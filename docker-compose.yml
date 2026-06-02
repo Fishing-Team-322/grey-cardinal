@@ -1,0 +1,127 @@
+# Grey Cardinal — оркестрация P0.
+#
+# Базовый профиль (postgres + brain-api + telegram-bot):
+#   docker compose up postgres brain-api telegram-bot
+# Полный профиль (плюс audio-worker и frontend-dashboard):
+#   docker compose --profile full up
+#
+# Все образы используют BuildKit cache-mount'ы (см. Dockerfile'ы),
+# поэтому повторные сборки переиспользуют кеш pip/npm и собираются быстро.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-grey_cardinal}
+      POSTGRES_USER: ${POSTGRES_USER:-grey}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grey}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grey} -d ${POSTGRES_DB:-grey_cardinal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  brain-api:
+    build:
+      context: .
+      dockerfile: apps/brain-api/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://grey:grey@postgres:5432/grey_cardinal}
+      BRAIN_API_HOST: ${BRAIN_API_HOST:-0.0.0.0}
+      BRAIN_API_PORT: ${BRAIN_API_PORT:-8000}
+      TELEGRAM_BOT_BASE_URL: ${TELEGRAM_BOT_BASE_URL:-http://telegram-bot:8010}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      BOARD_PROVIDER: ${BOARD_PROVIDER:-mock}
+      YOUGILE_API_BASE_URL: ${YOUGILE_API_BASE_URL:-https://ru.yougile.com}
+      YOUGILE_API_KEY: ${YOUGILE_API_KEY:-}
+      YOUGILE_COMPANY_ID: ${YOUGILE_COMPANY_ID:-}
+      YOUGILE_PROJECT_ID: ${YOUGILE_PROJECT_ID:-}
+      YOUGILE_BOARD_ID: ${YOUGILE_BOARD_ID:-}
+      YOUGILE_COLUMN_TODO_ID: ${YOUGILE_COLUMN_TODO_ID:-}
+      YOUGILE_COLUMN_IN_PROGRESS_ID: ${YOUGILE_COLUMN_IN_PROGRESS_ID:-}
+      YOUGILE_COLUMN_BLOCKED_ID: ${YOUGILE_COLUMN_BLOCKED_ID:-}
+      YOUGILE_COLUMN_DONE_ID: ${YOUGILE_COLUMN_DONE_ID:-}
+      REMINDER_DEADLINE_HOURS_BEFORE: ${REMINDER_DEADLINE_HOURS_BEFORE:-2}
+      REMINDER_STALE_HOURS: ${REMINDER_STALE_HOURS:-24}
+      EVENING_DIGEST_HOUR: ${EVENING_DIGEST_HOUR:-20}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Moscow}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: apps/telegram-bot/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      TELEGRAM_BOT_HOST: ${TELEGRAM_BOT_HOST:-0.0.0.0}
+      TELEGRAM_BOT_PORT: ${TELEGRAM_BOT_PORT:-8010}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_PUBLIC_BASE_URL: ${TELEGRAM_PUBLIC_BASE_URL:-}
+      BRAIN_API_BASE_URL: ${BRAIN_API_BASE_URL:-http://brain-api:8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8010:8010"
+    depends_on:
+      brain-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8010/health').status==200 else sys.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  audio-worker:
+    build:
+      context: .
+      dockerfile: apps/audio-worker/Dockerfile
+    profiles: ["full"]
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      AUDIO_WORKER_HOST: ${AUDIO_WORKER_HOST:-0.0.0.0}
+      AUDIO_WORKER_PORT: ${AUDIO_WORKER_PORT:-8020}
+      BRAIN_API_BASE_URL: ${BRAIN_API_BASE_URL:-http://brain-api:8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8020:8020"
+    depends_on:
+      brain-api:
+        condition: service_healthy
+
+  frontend-dashboard:
+    build:
+      context: apps/frontend-dashboard
+      dockerfile: Dockerfile
+    profiles: ["full"]
+    environment:
+      VITE_BRAIN_WS_URL: ${VITE_BRAIN_WS_URL:-ws://localhost:8000/ws/events}
+    ports:
+      - "5173:5173"
+    depends_on:
+      - brain-api
+
+volumes:
+  postgres_data:

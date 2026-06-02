@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grey-cardinal-brain-api"
+version = "0.1.0"
+description = "Grey Cardinal brain-api — мозг PM-агента: extraction, lifecycle, reminders, board"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "httpx>=0.27",
+    "grey-cardinal-contracts",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "aiosqlite>=0.20",
+    "ruff>=0.4",
+    "mypy>=1.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

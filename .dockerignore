@@ -1,0 +1,15 @@
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.pytest_cache/
+**/node_modules/
+**/dist/
+**/build/
+**/*.egg-info/
+.git/
+.env
+**/.DS_Store
+apps/frontend-dashboard/node_modules/
