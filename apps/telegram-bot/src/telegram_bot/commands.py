@@ -7,7 +7,7 @@ from __future__ import annotations
 
 
 def is_command(text: str | None) -> bool:
-    return bool(text) and text.lstrip().startswith("/")
+    return text is not None and text.lstrip().startswith("/")
 
 
 def parse_command(text: str) -> tuple[str, list[str]]:

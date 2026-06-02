@@ -5,20 +5,18 @@ from __future__ import annotations
 import logging
 from uuid import uuid4
 
+from brain_api.application.config import AppConfig
+from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
+from brain_api.application.rendering import render_status_changed
+from brain_api.domain.entities import AuditLog, Task
+from brain_api.domain.enums import TaskStatus
+from brain_api.domain.services import parse_public_id, status_for_command
 from grey_cardinal_contracts import (
     ActionsResponse,
     EventName,
     SendMessageAction,
     WebsocketEvent,
 )
-
-from brain_api.application.config import AppConfig
-from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
-from brain_api.application.rendering import render_status_changed
-from brain_api.domain.entities import AuditLog, Task
-from brain_api.domain.enums import TaskStatus
-from brain_api.domain.errors import BoardError
-from brain_api.domain.services import parse_public_id, status_for_command
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +103,7 @@ class UpdateTaskStatus:
                 await self._board.close_card(card.external_card_id)
             else:
                 await self._board.move_card(card.external_card_id, status)
-        except BoardError as exc:
+        except Exception as exc:
             logger.warning("Board sync failed for %s: %s", task.public_id, exc)
             await self._uow.audit.add(
                 AuditLog(

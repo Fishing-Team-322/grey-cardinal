@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import suppress
 from datetime import datetime
-
-from grey_cardinal_contracts import KnownUser, TaskExtractionResult, TaskPriority
 
 from brain_api.infrastructure.llm.client import OpenAICompatibleClient
 from brain_api.infrastructure.llm.heuristic_extractor import HeuristicTaskExtractor
 from brain_api.infrastructure.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from grey_cardinal_contracts import KnownUser, TaskExtractionResult, TaskPriority
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,8 @@ def _parse(raw: str) -> TaskExtractionResult:
             deadline = None
 
     priority = TaskPriority.medium
-    try:
+    with suppress(ValueError):
         priority = TaskPriority(str(data.get("priority", "medium")))
-    except ValueError:
-        pass
 
     return TaskExtractionResult(
         has_task=True,

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from grey_cardinal_contracts import WebsocketEvent
-
 from brain_api.infrastructure.events.websocket_manager import WebSocketManager
+from grey_cardinal_contracts import WebsocketEvent
 
 logger = logging.getLogger(__name__)
 

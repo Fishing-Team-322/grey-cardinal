@@ -191,6 +191,8 @@ def _extract_deadline(
         target_date = now.date()
     if hour is None:
         hour, minute = _DEFAULT_HOUR, _DEFAULT_MINUTE
+    if minute is None:
+        minute = _DEFAULT_MINUTE
 
     deadline = datetime(
         target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=now.tzinfo

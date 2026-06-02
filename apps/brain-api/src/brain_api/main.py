@@ -1,48 +1,52 @@
+"""Точка входа brain-api (FastAPI)."""
+
 from __future__ import annotations
 
-from fastapi import FastAPI, Header, HTTPException
+import logging
+from contextlib import asynccontextmanager
 
-from grey_cardinal_contracts import TranscriptEvent
+from fastapi import FastAPI
 
-from .config import get_settings
+from brain_api.api.routes import health, internal_audio, internal_telegram, tasks, websocket
+from brain_api.config import get_settings
+from brain_api.container import Container
+from brain_api.infrastructure.logging.setup import setup_logging
+from brain_api.infrastructure.scheduler.jobs import register_jobs
+from brain_api.infrastructure.scheduler.runner import AsyncScheduler
 
-app = FastAPI(title="Grey Cardinal Brain API")
-settings = get_settings()
-received_transcripts: list[TranscriptEvent] = []
-
-
-def _validate_internal_token(value: str) -> None:
-    if value != settings.internal_api_token:
-        raise HTTPException(status_code=401, detail="invalid internal token")
-
-
-@app.get("/health")
-async def health() -> dict[str, object]:
-    return {"ok": True, "service": "brain-api", "transcripts": len(received_transcripts)}
+logger = logging.getLogger(__name__)
 
 
-@app.post("/internal/audio/transcript")
-async def receive_transcript(
-    event: TranscriptEvent,
-    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
-) -> dict[str, object]:
-    _validate_internal_token(x_internal_token)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    logger.info("Starting brain-api (env=%s)", settings.app_env)
 
-    received_transcripts.append(event)
-    return {"ok": True, "received": len(received_transcripts)}
+    container = Container(settings)
+    app.state.container = container
+
+    scheduler = AsyncScheduler(timezone=settings.default_timezone)
+    register_jobs(scheduler, container)
+    app.state.scheduler = scheduler
+    logger.info("Scheduler started (reminders + digest)")
+
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+        await container.dispose()
+        logger.info("brain-api stopped")
 
 
-@app.get("/internal/audio/transcripts/recent")
-async def recent_transcripts(
-    limit: int = 20,
-    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
-) -> dict[str, object]:
-    """Internal/dev-only endpoint for local audio pipeline validation."""
-    _validate_internal_token(x_internal_token)
-    safe_limit = max(1, min(limit, 100))
-    items = received_transcripts[-safe_limit:]
-    return {
-        "ok": True,
-        "count": len(items),
-        "items": [event.model_dump(mode="json") for event in items],
-    }
+def create_app() -> FastAPI:
+    app = FastAPI(title="Grey Cardinal - brain-api", version="0.1.0", lifespan=lifespan)
+    app.include_router(health.router)
+    app.include_router(internal_telegram.router)
+    app.include_router(internal_audio.router)
+    app.include_router(tasks.router)
+    app.include_router(websocket.router)
+    return app
+
+
+app = create_app()

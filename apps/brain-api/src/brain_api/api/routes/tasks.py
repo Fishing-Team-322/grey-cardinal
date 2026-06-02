@@ -5,6 +5,10 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from brain_api.api.deps import get_container, verify_internal_token
+from brain_api.container import Container
+from brain_api.domain.entities import Task
 from grey_cardinal_contracts import (
     TaskDTO,
     TaskListResponse,
@@ -12,10 +16,6 @@ from grey_cardinal_contracts import (
     TaskSource,
     TaskStatus,
 )
-
-from brain_api.api.deps import get_container, verify_internal_token
-from brain_api.container import Container
-from brain_api.domain.entities import Task
 
 router = APIRouter(
     prefix="/internal/tasks",

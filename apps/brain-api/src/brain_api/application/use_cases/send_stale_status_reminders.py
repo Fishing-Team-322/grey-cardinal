@@ -6,14 +6,13 @@ import logging
 from datetime import timedelta
 from uuid import uuid4
 
-from grey_cardinal_contracts import EventName, WebsocketEvent
-
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import EventPublisher, TelegramGateway, UnitOfWork
 from brain_api.application.rendering import render_stale_reminder
 from brain_api.application.use_cases.send_deadline_reminders import _default_chat_id
 from brain_api.domain.entities import ReminderLog
 from brain_api.domain.enums import ReminderKind
+from grey_cardinal_contracts import EventName, WebsocketEvent
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +43,8 @@ class SendStaleStatusReminders:
         sent = 0
         for task in tasks:
             last = await uow.reminders.last_sent_at(task.id, ReminderKind.stale)
+            if last is not None and last.tzinfo is None:
+                last = last.replace(tzinfo=now.tzinfo)
             if last is not None and last > cooldown:
                 continue  # недавно уже напоминали
             text = render_stale_reminder(task)

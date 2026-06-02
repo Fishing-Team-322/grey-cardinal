@@ -11,7 +11,6 @@ import logging
 from collections.abc import Iterable
 
 from grey_cardinal_contracts import BotAction
-
 from telegram_bot.client import TelegramClient
 
 logger = logging.getLogger(__name__)

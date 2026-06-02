@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +67,7 @@ async def mock_transcript(
         speaker_id="unknown",
         speaker_name=None,
         text=text,
-        ts=datetime.now(timezone.utc),
+        ts=datetime.now(UTC),
         is_final=True,
         raw={"source": "audio-worker.mock"},
     )
@@ -98,7 +98,7 @@ async def receive_audio_chunk(
         speaker_id="unknown",
         speaker_name=None,
         text=text,
-        ts=datetime.now(timezone.utc),
+        ts=datetime.now(UTC),
         is_final=True,
         raw={
             "source": "audio-worker.audio_chunk",

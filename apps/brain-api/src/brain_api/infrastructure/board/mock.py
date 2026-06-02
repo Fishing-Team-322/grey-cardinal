@@ -9,10 +9,9 @@ from __future__ import annotations
 import logging
 from uuid import uuid4
 
-from grey_cardinal_contracts import BoardCardResult, BoardProvider
-
 from brain_api.domain.entities import Task
 from brain_api.domain.enums import TaskStatus
+from grey_cardinal_contracts import BoardCardResult, BoardProvider
 
 logger = logging.getLogger(__name__)
 

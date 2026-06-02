@@ -11,13 +11,6 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from grey_cardinal_contracts import (
-    BoardCardResult,
-    KnownUser,
-    TaskExtractionResult,
-    WebsocketEvent,
-)
-
 from brain_api.domain.entities import (
     AuditLog,
     BoardCard,
@@ -33,6 +26,12 @@ from brain_api.domain.entities import (
     User,
 )
 from brain_api.domain.enums import ReminderKind, TaskStatus
+from grey_cardinal_contracts import (
+    BoardCardResult,
+    KnownUser,
+    TaskExtractionResult,
+    WebsocketEvent,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -127,6 +126,7 @@ class TaskRepository(Protocol):
     async def next_sequence(self) -> int: ...
     async def update(self, task: Task) -> Task: ...
     async def list_active(self) -> list[Task]: ...
+    async def list_active_for_chat(self, telegram_chat_id: int) -> list[Task]: ...
     async def list_for_deadline_reminder(
         self, now: datetime, hours_before: int
     ) -> list[Task]: ...
@@ -143,6 +143,7 @@ class BoardCardRepository(Protocol):
 
 class TranscriptRepository(Protocol):
     async def add(self, event: TranscriptEvent) -> TranscriptEvent: ...
+    async def list_recent(self, limit: int = 20) -> list[TranscriptEvent]: ...
 
 
 class ReminderRepository(Protocol):

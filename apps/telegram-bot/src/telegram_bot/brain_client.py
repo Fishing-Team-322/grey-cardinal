@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 import httpx
+
 from grey_cardinal_contracts import (
     ActionsResponse,
     TelegramCallbackEvent,

@@ -1,14 +1,22 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_INPUT=1
 
 WORKDIR /app
 
-COPY apps/brain-api/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+COPY packages/contracts/python /app/packages/contracts/python
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -e /app/packages/contracts/python
 
-COPY packages /app/packages
-COPY apps/brain-api/src /app/src
+COPY apps/brain-api /app/apps/brain-api
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -e /app/apps/brain-api
 
-ENV PYTHONPATH=/app/src:/app/packages/contracts/python
+WORKDIR /app/apps/brain-api
+EXPOSE 8000
 
-CMD ["uvicorn", "brain_api.main:app", "--host", "0.0.0.0", "--port", "8010"]
-
+CMD ["sh", "-c", "alembic upgrade head && uvicorn brain_api.main:app --host 0.0.0.0 --port 8000"]

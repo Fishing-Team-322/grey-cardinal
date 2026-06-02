@@ -9,8 +9,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from brain_api.domain.entities import (
     AuditLog,
@@ -192,6 +193,7 @@ class UserRepositoryImpl:
             row.telegram_username = username
             row.display_name = display_name
         await self._s.flush()
+        await self._s.refresh(row)
         return _user(row)
 
     async def get(self, user_id: UUID) -> User | None:
@@ -247,6 +249,7 @@ class ChatRepositoryImpl:
             if project_id is not None:
                 row.project_id = project_id
         await self._s.flush()
+        await self._s.refresh(row)
 
         # Привязываем чат как чат по умолчанию проекту (для reminders/digest).
         if project_id is not None:
@@ -364,6 +367,7 @@ class ConfirmationRepositoryImpl:
         row.telegram_message_id = confirmation.telegram_message_id
         row.created_task_id = confirmation.created_task_id
         await self._s.flush()
+        await self._s.refresh(row)
         return _confirmation(row)
 
 
@@ -423,12 +427,39 @@ class TaskRepositoryImpl:
         row.completed_at = task.completed_at
         row.last_status_update_at = task.last_status_update_at
         await self._s.flush()
+        await self._s.refresh(row)
         return _task(row)
 
     async def list_active(self) -> list[Task]:
         rows = await self._s.scalars(
             select(m.TaskModel)
             .where(m.TaskModel.status.in_(_ACTIVE_STATUSES))
+            .order_by(m.TaskModel.seq)
+        )
+        return [_task(r) for r in rows]
+
+    async def list_active_for_chat(self, telegram_chat_id: int) -> list[Task]:
+        source_chat = aliased(m.TelegramChatModel)
+        default_chat = aliased(m.TelegramChatModel)
+        rows = await self._s.scalars(
+            select(m.TaskModel)
+            .outerjoin(
+                m.ChatMessageModel,
+                m.ChatMessageModel.id == m.TaskModel.source_message_id,
+            )
+            .outerjoin(source_chat, source_chat.id == m.ChatMessageModel.chat_id)
+            .outerjoin(m.ProjectModel, m.ProjectModel.id == m.TaskModel.project_id)
+            .outerjoin(default_chat, default_chat.id == m.ProjectModel.default_chat_id)
+            .where(
+                m.TaskModel.status.in_(_ACTIVE_STATUSES),
+                or_(
+                    source_chat.telegram_chat_id == telegram_chat_id,
+                    and_(
+                        m.TaskModel.source_message_id.is_(None),
+                        default_chat.telegram_chat_id == telegram_chat_id,
+                    ),
+                ),
+            )
             .order_by(m.TaskModel.seq)
         )
         return [_task(r) for r in rows]
@@ -520,6 +551,7 @@ class BoardCardRepositoryImpl:
         row.external_url = card.external_url
         row.external_payload = card.external_payload
         await self._s.flush()
+        await self._s.refresh(row)
         return _board_card(row)
 
 
@@ -542,6 +574,27 @@ class TranscriptRepositoryImpl:
         await self._s.flush()
         event.created_at = row.created_at
         return event
+
+    async def list_recent(self, limit: int = 20) -> list[TranscriptEvent]:
+        rows = await self._s.scalars(
+            select(m.TranscriptEventModel)
+            .order_by(m.TranscriptEventModel.created_at.desc())
+            .limit(max(1, min(limit, 100)))
+        )
+        return [
+            TranscriptEvent(
+                id=row.id,
+                meeting_id=row.meeting_id,
+                speaker_id=row.speaker_id,
+                speaker_name=row.speaker_name,
+                text=row.text,
+                ts=row.ts,
+                is_final=row.is_final,
+                raw_json=row.raw_json,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
 
 
 class ReminderRepositoryImpl:

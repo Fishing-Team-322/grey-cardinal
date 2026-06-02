@@ -3,12 +3,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
 PYTHONPATHS = [
     ROOT / "packages" / "contracts" / "python",
     ROOT / "apps" / "audio-worker" / "src",
     ROOT / "apps" / "brain-api" / "src",
+    ROOT / "apps" / "telegram-bot" / "src",
 ]
 
 for path in PYTHONPATHS:
