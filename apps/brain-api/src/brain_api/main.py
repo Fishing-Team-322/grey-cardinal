@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from brain_api.api.routes import (
     debug,
+    desktop,
     health,
     internal_audio,
     internal_telegram,
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Grey Cardinal - brain-api", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
     app.include_router(debug.router)
+    app.include_router(desktop.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
     app.include_router(meetings.router)

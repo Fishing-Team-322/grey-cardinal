@@ -65,6 +65,17 @@ int main(int argc, char** argv) {
             logger.warn("internal token is empty; uploads will likely be rejected");
         }
 
+        if (config.capture_mode != CaptureMode::SystemLoopbackExperimental) {
+            logger.warn(
+                "native agent currently implements only system_loopback_experimental; "
+                "desktop-first microphone capture is represented by apps/desktop-app mock flow"
+            );
+            std::cerr << "capture mode " << capture_mode_value(config.capture_mode)
+                      << " is not implemented by the native agent yet; use "
+                         "--capture-mode system_loopback_experimental for the legacy loopback test\n";
+            return 2;
+        }
+
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
 

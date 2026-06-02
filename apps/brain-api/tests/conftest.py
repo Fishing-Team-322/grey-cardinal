@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from brain_api.application.config import AppConfig
 from brain_api.application.use_cases.confirm_task import ConfirmTask
+from brain_api.application.use_cases.desktop_client import register_device
 from brain_api.application.use_cases.ingest_chat_message import IngestChatMessage
 from brain_api.infrastructure.board.mock import MockBoardGateway
 from brain_api.infrastructure.db.models import Base
@@ -26,6 +27,7 @@ from brain_api.infrastructure.events.event_bus import NullEventPublisher
 from brain_api.infrastructure.llm.heuristic_extractor import HeuristicTaskExtractor
 from brain_api.infrastructure.telegram_gateway.client import NullTelegramGateway
 from grey_cardinal_contracts import (
+    RegisterDeviceRequest,
     TelegramChatInfo,
     TelegramMessageEvent,
     TelegramSender,
@@ -155,6 +157,40 @@ def seed_chat(make_uow):
         return project, chat
 
     return _seed
+
+
+@pytest.fixture
+def register_desktop_identity(make_uow, config):
+    async def _register(
+        *,
+        display_name: str = "Петя",
+        telegram_username: str | None = "petya",
+        device_name: str = "Petya Laptop",
+        platform: str = "windows",
+    ):
+        async with make_uow() as uow:
+            response = await register_device(
+                uow,
+                config,
+                RegisterDeviceRequest(
+                    display_name=display_name,
+                    telegram_username=telegram_username,
+                    device_name=device_name,
+                    platform=platform,
+                    app_version="0.1.0",
+                ),
+            )
+        return response
+
+    return _register
+
+
+def desktop_headers(identity) -> dict[str, str]:
+    return {
+        "X-GC-User-Id": identity.user_id,
+        "X-GC-Device-Id": identity.device_id,
+        "X-GC-Client-Session-Id": identity.client_session_id,
+    }
 
 
 def callback_id_from_actions(actions) -> UUID:

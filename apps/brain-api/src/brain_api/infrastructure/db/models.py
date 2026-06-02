@@ -56,6 +56,33 @@ class UserModel(TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class DeviceModel(TimestampMixin, Base):
+    __tablename__ = "devices"
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    workspace_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    device_name: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(Text, nullable=False)
+    app_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    device_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ClientSessionModel(TimestampMixin, Base):
+    __tablename__ = "client_sessions"
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), nullable=True)
+    workspace_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    session_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ProjectModel(TimestampMixin, Base):
     __tablename__ = "projects"
 
@@ -201,6 +228,26 @@ class MeetingModel(TimestampMixin, Base):
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
 
 
+class MeetingParticipantModel(TimestampMixin, Base):
+    __tablename__ = "meeting_participants"
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "user_id", name="uq_meeting_participant_user"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    meeting_id: Mapped[UUID] = mapped_column(ForeignKey("meetings.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), nullable=True)
+    client_session_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("client_sessions.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
 class ReminderLogModel(Base):
     __tablename__ = "reminder_logs"
 
@@ -239,4 +286,37 @@ class AuditLogModel(Base):
     payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UserXpEventModel(Base):
+    __tablename__ = "user_xp_events"
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    workspace_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    meeting_id: Mapped[UUID | None] = mapped_column(ForeignKey("meetings.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UserXpTotalModel(Base):
+    __tablename__ = "user_xp_totals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "workspace_id", name="uq_user_xp_total_scope"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    workspace_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    points_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

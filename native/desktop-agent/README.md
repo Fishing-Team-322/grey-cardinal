@@ -1,6 +1,6 @@
 # Grey Cardinal Desktop Agent
 
-The desktop agent is a thin host-native audio client. On Windows it is a user-mode Core Audio client and does not install a kernel driver. It captures system output through WASAPI loopback and streams short audio chunks to the containerized Python pipeline. The common agent core is platform-neutral, so macOS/Linux require only new capture adapters.
+The desktop agent is a thin host-native audio client. The architecture default is now `microphone`, but this native C++ MVP still implements only the legacy Windows WASAPI loopback adapter. That adapter is explicitly `system_loopback_experimental` and must not be used as source of truth for speaker identity.
 
 P0 is Windows. macOS and Linux adapter stubs are present under `platform/macos` and `platform/linux`.
 
@@ -34,6 +34,7 @@ Then run the agent in another terminal:
 
 ```powershell
 .\build\Release\grey-cardinal-agent.exe `
+  --capture-mode system_loopback_experimental `
   --server http://localhost:8020 `
   --token dev-internal-token `
   --meeting-id demo-meeting `
@@ -44,8 +45,8 @@ Other useful commands:
 
 ```powershell
 .\build\Release\grey-cardinal-agent.exe --list-devices
-.\build\Release\grey-cardinal-agent.exe --dry-run --save-chunks .\chunks
-.\build\Release\grey-cardinal-agent.exe --dry-run-save-only --duration-sec 15 --save-chunks .\chunks
+.\build\Release\grey-cardinal-agent.exe --capture-mode system_loopback_experimental --dry-run --save-chunks .\chunks
+.\build\Release\grey-cardinal-agent.exe --capture-mode system_loopback_experimental --dry-run-save-only --duration-sec 15 --save-chunks .\chunks
 .\build\Release\grey-cardinal-agent.exe --config config.toml
 ```
 
@@ -65,6 +66,7 @@ Copy `config.example.toml` to `config.toml`:
 server_url = "http://localhost:8020"
 internal_token = "dev-internal-token"
 meeting_id = "demo-meeting"
+capture_mode = "microphone"
 chunk_ms = 3000
 duration_sec = 0
 save_chunks = "./chunks"
@@ -117,5 +119,6 @@ The installer is per-user, creates a Start Menu shortcut, can optionally create 
 - Server unavailable: confirm Docker is running and `curl http://localhost:8020/health` returns ok.
 - Token mismatch: align `--token` with `INTERNAL_API_TOKEN`.
 - Docker not running: start Docker Desktop and rebuild the `full` profile.
-- Device format unsupported: common float32/PCM WASAPI mix formats are supported. Other formats should be converted in a future adapter/resampler pass.
+- Default microphone mode: native C++ microphone capture is not implemented yet; use `apps/desktop-app` mock microphone flow for desktop-first validation.
+- Device format unsupported: common float32/PCM WASAPI mix formats are supported in `system_loopback_experimental`. Other formats should be converted in a future adapter/resampler pass.
 - Current MVP limitations: Windows WASAPI loopback is real; macOS/Linux adapters are planned stubs; mock ASR is the default server path; faster-whisper is optional; VAD and diarization are not implemented yet; chunks are mono PCM16 WAV at the captured sample rate unless a future resampler is added.

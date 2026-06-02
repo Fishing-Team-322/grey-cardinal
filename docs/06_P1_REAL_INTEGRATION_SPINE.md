@@ -22,6 +22,18 @@ Dashboard для backend demo не требуется.
 
 ## Transcript pipeline
 
+Preferred desktop-first path:
+
+```bash
+python scripts/smoke/desktop_microphone_flow.py
+```
+
+This registers a desktop device/session, joins `MTG-1`, posts an authenticated
+microphone transcript to `/desktop/transcripts`, confirms the created proposal,
+marks the task done, and checks XP.
+
+Legacy audio-worker path:
+
 ```bash
 curl -X POST http://localhost:8020/mock/transcript \
   -H "Content-Type: application/json" \
@@ -31,6 +43,8 @@ curl -X POST http://localhost:8020/mock/transcript \
 
 Transcript сохраняется, привязывается к активной встрече, из финальной реплики
 создается proposal и уходит в привязанный Telegram-чат.
+
+For production direction see [07_DESKTOP_FIRST_ARCHITECTURE.md](07_DESKTOP_FIRST_ARCHITECTURE.md).
 
 ## Demo scenario
 

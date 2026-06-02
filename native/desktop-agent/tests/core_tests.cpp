@@ -123,6 +123,11 @@ void test_config_defaults_and_cli_overrides() {
     const AgentConfig defaults = parse_args({"agent.exe"});
     expect_eq(defaults.server_url, std::string("http://localhost:8020"), "default server");
     expect_eq(defaults.meeting_id, std::string("local-windows-demo"), "default meeting id");
+    expect_eq(
+        grey_cardinal_agent::capture_mode_value(defaults.capture_mode),
+        std::string("microphone"),
+        "default capture mode"
+    );
     expect_eq(defaults.chunk_ms, 3000, "default chunk ms");
     expect_eq(defaults.duration_sec, 0, "default duration");
     expect_true(defaults.save_chunks.empty(), "save chunks disabled by default");
@@ -136,6 +141,8 @@ void test_config_defaults_and_cli_overrides() {
         "secret",
         "--meeting-id",
         "demo",
+        "--capture-mode",
+        "system_loopback_experimental",
         "--save-chunks",
         "chunks",
         "--chunk-ms",
@@ -147,6 +154,11 @@ void test_config_defaults_and_cli_overrides() {
     expect_eq(config.server_url, std::string("http://localhost:8020/base"), "server override");
     expect_eq(config.internal_token, std::string("secret"), "token override");
     expect_eq(config.meeting_id, std::string("demo"), "meeting override");
+    expect_eq(
+        grey_cardinal_agent::capture_mode_value(config.capture_mode),
+        std::string("system_loopback_experimental"),
+        "capture mode override"
+    );
     expect_eq(config.save_chunks.string(), std::string("chunks"), "save chunks override");
     expect_eq(config.chunk_ms, 1250, "chunk ms override");
     expect_eq(config.duration_sec, 15, "duration override");

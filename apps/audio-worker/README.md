@@ -2,6 +2,8 @@
 
 `audio-worker` accepts WAV chunks from the host-native desktop agent, runs a small ASR abstraction, and forwards `TranscriptEvent` payloads to `brain-api`.
 
+This is now the legacy/dev path. The production direction is authenticated desktop clients sending microphone transcripts directly to `brain-api` via `/desktop/transcripts`.
+
 ## Run with Docker
 
 ```powershell
@@ -52,7 +54,7 @@ The default test path uses mock ASR and a fake brain client; it does not require
 
 ## Known limitations
 
-- Mock ASR is the default for fast offline tests and demos.
+- Mock ASR is the default for fast offline tests and legacy demos.
 - `faster-whisper` is optional and CPU-backed in this MVP.
 - No VAD or diarization yet; transcript events use `speaker_id=unknown`.
-- The Windows agent sends mono PCM16 WAV chunks at the captured sample rate unless future resampling is added.
+- The Windows loopback agent sends mono PCM16 WAV chunks at the captured sample rate unless future resampling is added, but loopback is experimental and not trusted speaker identity.

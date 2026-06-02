@@ -36,6 +36,7 @@ try {
         "--server", $Server,
         "--token", $Token,
         "--meeting-id", $MeetingId,
+        "--capture-mode", "system_loopback_experimental",
         "--save-chunks", $resolvedChunks
     )
 

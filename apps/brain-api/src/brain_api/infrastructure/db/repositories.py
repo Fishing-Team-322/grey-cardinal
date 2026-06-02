@@ -17,9 +17,12 @@ from brain_api.domain.entities import (
     AuditLog,
     BoardCard,
     ChatMessage,
+    ClientSession,
     Confirmation,
+    Device,
     DigestLog,
     Meeting,
+    MeetingParticipant,
     Project,
     ReminderLog,
     Task,
@@ -27,15 +30,20 @@ from brain_api.domain.entities import (
     TelegramChat,
     TranscriptEvent,
     User,
+    UserXpEvent,
+    UserXpTotal,
 )
 from brain_api.domain.enums import (
     BoardProvider,
+    ClientSessionStatus,
     ConfirmationStatus,
+    MeetingParticipantStatus,
     MeetingStatus,
     ReminderKind,
     TaskPriority,
     TaskSource,
     TaskStatus,
+    XpEventKind,
 )
 from brain_api.domain.services import parse_public_id
 from brain_api.infrastructure.db import models as m
@@ -57,6 +65,37 @@ def _user(row: m.UserModel) -> User:
         display_name=row.display_name,
         telegram_user_id=row.telegram_user_id,
         telegram_username=row.telegram_username,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _device(row: m.DeviceModel) -> Device:
+    return Device(
+        id=row.id,
+        user_id=row.user_id,
+        workspace_id=row.workspace_id,
+        device_name=row.device_name,
+        platform=row.platform,
+        app_version=row.app_version,
+        device_fingerprint=row.device_fingerprint,
+        last_seen_at=row.last_seen_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _client_session(row: m.ClientSessionModel) -> ClientSession:
+    return ClientSession(
+        id=row.id,
+        user_id=row.user_id,
+        device_id=row.device_id,
+        workspace_id=row.workspace_id,
+        session_token_hash=row.session_token_hash,
+        status=ClientSessionStatus(row.status),
+        started_at=row.started_at,
+        last_seen_at=row.last_seen_at,
+        expires_at=row.expires_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -108,6 +147,23 @@ def _meeting(row: m.MeetingModel) -> Meeting:
         started_at=row.started_at,
         stopped_at=row.stopped_at,
         created_by_user_id=row.created_by_user_id,
+        metadata=row.metadata_json or {},
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _meeting_participant(row: m.MeetingParticipantModel) -> MeetingParticipant:
+    return MeetingParticipant(
+        id=row.id,
+        meeting_id=row.meeting_id,
+        user_id=row.user_id,
+        device_id=row.device_id,
+        client_session_id=row.client_session_id,
+        status=MeetingParticipantStatus(row.status),
+        joined_at=row.joined_at,
+        left_at=row.left_at,
+        last_seen_at=row.last_seen_at,
         metadata=row.metadata_json or {},
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -182,6 +238,32 @@ def _board_card(row: m.BoardCardModel) -> BoardCard:
     )
 
 
+def _xp_event(row: m.UserXpEventModel) -> UserXpEvent:
+    return UserXpEvent(
+        id=row.id,
+        user_id=row.user_id,
+        workspace_id=row.workspace_id,
+        task_id=row.task_id,
+        meeting_id=row.meeting_id,
+        kind=XpEventKind(row.kind),
+        points=row.points,
+        reason=row.reason,
+        metadata=row.metadata_json or {},
+        created_at=row.created_at,
+    )
+
+
+def _xp_total(row: m.UserXpTotalModel) -> UserXpTotal:
+    return UserXpTotal(
+        id=row.id,
+        user_id=row.user_id,
+        workspace_id=row.workspace_id,
+        points_total=row.points_total,
+        level=row.level,
+        updated_at=row.updated_at,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Репозитории
 # --------------------------------------------------------------------------- #
@@ -220,9 +302,145 @@ class UserRepositoryImpl:
         row = await self._s.get(m.UserModel, user_id)
         return _user(row) if row else None
 
+    async def upsert_desktop_user(
+        self, display_name: str, telegram_username: str | None = None
+    ) -> User:
+        statement = select(m.UserModel)
+        if telegram_username:
+            statement = statement.where(m.UserModel.telegram_username == telegram_username)
+        else:
+            statement = statement.where(m.UserModel.display_name == display_name)
+        row = await self._s.scalar(statement)
+        if row is None:
+            row = m.UserModel(
+                id=uuid4(),
+                telegram_user_id=None,
+                telegram_username=telegram_username,
+                display_name=display_name,
+            )
+            self._s.add(row)
+        else:
+            row.display_name = display_name
+            if telegram_username:
+                row.telegram_username = telegram_username
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _user(row)
+
+    async def get_by_display_name(self, display_name: str) -> User | None:
+        row = await self._s.scalar(
+            select(m.UserModel).where(
+                func.lower(m.UserModel.display_name) == display_name.lower()
+            )
+        )
+        return _user(row) if row else None
+
     async def list_known(self, limit: int = 50) -> list[User]:
         rows = await self._s.scalars(select(m.UserModel).limit(limit))
         return [_user(r) for r in rows]
+
+
+class DeviceRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def get(self, device_id: UUID) -> Device | None:
+        row = await self._s.get(m.DeviceModel, device_id)
+        return _device(row) if row else None
+
+    async def upsert(
+        self,
+        *,
+        user_id: UUID,
+        device_name: str,
+        platform: str,
+        workspace_id: UUID | None = None,
+        app_version: str | None = None,
+        device_fingerprint: str | None = None,
+        now: datetime | None = None,
+    ) -> Device:
+        statement = select(m.DeviceModel).where(m.DeviceModel.user_id == user_id)
+        if device_fingerprint:
+            statement = statement.where(m.DeviceModel.device_fingerprint == device_fingerprint)
+        else:
+            statement = statement.where(
+                m.DeviceModel.device_name == device_name,
+                m.DeviceModel.platform == platform,
+            )
+        row = await self._s.scalar(statement)
+        if row is None:
+            row = m.DeviceModel(
+                id=uuid4(),
+                user_id=user_id,
+                workspace_id=workspace_id,
+                device_name=device_name,
+                platform=platform,
+                app_version=app_version,
+                device_fingerprint=device_fingerprint,
+                last_seen_at=now,
+            )
+            self._s.add(row)
+        else:
+            row.device_name = device_name
+            row.platform = platform
+            row.workspace_id = workspace_id
+            row.app_version = app_version
+            row.device_fingerprint = device_fingerprint or row.device_fingerprint
+            row.last_seen_at = now or row.last_seen_at
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _device(row)
+
+    async def touch(self, device_id: UUID, now: datetime) -> Device | None:
+        row = await self._s.get(m.DeviceModel, device_id)
+        if row is None:
+            return None
+        row.last_seen_at = now
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _device(row)
+
+
+class ClientSessionRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def get(self, session_id: UUID) -> ClientSession | None:
+        row = await self._s.get(m.ClientSessionModel, session_id)
+        return _client_session(row) if row else None
+
+    async def start(
+        self,
+        *,
+        user_id: UUID,
+        device_id: UUID | None,
+        workspace_id: UUID | None,
+        now: datetime,
+        expires_at: datetime | None = None,
+    ) -> ClientSession:
+        row = m.ClientSessionModel(
+            id=uuid4(),
+            user_id=user_id,
+            device_id=device_id,
+            workspace_id=workspace_id,
+            status=ClientSessionStatus.active.value,
+            started_at=now,
+            last_seen_at=now,
+            expires_at=expires_at,
+        )
+        self._s.add(row)
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _client_session(row)
+
+    async def touch(self, session_id: UUID, now: datetime) -> ClientSession | None:
+        row = await self._s.get(m.ClientSessionModel, session_id)
+        if row is None:
+            return None
+        row.last_seen_at = now
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _client_session(row)
 
 
 class ProjectRepositoryImpl:
@@ -408,6 +626,97 @@ class MeetingRepositoryImpl:
         return int(value or 0)
 
 
+class MeetingParticipantRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def join(
+        self,
+        *,
+        meeting_id: UUID,
+        user_id: UUID,
+        device_id: UUID | None,
+        client_session_id: UUID | None,
+        now: datetime,
+        metadata: dict | None = None,
+    ) -> MeetingParticipant:
+        row = await self._s.scalar(
+            select(m.MeetingParticipantModel).where(
+                m.MeetingParticipantModel.meeting_id == meeting_id,
+                m.MeetingParticipantModel.user_id == user_id,
+            )
+        )
+        if row is None:
+            row = m.MeetingParticipantModel(
+                id=uuid4(),
+                meeting_id=meeting_id,
+                user_id=user_id,
+                device_id=device_id,
+                client_session_id=client_session_id,
+                status=MeetingParticipantStatus.joined.value,
+                joined_at=now,
+                last_seen_at=now,
+                metadata_json=metadata or {},
+            )
+            self._s.add(row)
+        else:
+            row.device_id = device_id
+            row.client_session_id = client_session_id
+            row.status = MeetingParticipantStatus.joined.value
+            row.left_at = None
+            row.last_seen_at = now
+            row.metadata_json = metadata or row.metadata_json or {}
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _meeting_participant(row)
+
+    async def leave(
+        self,
+        meeting_id: UUID,
+        user_id: UUID,
+        now: datetime,
+    ) -> MeetingParticipant | None:
+        row = await self._s.scalar(
+            select(m.MeetingParticipantModel).where(
+                m.MeetingParticipantModel.meeting_id == meeting_id,
+                m.MeetingParticipantModel.user_id == user_id,
+            )
+        )
+        if row is None:
+            return None
+        row.status = MeetingParticipantStatus.left.value
+        row.left_at = now
+        row.last_seen_at = now
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _meeting_participant(row)
+
+    async def touch_active_for_session(
+        self, client_session_id: UUID, now: datetime, meeting_id: UUID | None = None
+    ) -> MeetingParticipant | None:
+        statement = select(m.MeetingParticipantModel).where(
+            m.MeetingParticipantModel.client_session_id == client_session_id,
+            m.MeetingParticipantModel.status == MeetingParticipantStatus.joined.value,
+        )
+        if meeting_id is not None:
+            statement = statement.where(m.MeetingParticipantModel.meeting_id == meeting_id)
+        row = await self._s.scalar(statement.order_by(m.MeetingParticipantModel.joined_at.desc()))
+        if row is None:
+            return None
+        row.last_seen_at = now
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _meeting_participant(row)
+
+    async def list_for_meeting(self, meeting_id: UUID) -> list[MeetingParticipant]:
+        rows = await self._s.scalars(
+            select(m.MeetingParticipantModel)
+            .where(m.MeetingParticipantModel.meeting_id == meeting_id)
+            .order_by(m.MeetingParticipantModel.joined_at)
+        )
+        return [_meeting_participant(row) for row in rows]
+
+
 class MessageRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -571,6 +880,20 @@ class TaskRepositoryImpl:
             select(m.TaskModel)
             .where(m.TaskModel.status.in_(_ACTIVE_STATUSES))
             .order_by(m.TaskModel.seq)
+        )
+        return [_task(r) for r in rows]
+
+    async def list_for_user(self, user_id: UUID, limit: int = 50) -> list[Task]:
+        rows = await self._s.scalars(
+            select(m.TaskModel)
+            .where(
+                or_(
+                    m.TaskModel.assignee_id == user_id,
+                    m.TaskModel.status.in_(_ACTIVE_STATUSES),
+                )
+            )
+            .order_by(m.TaskModel.seq.desc())
+            .limit(max(1, min(limit, 100)))
         )
         return [_task(r) for r in rows]
 
@@ -874,6 +1197,90 @@ class AuditRepositoryImpl:
         return log
 
 
+class GamificationRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add_event_once(self, event: UserXpEvent) -> UserXpEvent | None:
+        idempotency_key = event.metadata.get("idempotency_key")
+        if idempotency_key:
+            existing = await self._s.scalar(
+                select(m.UserXpEventModel).where(
+                    m.UserXpEventModel.user_id == event.user_id,
+                    m.UserXpEventModel.kind == event.kind.value,
+                    m.UserXpEventModel.metadata_json["idempotency_key"].as_string()
+                    == str(idempotency_key),
+                )
+            )
+            if existing is not None:
+                return None
+
+        row = m.UserXpEventModel(
+            id=event.id,
+            user_id=event.user_id,
+            workspace_id=event.workspace_id,
+            task_id=event.task_id,
+            meeting_id=event.meeting_id,
+            kind=event.kind.value,
+            points=event.points,
+            reason=event.reason,
+            metadata_json=event.metadata,
+        )
+        self._s.add(row)
+        await self._s.flush()
+
+        total_row = await self._find_total_row(event.user_id, event.workspace_id)
+        if total_row is None:
+            total_row = m.UserXpTotalModel(
+                id=uuid4(),
+                user_id=event.user_id,
+                workspace_id=event.workspace_id,
+                points_total=0,
+                level=1,
+            )
+            self._s.add(total_row)
+            await self._s.flush()
+        total_row.points_total += event.points
+        total_row.level = max(1, (total_row.points_total // 100) + 1)
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _xp_event(row)
+
+    async def get_total(self, user_id: UUID, workspace_id: UUID | None = None) -> UserXpTotal:
+        row = await self._find_total_row(user_id, workspace_id)
+        if row is None:
+            row = m.UserXpTotalModel(
+                id=uuid4(),
+                user_id=user_id,
+                workspace_id=workspace_id,
+                points_total=0,
+                level=1,
+            )
+            self._s.add(row)
+            await self._s.flush()
+            await self._s.refresh(row)
+        return _xp_total(row)
+
+    async def list_recent(self, user_id: UUID, limit: int = 20) -> list[UserXpEvent]:
+        rows = await self._s.scalars(
+            select(m.UserXpEventModel)
+            .where(m.UserXpEventModel.user_id == user_id)
+            .order_by(m.UserXpEventModel.created_at.desc())
+            .limit(max(1, min(limit, 100)))
+        )
+        return [_xp_event(row) for row in rows]
+
+    async def _find_total_row(
+        self, user_id: UUID, workspace_id: UUID | None
+    ) -> m.UserXpTotalModel | None:
+        statement = select(m.UserXpTotalModel).where(m.UserXpTotalModel.user_id == user_id)
+        if workspace_id is None:
+            statement = statement.where(m.UserXpTotalModel.workspace_id.is_(None))
+        else:
+            statement = statement.where(m.UserXpTotalModel.workspace_id == workspace_id)
+        return await self._s.scalar(statement)
+
+
 # --------------------------------------------------------------------------- #
 # UnitOfWork
 # --------------------------------------------------------------------------- #
@@ -883,10 +1290,13 @@ class SqlAlchemyUnitOfWork:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self.users = UserRepositoryImpl(session)
+        self.devices = DeviceRepositoryImpl(session)
+        self.client_sessions = ClientSessionRepositoryImpl(session)
         self.projects = ProjectRepositoryImpl(session)
         self.chats = ChatRepositoryImpl(session)
         self.messages = MessageRepositoryImpl(session)
         self.meetings = MeetingRepositoryImpl(session)
+        self.meeting_participants = MeetingParticipantRepositoryImpl(session)
         self.proposals = ProposalRepositoryImpl(session)
         self.confirmations = ConfirmationRepositoryImpl(session)
         self.tasks = TaskRepositoryImpl(session)
@@ -896,6 +1306,7 @@ class SqlAlchemyUnitOfWork:
         self.reminders = ReminderRepositoryImpl(session)
         self.digests = DigestRepositoryImpl(session)
         self.audit = AuditRepositoryImpl(session)
+        self.gamification = GamificationRepositoryImpl(session)
 
     async def commit(self) -> None:
         await self._session.commit()
