@@ -33,7 +33,7 @@ class SendStaleStatusReminders:
     async def execute(self) -> int:
         uow = self._uow
         now = self._config.now()
-        chat_id = await _default_chat_id(uow)
+        chat_id = await _default_chat_id(uow, self._config)
         if chat_id is None:
             return 0
 

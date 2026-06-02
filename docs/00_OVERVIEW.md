@@ -1,6 +1,7 @@
 # Обзор
 
-P0 Grey Cardinal принимает сообщения Telegram и transcript-события, извлекает возможные задачи,
+P1 Grey Cardinal принимает сообщения Telegram и transcript-события, ведет встречи,
+извлекает возможные задачи,
 просит подтверждение и после callback создаёт локальную задачу с карточкой на доске.
 
 Главное правило: `brain-api` - единственный владелец PostgreSQL и task lifecycle.
@@ -25,6 +26,7 @@ Transcript flow:
 audio-worker
   -> POST /internal/audio/transcript
   -> brain-api
+  -> meetings
   -> transcript_events
   -> proposal
   -> Telegram action в default chat, если он уже известен

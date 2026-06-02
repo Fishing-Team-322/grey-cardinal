@@ -31,7 +31,7 @@ class SendDeadlineReminders:
     async def execute(self) -> int:
         uow = self._uow
         now = self._config.now()
-        chat_id = await _default_chat_id(uow)
+        chat_id = await _default_chat_id(uow, self._config)
         if chat_id is None:
             return 0
 
@@ -67,8 +67,12 @@ class SendDeadlineReminders:
         return sent
 
 
-async def _default_chat_id(uow: UnitOfWork) -> int | None:
-    project = await uow.projects.ensure_default()
+async def _default_chat_id(uow: UnitOfWork, config: AppConfig | None = None) -> int | None:
+    if config and config.default_telegram_chat_id is not None:
+        return config.default_telegram_chat_id
+    project = await uow.projects.ensure_default(
+        config.default_workspace_name if config else "Hackathon Team"
+    )
     if project.default_chat_id is None:
         return None
     chat = await uow.chats.get(project.default_chat_id)

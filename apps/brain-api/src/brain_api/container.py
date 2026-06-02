@@ -44,6 +44,8 @@ class Container:
             reminder_deadline_hours_before=settings.reminder_deadline_hours_before,
             reminder_stale_hours=settings.reminder_stale_hours,
             evening_digest_hour=settings.evening_digest_hour,
+            default_workspace_name=settings.default_workspace_name,
+            default_telegram_chat_id=settings.default_telegram_chat_id,
         )
 
         self.engine: AsyncEngine = create_engine(settings.database_url, echo=settings.db_echo)
@@ -88,14 +90,19 @@ class Container:
                 company_id=settings.yougile_company_id or None,
                 project_id=settings.yougile_project_id or None,
                 board_id=settings.yougile_board_id or None,
+                column_backlog_id=settings.yougile_column_backlog_id or None,
                 column_todo_id=settings.yougile_column_todo_id or None,
                 column_in_progress_id=settings.yougile_column_in_progress_id or None,
+                column_review_id=settings.yougile_column_review_id or None,
                 column_blocked_id=settings.yougile_column_blocked_id or None,
                 column_done_id=settings.yougile_column_done_id or None,
             )
             if cfg.is_configured:
                 logger.info("Board provider: YouGile")
                 return YouGileBoardGateway(cfg)
-            logger.warning("BOARD_PROVIDER=yougile, но не настроен — откат на MockBoardGateway")
+            logger.warning(
+                "BOARD_PROVIDER=yougile, но не настроен (%s) — откат на MockBoardGateway",
+                ", ".join(cfg.missing_required),
+            )
         logger.info("Board provider: Mock")
         return MockBoardGateway()

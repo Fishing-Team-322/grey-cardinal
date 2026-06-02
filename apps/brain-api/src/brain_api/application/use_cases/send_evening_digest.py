@@ -36,7 +36,7 @@ class SendEveningDigest:
 
     async def execute(self) -> int:
         """Запуск планировщиком: отправляет дайджест в чат по умолчанию."""
-        chat_id = await _default_chat_id(self._uow)
+        chat_id = await _default_chat_id(self._uow, self._config)
         if chat_id is None:
             return 0
         now = self._config.now()

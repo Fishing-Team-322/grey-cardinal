@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 class YouGileBoardGateway:
     def __init__(self, config: YouGileConfig, timeout: float = 20.0) -> None:
         if not config.is_configured:
-            raise ValueError("YouGile is not configured (нужны API key и column_todo_id)")
+            raise ValueError(
+                "YouGile is not configured: " + ", ".join(config.missing_required)
+            )
         self._config = config
         self._timeout = timeout
         self._base = config.api_base_url.rstrip("/") + "/api-v2"

@@ -32,7 +32,7 @@ class IngestChatMessage:
     async def execute(self, event: TelegramMessageEvent) -> ActionsResponse:
         uow = self._uow
 
-        project = await uow.projects.ensure_default()
+        project = await uow.projects.ensure_default(self._config.default_workspace_name)
         chat = await uow.chats.upsert(
             telegram_chat_id=event.chat.id,
             chat_type=event.chat.type,

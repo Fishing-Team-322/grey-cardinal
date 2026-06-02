@@ -73,3 +73,6 @@ curl -X POST http://localhost:8020/mock/transcript \
 curl -H "X-Internal-Token: dev-internal-token" \
   http://localhost:8000/internal/audio/transcripts/recent
 ```
+
+Полный P1 smoke с `/bind_chat`, meeting lifecycle, demo scenario и debug state:
+[06_P1_REAL_INTEGRATION_SPINE.md](06_P1_REAL_INTEGRATION_SPINE.md).

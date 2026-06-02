@@ -7,7 +7,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from brain_api.api.routes import health, internal_audio, internal_telegram, tasks, websocket
+from brain_api.api.routes import (
+    debug,
+    health,
+    internal_audio,
+    internal_telegram,
+    meetings,
+    tasks,
+    websocket,
+)
 from brain_api.config import get_settings
 from brain_api.container import Container
 from brain_api.infrastructure.logging.setup import setup_logging
@@ -42,8 +50,10 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Grey Cardinal - brain-api", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
+    app.include_router(debug.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
+    app.include_router(meetings.router)
     app.include_router(tasks.router)
     app.include_router(websocket.router)
     return app

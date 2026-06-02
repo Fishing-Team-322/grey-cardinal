@@ -166,13 +166,39 @@ class TranscriptEventModel(TimestampMixin, Base):
     __tablename__ = "transcript_events"
 
     id: Mapped[UUID] = _uuid_pk()
+    meeting_db_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("meetings.id"), nullable=True
+    )
     meeting_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     speaker_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     speaker_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_final: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="audio_worker")
     raw_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class MeetingModel(TimestampMixin, Base):
+    __tablename__ = "meetings"
+
+    id: Mapped[UUID] = _uuid_pk()
+    seq: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    public_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    telegram_chat_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("telegram_chats.id"), nullable=True
+    )
+    external_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
 
 
 class ReminderLogModel(Base):

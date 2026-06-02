@@ -14,6 +14,7 @@ from uuid import UUID
 from brain_api.domain.enums import (
     BoardProvider,
     ConfirmationStatus,
+    MeetingStatus,
     ReminderKind,
     TaskPriority,
     TaskSource,
@@ -69,10 +70,30 @@ class TranscriptEvent:
     ts: datetime
     is_final: bool
     meeting_id: str | None = None
+    meeting_db_id: UUID | None = None
     speaker_id: str | None = None
     speaker_name: str | None = None
+    confidence: float | None = None
+    source: str = "audio_worker"
     raw_json: dict[str, Any] | None = None
     created_at: datetime | None = None
+
+
+@dataclass
+class Meeting:
+    id: UUID
+    public_id: str
+    status: MeetingStatus
+    started_at: datetime
+    project_id: UUID | None = None
+    telegram_chat_id: UUID | None = None
+    external_source: str | None = None
+    title: str | None = None
+    stopped_at: datetime | None = None
+    created_by_user_id: UUID | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass

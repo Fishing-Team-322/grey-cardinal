@@ -1,5 +1,13 @@
 from .board import BoardCardResult, BoardProvider
 from .events import EventName, WebsocketEvent
+from .meetings import (
+    DemoScenarioPayload,
+    MeetingListResponse,
+    MeetingStartRequest,
+    MeetingStatus,
+    MeetingStatusResponse,
+    MeetingStopRequest,
+)
 from .tasks import (
     ConfirmationStatus,
     KnownUser,
@@ -27,7 +35,13 @@ from .telegram import (
     TelegramMessageRef,
     TelegramSender,
 )
-from .transcripts import TranscriptEvent
+from .transcripts import (
+    TranscriptDTO,
+    TranscriptEvent,
+    TranscriptIngestResponse,
+    TranscriptListResponse,
+    TranscriptSource,
+)
 
 __all__ = [
     "ActionsResponse",
@@ -37,10 +51,16 @@ __all__ = [
     "BoardProvider",
     "BotAction",
     "ConfirmationStatus",
+    "DemoScenarioPayload",
     "EditMessageAction",
     "EditMessageRequest",
     "EventName",
     "KnownUser",
+    "MeetingListResponse",
+    "MeetingStartRequest",
+    "MeetingStatus",
+    "MeetingStatusResponse",
+    "MeetingStopRequest",
     "SendMessageAction",
     "SendMessageRequest",
     "SendMessageResponse",
@@ -57,5 +77,9 @@ __all__ = [
     "TelegramMessageRef",
     "TelegramSender",
     "TranscriptEvent",
+    "TranscriptDTO",
+    "TranscriptIngestResponse",
+    "TranscriptListResponse",
+    "TranscriptSource",
     "WebsocketEvent",
 ]

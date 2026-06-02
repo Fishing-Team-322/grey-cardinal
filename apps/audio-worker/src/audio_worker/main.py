@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import Body, FastAPI, Header, HTTPException, Request
 
-from grey_cardinal_contracts import TranscriptEvent
+from grey_cardinal_contracts import (
+    DemoScenarioPayload,
+    MeetingStartRequest,
+    MeetingStopRequest,
+    TranscriptEvent,
+    TranscriptSource,
+)
 
 from .asr import create_asr_engine
 from .brain_client import BrainClient
@@ -65,14 +72,90 @@ async def mock_transcript(
     event = TranscriptEvent(
         meeting_id=meeting_id,
         speaker_id="unknown",
-        speaker_name=None,
+        speaker_name=payload.get("speaker_name"),
         text=text,
         ts=datetime.now(UTC),
         is_final=True,
         raw={"source": "audio-worker.mock"},
     )
-    sent_to_brain = await brain_client.send_transcript(event)
-    return {"ok": True, "meeting_id": meeting_id, "text": text, "sent_to_brain": sent_to_brain}
+    result = await brain_client.send_transcript(event)
+    return {
+        "ok": result is not None,
+        "meeting_id": meeting_id,
+        "text": text,
+        "sent_to_brain": result is not None,
+        "brain_response": result.model_dump(mode="json") if result else None,
+    }
+
+
+@app.post("/mock/meeting/start")
+async def mock_meeting_start(
+    payload: dict[str, Any] | None = Body(default=None),
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+) -> dict[str, object]:
+    _validate_internal_token(x_internal_token)
+    payload = payload or {}
+    result = await brain_client.start_meeting(
+        MeetingStartRequest(
+            telegram_chat_id=payload.get("telegram_chat_id"),
+            external_source="audio_worker",
+            title=payload.get("title"),
+            metadata=payload.get("metadata") or {},
+        )
+    )
+    return {"ok": result is not None, "meeting": result.model_dump(mode="json") if result else None}
+
+
+@app.post("/mock/meeting/stop")
+async def mock_meeting_stop(
+    payload: dict[str, Any] = Body(),
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+) -> dict[str, object]:
+    _validate_internal_token(x_internal_token)
+    meeting_id = str(payload.get("meeting_id") or "")
+    if not meeting_id:
+        raise HTTPException(status_code=422, detail="meeting_id is required")
+    result = await brain_client.stop_meeting(
+        meeting_id, MeetingStopRequest(telegram_chat_id=payload.get("telegram_chat_id"))
+    )
+    return {"ok": result is not None, "meeting": result.model_dump(mode="json") if result else None}
+
+
+@app.post("/mock/scenario")
+async def mock_scenario(
+    payload: DemoScenarioPayload = Body(default_factory=DemoScenarioPayload),
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+) -> dict[str, object]:
+    _validate_internal_token(x_internal_token)
+    meeting_id = payload.meeting_id
+    if meeting_id is None:
+        meeting = await brain_client.start_meeting(
+            MeetingStartRequest(external_source="demo", metadata={"demo": True})
+        )
+        if meeting is None:
+            return {"ok": False, "sent": 0, "meeting_id": None}
+        meeting_id = meeting.public_id
+
+    lines = [
+        ("Петя", "Петя, подготовь оплату к четвергу"),
+        ("Аня", "Аня, проверь интеграцию с YouGile сегодня вечером"),
+        ("Дима", "Дима, подними websocket для дашборда до завтра"),
+    ]
+    sent = 0
+    for speaker, text in lines:
+        result = await brain_client.send_transcript(
+            TranscriptEvent(
+                meeting_id=meeting_id,
+                speaker_name=speaker,
+                text=text,
+                ts=datetime.now(UTC),
+                source=TranscriptSource.demo,
+            )
+        )
+        sent += int(result is not None)
+        if payload.delay_seconds:
+            await asyncio.sleep(payload.delay_seconds)
+    return {"ok": sent == len(lines), "sent": sent, "meeting_id": meeting_id}
 
 
 @app.post("/audio/chunk")
@@ -120,5 +203,5 @@ async def receive_audio_chunk(
         "chunk_seq": x_chunk_seq,
         "meeting_id": x_meeting_id,
         "text": text,
-        "sent_to_brain": sent_to_brain,
+        "sent_to_brain": sent_to_brain is not None,
     }

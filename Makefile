@@ -2,7 +2,8 @@
 PY ?= python
 
 .PHONY: help install dev test test-all lint format migrate docker-up docker-down docker-build \
-        brain bot audio frontend set-telegram-webhook test-agent audio-agent-configure \
+        brain bot audio frontend set-telegram-webhook get-telegram-webhook-info \
+        set-telegram-commands yougile-smoke test-agent audio-agent-configure \
         audio-agent-build audio-agent-test audio-agent-run audio-worker-test-chunk
 
 help: ## Показать список команд
@@ -56,10 +57,16 @@ frontend: ## Запустить frontend-dashboard локально
 	cd apps/frontend-dashboard && npm install && npm run dev
 
 set-telegram-webhook: ## Зарегистрировать Telegram webhook
-	curl -sS -X POST "https://api.telegram.org/bot$${TELEGRAM_BOT_TOKEN}/setWebhook" \
-		-d "url=$${TELEGRAM_PUBLIC_BASE_URL}/webhooks/telegram" \
-		-d "secret_token=$${TELEGRAM_WEBHOOK_SECRET}" \
-		-d "allowed_updates=[\"message\",\"callback_query\"]"
+	$(PY) scripts/telegram_setup.py set-webhook
+
+get-telegram-webhook-info: ## Показать текущую конфигурацию Telegram webhook
+	$(PY) scripts/telegram_setup.py webhook-info
+
+set-telegram-commands: ## Зарегистрировать список Telegram-команд
+	$(PY) scripts/telegram_setup.py set-commands
+
+yougile-smoke: ## Создать и закрыть реальную тестовую карточку YouGile
+	$(PY) scripts/yougile_smoke.py
 
 test-agent: audio-agent-configure audio-agent-build audio-agent-test ## Собрать и протестировать native audio-agent
 

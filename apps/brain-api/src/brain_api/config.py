@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,8 +31,10 @@ class Settings(BaseSettings):
     yougile_company_id: str = ""
     yougile_project_id: str = ""
     yougile_board_id: str = ""
+    yougile_column_backlog_id: str = ""
     yougile_column_todo_id: str = ""
     yougile_column_in_progress_id: str = ""
+    yougile_column_review_id: str = ""
     yougile_column_blocked_id: str = ""
     yougile_column_done_id: str = ""
 
@@ -39,10 +42,17 @@ class Settings(BaseSettings):
     reminder_stale_hours: int = 24
     evening_digest_hour: int = 20
     default_timezone: str = "Europe/Moscow"
+    default_workspace_name: str = "Hackathon Team"
+    default_telegram_chat_id: int | None = None
 
     @property
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key and self.llm_base_url and self.llm_model)
+
+    @field_validator("default_telegram_chat_id", mode="before")
+    @classmethod
+    def blank_chat_id_is_none(cls, value: object) -> object:
+        return None if value == "" else value
 
 
 def get_settings() -> Settings:
