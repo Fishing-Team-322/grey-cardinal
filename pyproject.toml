@@ -33,5 +33,5 @@ exclude = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["apps/brain-api/tests", "apps/telegram-bot/tests", "packages/contracts/python/tests"]
+testpaths = ["apps/audio-worker/tests", "apps/brain-api/tests", "apps/telegram-bot/tests", "packages/contracts/python/tests"]
 filterwarnings = ["ignore::DeprecationWarning"]

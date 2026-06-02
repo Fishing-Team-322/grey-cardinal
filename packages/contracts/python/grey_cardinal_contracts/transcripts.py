@@ -1,9 +1,3 @@
-"""Контракт transcript-события от audio-worker -> brain-api.
-
-На P0 audio-worker реальный звук не пишет, но контракт зафиксирован,
-чтобы P1-пайплайн подключался без изменения API brain-api.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -21,3 +15,4 @@ class TranscriptEvent(BaseModel):
     ts: datetime
     is_final: bool = True
     raw: dict[str, Any] = Field(default_factory=dict)
+
