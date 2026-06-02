@@ -4,18 +4,17 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from brain_api.application.config import AppConfig
+from brain_api.application.ports import EventPublisher, UnitOfWork
+from brain_api.application.rendering import proposal_keyboard, render_proposal_text
+from brain_api.domain.entities import Confirmation, TaskProposal, User
+from brain_api.domain.enums import ConfirmationStatus, TaskPriority, TaskSource
 from grey_cardinal_contracts import (
     EventName,
     SendMessageAction,
     TaskExtractionResult,
     WebsocketEvent,
 )
-
-from brain_api.application.config import AppConfig
-from brain_api.application.ports import EventPublisher, UnitOfWork
-from brain_api.application.rendering import proposal_keyboard, render_proposal_text
-from brain_api.domain.entities import Confirmation, TaskProposal, User
-from brain_api.domain.enums import ConfirmationStatus, TaskPriority, TaskSource
 
 
 def _match_assignee(assignee: str | None, known: list[User]) -> tuple[str | None, UUID | None]:

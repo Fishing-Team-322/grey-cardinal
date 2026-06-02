@@ -9,14 +9,6 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from grey_cardinal_contracts import (
-    ActionsResponse,
-    EventName,
-    KnownUser,
-    TranscriptEvent as TranscriptEventContract,
-    WebsocketEvent,
-)
-
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import (
     EventPublisher,
@@ -28,6 +20,15 @@ from brain_api.application.use_cases._shared import create_proposal_with_confirm
 from brain_api.application.use_cases.send_deadline_reminders import _default_chat_id
 from brain_api.domain.entities import TranscriptEvent as TranscriptEntity
 from brain_api.domain.enums import TaskSource
+from grey_cardinal_contracts import (
+    ActionsResponse,
+    EventName,
+    KnownUser,
+    WebsocketEvent,
+)
+from grey_cardinal_contracts import (
+    TranscriptEvent as TranscriptEventContract,
+)
 
 
 class IngestTranscriptEvent:
@@ -107,4 +108,4 @@ class IngestTranscriptEvent:
         if chat_id is not None:
             await self._telegram.send_message(chat_id, action.text, action.reply_markup)
 
-        return ActionsResponse(actions=[action])
+        return ActionsResponse(actions=[action] if chat_id is not None else [])

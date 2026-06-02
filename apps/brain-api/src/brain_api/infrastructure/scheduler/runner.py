@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -60,18 +61,14 @@ class AsyncScheduler:
             logger.exception("Scheduler job '%s' failed", name)
 
     async def _sleep(self, seconds: float) -> None:
-        try:
+        with suppress(TimeoutError):
             await asyncio.wait_for(self._stopping.wait(), timeout=seconds)
-        except TimeoutError:
-            pass
 
     async def stop(self) -> None:
         self._stopping.set()
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
-            try:
+            with suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
         self._tasks.clear()

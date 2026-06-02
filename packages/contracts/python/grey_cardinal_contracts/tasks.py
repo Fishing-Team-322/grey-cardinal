@@ -9,12 +9,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     proposed = "proposed"
     confirmed = "confirmed"
     todo = "todo"
@@ -25,21 +25,21 @@ class TaskStatus(str, Enum):
     cancelled = "cancelled"
 
 
-class TaskPriority(str, Enum):
+class TaskPriority(StrEnum):
     low = "low"
     medium = "medium"
     high = "high"
     critical = "critical"
 
 
-class TaskSource(str, Enum):
+class TaskSource(StrEnum):
     telegram_chat = "telegram_chat"
     telegram_direct = "telegram_direct"
     meeting_transcript = "meeting_transcript"
     manual = "manual"
 
 
-class ConfirmationStatus(str, Enum):
+class ConfirmationStatus(StrEnum):
     pending = "pending"
     accepted = "accepted"
     rejected = "rejected"

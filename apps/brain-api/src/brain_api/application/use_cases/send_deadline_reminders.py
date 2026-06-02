@@ -5,13 +5,12 @@ from __future__ import annotations
 import logging
 from uuid import uuid4
 
-from grey_cardinal_contracts import EventName, WebsocketEvent
-
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import EventPublisher, TelegramGateway, UnitOfWork
 from brain_api.application.rendering import render_deadline_reminder
 from brain_api.domain.entities import ReminderLog
 from brain_api.domain.enums import ReminderKind
+from grey_cardinal_contracts import EventName, WebsocketEvent
 
 logger = logging.getLogger(__name__)
 

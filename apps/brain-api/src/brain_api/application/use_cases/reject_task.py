@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from brain_api.application.ports import EventPublisher, UnitOfWork
+from brain_api.application.rendering import render_task_rejected
+from brain_api.domain.entities import AuditLog
+from brain_api.domain.enums import ConfirmationStatus
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
@@ -11,11 +15,6 @@ from grey_cardinal_contracts import (
     EventName,
     WebsocketEvent,
 )
-
-from brain_api.application.ports import EventPublisher, UnitOfWork
-from brain_api.application.rendering import render_task_rejected
-from brain_api.domain.entities import AuditLog
-from brain_api.domain.enums import ConfirmationStatus
 
 
 class RejectTask:

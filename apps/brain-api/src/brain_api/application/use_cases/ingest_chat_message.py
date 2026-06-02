@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from grey_cardinal_contracts import (
-    ActionsResponse,
-    KnownUser,
-    TelegramMessageEvent,
-)
-
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import EventPublisher, TaskExtractor, UnitOfWork
 from brain_api.application.use_cases._shared import create_proposal_with_confirmation
 from brain_api.domain.entities import ChatMessage
 from brain_api.domain.enums import TaskSource
+from grey_cardinal_contracts import (
+    ActionsResponse,
+    KnownUser,
+    TelegramMessageEvent,
+)
 
 
 class IngestChatMessage:

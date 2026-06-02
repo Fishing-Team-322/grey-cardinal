@@ -6,13 +6,12 @@ import logging
 from datetime import datetime
 from uuid import uuid4
 
-from grey_cardinal_contracts import ActionsResponse, SendMessageAction
-
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import TelegramGateway, UnitOfWork
 from brain_api.application.rendering import render_digest
 from brain_api.application.use_cases.send_deadline_reminders import _default_chat_id
 from brain_api.domain.entities import DigestLog
+from grey_cardinal_contracts import ActionsResponse, SendMessageAction
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +40,8 @@ class SendEveningDigest:
         if chat_id is None:
             return 0
         now = self._config.now()
+        if await self._uow.digests.sent_today(chat_id, now):
+            return 0
         text = await self._build_text(now)
         await self._telegram.send_message(chat_id, text)
         await self._log(chat_id, text)

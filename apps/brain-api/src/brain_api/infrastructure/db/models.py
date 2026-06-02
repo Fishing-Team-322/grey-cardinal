@@ -18,7 +18,6 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
-    String,
     Text,
     UniqueConstraint,
     func,

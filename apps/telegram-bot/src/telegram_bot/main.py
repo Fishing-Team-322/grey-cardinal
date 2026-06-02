@@ -6,13 +6,13 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
+
 from grey_cardinal_contracts import (
     AnswerCallbackRequest,
     EditMessageRequest,
     SendMessageRequest,
     SendMessageResponse,
 )
-
 from telegram_bot.brain_client import BrainClient
 from telegram_bot.client import TelegramClient
 from telegram_bot.config import Settings, get_settings
@@ -58,9 +58,11 @@ def create_app() -> FastAPI:
     ) -> dict[str, bool]:
         settings = _settings(request)
         # Проверка секрета вебхука (если задан).
-        if settings.telegram_webhook_secret:
-            if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "Bad webhook secret")
+        if (
+            settings.telegram_webhook_secret
+            and x_telegram_bot_api_secret_token != settings.telegram_webhook_secret
+        ):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Bad webhook secret")
         update = await request.json()
         await process_update(update, request.app.state.client, request.app.state.brain)
         return {"ok": True}

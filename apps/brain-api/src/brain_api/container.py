@@ -7,6 +7,7 @@ session factory) и выдаёт UnitOfWork на каждую операцию.
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -16,8 +17,10 @@ from brain_api.application.ports import (
     EventPublisher,
     TaskExtractor,
     TelegramGateway,
+    UnitOfWork,
 )
 from brain_api.config import Settings
+from brain_api.domain.enums import BoardProvider
 from brain_api.infrastructure.board.base import YouGileConfig, resolve_provider
 from brain_api.infrastructure.board.mock import MockBoardGateway
 from brain_api.infrastructure.board.yougile import YouGileBoardGateway
@@ -29,7 +32,6 @@ from brain_api.infrastructure.llm.client import OpenAICompatibleClient
 from brain_api.infrastructure.llm.extractor import LLMTaskExtractor
 from brain_api.infrastructure.llm.heuristic_extractor import HeuristicTaskExtractor
 from brain_api.infrastructure.telegram_gateway.client import HttpTelegramGateway
-from brain_api.domain.enums import BoardProvider
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +60,8 @@ class Container:
         self.board: BoardGateway = self._build_board(settings)
 
     # ------------------------------------------------------------------ #
-    def make_uow(self) -> SqlAlchemyUnitOfWork:
-        return SqlAlchemyUnitOfWork(self.session_factory())
+    def make_uow(self) -> UnitOfWork:
+        return cast(UnitOfWork, SqlAlchemyUnitOfWork(self.session_factory()))
 
     async def dispose(self) -> None:
         await self.engine.dispose()

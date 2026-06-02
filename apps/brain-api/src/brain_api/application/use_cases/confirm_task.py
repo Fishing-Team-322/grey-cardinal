@@ -5,6 +5,12 @@ from __future__ import annotations
 import logging
 from uuid import UUID, uuid4
 
+from brain_api.application.config import AppConfig
+from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
+from brain_api.application.rendering import render_task_created
+from brain_api.domain.entities import AuditLog, BoardCard, Task
+from brain_api.domain.enums import BoardProvider, ConfirmationStatus, TaskStatus
+from brain_api.domain.services import format_public_id
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
@@ -12,14 +18,6 @@ from grey_cardinal_contracts import (
     EventName,
     WebsocketEvent,
 )
-
-from brain_api.application.config import AppConfig
-from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
-from brain_api.application.rendering import render_task_created
-from brain_api.domain.entities import AuditLog, BoardCard, Confirmation, Task
-from brain_api.domain.enums import BoardProvider, ConfirmationStatus, TaskStatus
-from brain_api.domain.errors import BoardError
-from brain_api.domain.services import format_public_id
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +130,7 @@ class ConfirmTask:
         """Создать карточку на доске. Ошибка доски не теряет задачу — пишем в audit."""
         try:
             result = await self._board.create_card(task)
-        except BoardError as exc:
+        except Exception as exc:
             logger.warning("Board card creation failed for %s: %s", task.public_id, exc)
             await self._uow.audit.add(
                 AuditLog(
@@ -144,7 +142,7 @@ class ConfirmTask:
                     payload={"error": str(exc)},
                 )
             )
-            return None
+            return "недоступна, задача сохранена локально"
 
         provider = BoardProvider(result.provider.value)
         await self._uow.board_cards.add(

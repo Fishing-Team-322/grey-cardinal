@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 
 # CMake / native builds
 native/desktop-agent/build/

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from grey_cardinal_contracts import (
@@ -13,14 +13,13 @@ from grey_cardinal_contracts import (
     TelegramMessageRef,
     TelegramSender,
 )
-
 from telegram_bot.commands import parse_command
 
 
 def _ts(value: int | None) -> datetime:
     if value is None:
-        return datetime.now(timezone.utc)
-    return datetime.fromtimestamp(value, tz=timezone.utc)
+        return datetime.now(UTC)
+    return datetime.fromtimestamp(value, tz=UTC)
 
 
 def _sender(raw: dict[str, Any]) -> TelegramSender:

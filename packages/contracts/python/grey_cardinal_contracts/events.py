@@ -6,13 +6,13 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class EventName(str, Enum):
+class EventName(StrEnum):
     task_proposed = "task_proposed"
     task_created = "task_created"
     task_rejected = "task_rejected"

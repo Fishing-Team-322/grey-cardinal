@@ -12,12 +12,12 @@ from __future__ import annotations
 import logging
 
 import httpx
-from grey_cardinal_contracts import BoardCardResult, BoardProvider
 
 from brain_api.domain.entities import Task
 from brain_api.domain.enums import TaskStatus
 from brain_api.domain.errors import BoardError
 from brain_api.infrastructure.board.base import YouGileConfig
+from grey_cardinal_contracts import BoardCardResult, BoardProvider
 
 logger = logging.getLogger(__name__)
 

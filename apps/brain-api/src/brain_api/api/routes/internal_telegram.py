@@ -5,14 +5,6 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from grey_cardinal_contracts import (
-    ActionsResponse,
-    AnswerCallbackAction,
-    SendMessageAction,
-    TelegramCallbackEvent,
-    TelegramCommandEvent,
-    TelegramMessageEvent,
-)
 
 from brain_api.api.deps import get_container, verify_internal_token
 from brain_api.application.rendering import CB_CONFIRM, CB_EDIT, CB_REJECT, EDIT_STUB_TEXT
@@ -23,6 +15,14 @@ from brain_api.application.use_cases.reject_task import RejectTask
 from brain_api.application.use_cases.send_evening_digest import SendEveningDigest
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.container import Container
+from grey_cardinal_contracts import (
+    ActionsResponse,
+    AnswerCallbackAction,
+    SendMessageAction,
+    TelegramCallbackEvent,
+    TelegramCommandEvent,
+    TelegramMessageEvent,
+)
 
 router = APIRouter(
     prefix="/internal/telegram",
