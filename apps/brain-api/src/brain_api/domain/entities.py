@@ -13,12 +13,15 @@ from uuid import UUID
 
 from brain_api.domain.enums import (
     BoardProvider,
+    ClientSessionStatus,
     ConfirmationStatus,
+    MeetingParticipantStatus,
     MeetingStatus,
     ReminderKind,
     TaskPriority,
     TaskSource,
     TaskStatus,
+    XpEventKind,
 )
 
 
@@ -28,6 +31,35 @@ class User:
     display_name: str
     telegram_user_id: int | None = None
     telegram_username: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass
+class Device:
+    id: UUID
+    user_id: UUID
+    device_name: str
+    platform: str
+    workspace_id: UUID | None = None
+    app_version: str | None = None
+    device_fingerprint: str | None = None
+    last_seen_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass
+class ClientSession:
+    id: UUID
+    user_id: UUID
+    status: ClientSessionStatus
+    started_at: datetime
+    device_id: UUID | None = None
+    workspace_id: UUID | None = None
+    session_token_hash: str | None = None
+    last_seen_at: datetime | None = None
+    expires_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -91,6 +123,22 @@ class Meeting:
     title: str | None = None
     stopped_at: datetime | None = None
     created_by_user_id: UUID | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass
+class MeetingParticipant:
+    id: UUID
+    meeting_id: UUID
+    user_id: UUID
+    status: MeetingParticipantStatus
+    joined_at: datetime
+    device_id: UUID | None = None
+    client_session_id: UUID | None = None
+    left_at: datetime | None = None
+    last_seen_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -190,3 +238,27 @@ class AuditLog:
     entity_id: UUID | None = None
     payload: dict[str, Any] | None = None
     created_at: datetime | None = None
+
+
+@dataclass
+class UserXpEvent:
+    id: UUID
+    user_id: UUID
+    kind: XpEventKind
+    points: int
+    reason: str
+    workspace_id: UUID | None = None
+    task_id: UUID | None = None
+    meeting_id: UUID | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime | None = None
+
+
+@dataclass
+class UserXpTotal:
+    id: UUID
+    user_id: UUID
+    points_total: int
+    level: int
+    workspace_id: UUID | None = None
+    updated_at: datetime | None = None

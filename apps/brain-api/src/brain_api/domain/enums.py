@@ -67,6 +67,29 @@ class MeetingStatus(StrEnum):
     failed = "failed"
 
 
+class ClientSessionStatus(StrEnum):
+    active = "active"
+    revoked = "revoked"
+    expired = "expired"
+
+
+class MeetingParticipantStatus(StrEnum):
+    joined = "joined"
+    left = "left"
+    disconnected = "disconnected"
+
+
+class XpEventKind(StrEnum):
+    task_created_from_speech = "task_created_from_speech"
+    task_confirmed = "task_confirmed"
+    task_completed = "task_completed"
+    status_updated = "status_updated"
+    meeting_joined = "meeting_joined"
+    meeting_summary_ready = "meeting_summary_ready"
+    streak_bonus = "streak_bonus"
+    risk_resolved = "risk_resolved"
+
+
 # Человекочитаемые подписи статусов/приоритетов для русскоязычного UX.
 STATUS_LABELS_RU: dict[TaskStatus, str] = {
     TaskStatus.proposed: "Предложена",

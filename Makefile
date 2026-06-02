@@ -4,7 +4,8 @@ PY ?= python
 .PHONY: help install dev test test-all lint format migrate docker-up docker-down docker-build \
         brain bot audio frontend set-telegram-webhook get-telegram-webhook-info \
         set-telegram-commands yougile-smoke test-agent audio-agent-configure \
-        audio-agent-build audio-agent-test audio-agent-run audio-worker-test-chunk
+        audio-agent-build audio-agent-test audio-agent-run audio-worker-test-chunk \
+        smoke-desktop-flow
 
 help: ## Показать список команд
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -67,6 +68,9 @@ set-telegram-commands: ## Зарегистрировать список Telegram
 
 yougile-smoke: ## Создать и закрыть реальную тестовую карточку YouGile
 	$(PY) scripts/yougile_smoke.py
+
+smoke-desktop-flow: ## Проверить desktop-first microphone flow через brain-api
+	$(PY) scripts/smoke/desktop_microphone_flow.py
 
 test-agent: audio-agent-configure audio-agent-build audio-agent-test ## Собрать и протестировать native audio-agent
 

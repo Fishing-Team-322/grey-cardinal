@@ -4,19 +4,25 @@ Grey Cardinal превращает сообщения Telegram и финальн
 `brain-api` хранит lifecycle задач в PostgreSQL, а интеграция с доской по умолчанию работает
 через стабильный `MockBoardGateway`.
 
+Новая audio-архитектура — desktop-first: каждый участник ставит desktop app,
+а speaker identity берётся из authenticated desktop session/device, не из voice recognition.
+Production-путь для речи: `/desktop/transcripts` с `capture_mode=microphone`.
+
 ## Архитектура P1
 
 ```text
 Telegram webhook -> telegram-bot -> brain-api -> PostgreSQL -> MockBoardGateway / YouGile
+desktop-app microphone -> brain-api /desktop/transcripts -> meeting timeline -> proposal
 audio-worker -> brain-api -> meeting -> transcript -> proposal -> Telegram action
-native desktop-agent -> audio-worker /audio/chunk
+native desktop-agent -> audio-worker /audio/chunk (system_loopback_experimental)
 ```
 
 - `telegram-bot` - тонкий transport adapter Telegram.
 - `audio-worker` - service-client `brain-api`; поддерживает mock meeting/scenario, transcript и WAV chunks.
 - `brain-api` - единственный владелец PostgreSQL, meeting lifecycle и task lifecycle.
+- `apps/desktop-app` - primary participant client skeleton: dev identity, meeting join, mock microphone transcript, tasks, XP.
 - `frontend-dashboard` - существующий websocket-клиент; на этом этапе функционально не менялся.
-- `native/desktop-agent` - дополнительный Windows WASAPI loopback-клиент для audio-worker.
+- `native/desktop-agent` - дополнительный Windows WASAPI loopback-клиент для audio-worker, только experimental.
 
 Подробности: [docs/00_OVERVIEW.md](docs/00_OVERVIEW.md).
 
@@ -64,6 +70,14 @@ Native audio-agent проверяется отдельно:
 make test-agent
 ```
 
+Desktop app skeleton:
+
+```bash
+cd apps/desktop-app
+npm install
+npm run build
+```
+
 ## Ручной smoke test
 
 Пошаговые `curl`-команды без реального Telegram находятся в
@@ -85,6 +99,14 @@ curl -X POST http://localhost:8020/mock/transcript \
 curl -H "X-Internal-Token: dev-internal-token" \
   http://localhost:8000/internal/audio/transcripts/recent
 ```
+
+Desktop-first microphone smoke:
+
+```bash
+python scripts/smoke/desktop_microphone_flow.py
+```
+
+Подробности: [docs/07_DESKTOP_FIRST_ARCHITECTURE.md](docs/07_DESKTOP_FIRST_ARCHITECTURE.md).
 
 ## Audio Agent
 

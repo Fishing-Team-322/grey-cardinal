@@ -46,6 +46,8 @@ void apply_key_value(AgentConfig& config, const std::string& key, const std::str
         config.internal_token = value;
     } else if (key == "meeting_id") {
         config.meeting_id = value;
+    } else if (key == "capture_mode") {
+        config.capture_mode = parse_capture_mode(value);
     } else if (key == "chunk_ms") {
         config.chunk_ms = std::stoi(value);
     } else if (key == "duration_sec") {
@@ -145,6 +147,8 @@ void apply_cli_args(AgentConfig& config, const std::vector<std::string>& args) {
             config.duration_sec = std::stoi(require_value(arg));
         } else if (arg == "--meeting-id") {
             config.meeting_id = require_value(arg);
+        } else if (arg == "--capture-mode") {
+            config.capture_mode = parse_capture_mode(require_value(arg));
         } else if (arg == "--save-chunks") {
             config.save_chunks = require_value(arg);
         } else if (arg == "--dry-run" || arg == "--dry-run-save-only") {
@@ -182,10 +186,41 @@ AgentConfig load_config_from_args(int argc, char** argv) {
     return config;
 }
 
+CaptureMode parse_capture_mode(const std::string& value) {
+    if (value == "microphone") {
+        return CaptureMode::Microphone;
+    }
+    if (value == "system_loopback_experimental") {
+        return CaptureMode::SystemLoopbackExperimental;
+    }
+    if (value == "mixed_meeting_experimental") {
+        return CaptureMode::MixedMeetingExperimental;
+    }
+    if (value == "mock") {
+        return CaptureMode::Mock;
+    }
+    throw std::runtime_error("unsupported capture mode: " + value);
+}
+
+std::string capture_mode_value(CaptureMode mode) {
+    switch (mode) {
+    case CaptureMode::Microphone:
+        return "microphone";
+    case CaptureMode::SystemLoopbackExperimental:
+        return "system_loopback_experimental";
+    case CaptureMode::MixedMeetingExperimental:
+        return "mixed_meeting_experimental";
+    case CaptureMode::Mock:
+        return "mock";
+    }
+    return "microphone";
+}
+
 std::string config_summary(const AgentConfig& config) {
     std::ostringstream output;
     output << "server_url=" << config.server_url
            << " meeting_id=" << config.meeting_id
+           << " capture_mode=" << capture_mode_value(config.capture_mode)
            << " chunk_ms=" << config.chunk_ms
            << " duration_sec=" << config.duration_sec
            << " dry_run=" << (config.dry_run ? "true" : "false")
@@ -207,6 +242,7 @@ Usage:
 Options:
   --server <url>       audio-worker base URL, default http://localhost:8020
   --token <token>      internal token, also read from config/env
+  --capture-mode <m>   microphone (default), system_loopback_experimental, mixed_meeting_experimental, or mock
   --chunk-ms <ms>      chunk duration, default 3000
   --duration-sec <s>   capture for N seconds then exit, default 0 means until Ctrl+C
   --meeting-id <id>    meeting id, default local-windows-demo

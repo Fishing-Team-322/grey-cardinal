@@ -70,6 +70,8 @@ async def recent_transcripts(
             is_final=event.is_final,
             confidence=event.confidence,
             source=TranscriptSource(event.source),
+            source_payload=(event.raw_json or {}).get("source"),
+            speaker=(event.raw_json or {}).get("speaker"),
             raw=event.raw_json or {},
         )
         for event in events

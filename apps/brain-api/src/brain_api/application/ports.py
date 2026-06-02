@@ -15,9 +15,12 @@ from brain_api.domain.entities import (
     AuditLog,
     BoardCard,
     ChatMessage,
+    ClientSession,
     Confirmation,
+    Device,
     DigestLog,
     Meeting,
+    MeetingParticipant,
     Project,
     ReminderLog,
     Task,
@@ -25,6 +28,8 @@ from brain_api.domain.entities import (
     TelegramChat,
     TranscriptEvent,
     User,
+    UserXpEvent,
+    UserXpTotal,
 )
 from brain_api.domain.enums import ReminderKind, TaskStatus
 from grey_cardinal_contracts import (
@@ -81,8 +86,42 @@ class UserRepository(Protocol):
     async def upsert_from_telegram(
         self, telegram_user_id: int, username: str | None, display_name: str
     ) -> User: ...
+    async def upsert_desktop_user(
+        self, display_name: str, telegram_username: str | None = None
+    ) -> User: ...
     async def get(self, user_id: UUID) -> User | None: ...
+    async def get_by_display_name(self, display_name: str) -> User | None: ...
     async def list_known(self, limit: int = 50) -> list[User]: ...
+
+
+class DeviceRepository(Protocol):
+    async def get(self, device_id: UUID) -> Device | None: ...
+    async def upsert(
+        self,
+        *,
+        user_id: UUID,
+        device_name: str,
+        platform: str,
+        workspace_id: UUID | None = None,
+        app_version: str | None = None,
+        device_fingerprint: str | None = None,
+        now: datetime | None = None,
+    ) -> Device: ...
+    async def touch(self, device_id: UUID, now: datetime) -> Device | None: ...
+
+
+class ClientSessionRepository(Protocol):
+    async def get(self, session_id: UUID) -> ClientSession | None: ...
+    async def start(
+        self,
+        *,
+        user_id: UUID,
+        device_id: UUID | None,
+        workspace_id: UUID | None,
+        now: datetime,
+        expires_at: datetime | None = None,
+    ) -> ClientSession: ...
+    async def touch(self, session_id: UUID, now: datetime) -> ClientSession | None: ...
 
 
 class ProjectRepository(Protocol):
@@ -115,6 +154,26 @@ class MeetingRepository(Protocol):
     async def count_proposals(self, meeting_id: UUID) -> int: ...
 
 
+class MeetingParticipantRepository(Protocol):
+    async def join(
+        self,
+        *,
+        meeting_id: UUID,
+        user_id: UUID,
+        device_id: UUID | None,
+        client_session_id: UUID | None,
+        now: datetime,
+        metadata: dict | None = None,
+    ) -> MeetingParticipant: ...
+    async def leave(
+        self, meeting_id: UUID, user_id: UUID, now: datetime
+    ) -> MeetingParticipant | None: ...
+    async def touch_active_for_session(
+        self, client_session_id: UUID, now: datetime, meeting_id: UUID | None = None
+    ) -> MeetingParticipant | None: ...
+    async def list_for_meeting(self, meeting_id: UUID) -> list[MeetingParticipant]: ...
+
+
 class MessageRepository(Protocol):
     async def get_by_tg(
         self, chat_id: UUID, telegram_message_id: int
@@ -141,6 +200,7 @@ class TaskRepository(Protocol):
     async def next_sequence(self) -> int: ...
     async def update(self, task: Task) -> Task: ...
     async def list_active(self) -> list[Task]: ...
+    async def list_for_user(self, user_id: UUID, limit: int = 50) -> list[Task]: ...
     async def list_active_for_chat(self, telegram_chat_id: int) -> list[Task]: ...
     async def list_for_deadline_reminder(
         self, now: datetime, hours_before: int
@@ -181,6 +241,12 @@ class AuditRepository(Protocol):
     async def add(self, log: AuditLog) -> AuditLog: ...
 
 
+class GamificationRepository(Protocol):
+    async def add_event_once(self, event: UserXpEvent) -> UserXpEvent | None: ...
+    async def get_total(self, user_id: UUID, workspace_id: UUID | None = None) -> UserXpTotal: ...
+    async def list_recent(self, user_id: UUID, limit: int = 20) -> list[UserXpEvent]: ...
+
+
 @runtime_checkable
 class UnitOfWork(Protocol):
     """Агрегирует репозитории и управляет транзакцией.
@@ -189,10 +255,13 @@ class UnitOfWork(Protocol):
     """
 
     users: UserRepository
+    devices: DeviceRepository
+    client_sessions: ClientSessionRepository
     projects: ProjectRepository
     chats: ChatRepository
     messages: MessageRepository
     meetings: MeetingRepository
+    meeting_participants: MeetingParticipantRepository
     proposals: ProposalRepository
     confirmations: ConfirmationRepository
     tasks: TaskRepository
@@ -202,6 +271,7 @@ class UnitOfWork(Protocol):
     reminders: ReminderRepository
     digests: DigestRepository
     audit: AuditRepository
+    gamification: GamificationRepository
 
     async def commit(self) -> None: ...
     async def rollback(self) -> None: ...

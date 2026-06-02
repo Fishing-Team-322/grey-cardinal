@@ -24,6 +24,8 @@ from grey_cardinal_contracts import (
     EventName,
     KnownUser,
     TranscriptIngestResponse,
+    TranscriptSource,
+    TranscriptSourceDetails,
     WebsocketEvent,
 )
 from grey_cardinal_contracts import (
@@ -65,7 +67,7 @@ class IngestTranscriptEvent:
             ts=event.ts,
             is_final=event.is_final,
             confidence=event.confidence,
-            source=event.source.value,
+            source=_source_value(event.source),
             raw_json=event.raw or {},
         )
         await uow.transcripts.add(entity)
@@ -131,3 +133,9 @@ class IngestTranscriptEvent:
             proposal_created=True,
             telegram_notified=notified,
         )
+
+
+def _source_value(source: TranscriptSource | TranscriptSourceDetails) -> str:
+    if isinstance(source, TranscriptSourceDetails):
+        return source.kind.value
+    return source.value

@@ -8,8 +8,9 @@ from uuid import uuid4
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
 from brain_api.application.rendering import render_status_changed
+from brain_api.application.use_cases.gamification import GamificationService
 from brain_api.domain.entities import AuditLog, Task
-from brain_api.domain.enums import TaskStatus
+from brain_api.domain.enums import TaskStatus, XpEventKind
 from brain_api.domain.services import parse_public_id, status_for_command
 from grey_cardinal_contracts import (
     ActionsResponse,
@@ -75,6 +76,26 @@ class UpdateTaskStatus:
                 },
             )
         )
+        if task.assignee_id is not None:
+            await GamificationService().grant(
+                self._uow,
+                user_id=task.assignee_id,
+                workspace_id=task.project_id,
+                task_id=task.id,
+                kind=XpEventKind.status_updated,
+                reason=f"Обновил статус {task.public_id}: {new_status.value}",
+                idempotency_key=f"status_updated:{task.id}:{new_status.value}",
+            )
+            if new_status == TaskStatus.done:
+                await GamificationService().grant(
+                    self._uow,
+                    user_id=task.assignee_id,
+                    workspace_id=task.project_id,
+                    task_id=task.id,
+                    kind=XpEventKind.task_completed,
+                    reason=f"Закрыл задачу {task.public_id}",
+                    idempotency_key=f"task_completed:{task.id}",
+                )
         await self._uow.commit()
         return _msg(chat_id, render_status_changed(task))
 

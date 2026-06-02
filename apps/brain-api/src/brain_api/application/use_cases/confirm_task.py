@@ -8,8 +8,9 @@ from uuid import UUID, uuid4
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
 from brain_api.application.rendering import render_task_created
+from brain_api.application.use_cases.gamification import GamificationService
 from brain_api.domain.entities import AuditLog, BoardCard, Task
-from brain_api.domain.enums import BoardProvider, ConfirmationStatus, TaskStatus
+from brain_api.domain.enums import BoardProvider, ConfirmationStatus, TaskStatus, XpEventKind
 from brain_api.domain.services import format_public_id
 from grey_cardinal_contracts import (
     ActionsResponse,
@@ -120,6 +121,17 @@ class ConfirmTask:
                 },
             )
         )
+
+        if task.assignee_id is not None:
+            await GamificationService().grant(
+                uow,
+                user_id=task.assignee_id,
+                workspace_id=task.project_id,
+                task_id=task.id,
+                kind=XpEventKind.task_confirmed,
+                reason=f"Подтвердили задачу {task.public_id}",
+                idempotency_key=f"task_confirmed:{task.id}",
+            )
 
         await uow.commit()
         return _created_actions(
