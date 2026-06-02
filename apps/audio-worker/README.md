@@ -9,6 +9,12 @@ docker compose --profile full up --build
 curl http://localhost:8020/health
 ```
 
+Pipeline validation from the repository root:
+
+```powershell
+.\scripts\windows\validate_audio_pipeline.ps1
+```
+
 ## POST `/audio/chunk`
 
 Headers:
@@ -18,7 +24,7 @@ Headers:
 - `X-Chunk-Seq`: incrementing chunk number
 - `X-Audio-Format`: `wav`
 
-Body: `audio/wav` bytes.
+Body: `audio/wav` bytes. The worker rejects empty payloads and payloads without `RIFF`/`WAVE` WAV markers.
 
 Smoke test:
 
@@ -36,3 +42,17 @@ Smoke test:
 
 `faster-whisper` is optional. The worker imports it only when `AUDIO_ASR_PROVIDER=faster_whisper`, so the default mock mode stays lightweight.
 
+## Tests
+
+```powershell
+python -m pytest apps/audio-worker apps/brain-api
+```
+
+The default test path uses mock ASR and a fake brain client; it does not require real audio, Docker, or network access.
+
+## Known limitations
+
+- Mock ASR is the default for fast offline tests and demos.
+- `faster-whisper` is optional and CPU-backed in this MVP.
+- No VAD or diarization yet; transcript events use `speaker_id=unknown`.
+- The Windows agent sends mono PCM16 WAV chunks at the captured sample rate unless future resampling is added.

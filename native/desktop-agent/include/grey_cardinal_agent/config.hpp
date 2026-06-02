@@ -10,6 +10,7 @@ struct AgentConfig {
     std::string internal_token;
     std::string meeting_id = "local-windows-demo";
     int chunk_ms = 3000;
+    int duration_sec = 0;
     std::filesystem::path save_chunks;
     bool dry_run = false;
     bool list_devices = false;
@@ -22,4 +23,3 @@ std::string config_summary(const AgentConfig& config);
 std::string help_text();
 
 } // namespace grey_cardinal_agent
-

@@ -48,6 +48,8 @@ void apply_key_value(AgentConfig& config, const std::string& key, const std::str
         config.meeting_id = value;
     } else if (key == "chunk_ms") {
         config.chunk_ms = std::stoi(value);
+    } else if (key == "duration_sec") {
+        config.duration_sec = std::stoi(value);
     } else if (key == "save_chunks") {
         config.save_chunks = value;
     } else if (key == "dry_run") {
@@ -139,11 +141,13 @@ void apply_cli_args(AgentConfig& config, const std::vector<std::string>& args) {
             config.internal_token = require_value(arg);
         } else if (arg == "--chunk-ms") {
             config.chunk_ms = std::stoi(require_value(arg));
+        } else if (arg == "--duration-sec") {
+            config.duration_sec = std::stoi(require_value(arg));
         } else if (arg == "--meeting-id") {
             config.meeting_id = require_value(arg);
         } else if (arg == "--save-chunks") {
             config.save_chunks = require_value(arg);
-        } else if (arg == "--dry-run") {
+        } else if (arg == "--dry-run" || arg == "--dry-run-save-only") {
             config.dry_run = true;
         } else if (arg == "--list-devices") {
             config.list_devices = true;
@@ -171,6 +175,9 @@ AgentConfig load_config_from_args(int argc, char** argv) {
     if (config.chunk_ms <= 0) {
         throw std::runtime_error("--chunk-ms must be greater than zero");
     }
+    if (config.duration_sec < 0) {
+        throw std::runtime_error("--duration-sec must be zero or greater");
+    }
 
     return config;
 }
@@ -180,6 +187,7 @@ std::string config_summary(const AgentConfig& config) {
     output << "server_url=" << config.server_url
            << " meeting_id=" << config.meeting_id
            << " chunk_ms=" << config.chunk_ms
+           << " duration_sec=" << config.duration_sec
            << " dry_run=" << (config.dry_run ? "true" : "false")
            << " save_chunks=" << (config.save_chunks.empty() ? "<disabled>" : config.save_chunks.string())
            << " token=" << (config.internal_token.empty() ? "<empty>" : "<set>");
@@ -200,9 +208,11 @@ Options:
   --server <url>       audio-worker base URL, default http://localhost:8020
   --token <token>      internal token, also read from config/env
   --chunk-ms <ms>      chunk duration, default 3000
+  --duration-sec <s>   capture for N seconds then exit, default 0 means until Ctrl+C
   --meeting-id <id>    meeting id, default local-windows-demo
   --save-chunks <dir>  write WAV chunks for debugging
   --dry-run            capture and log chunks but skip upload
+  --dry-run-save-only  alias for --dry-run, useful with --save-chunks
   --list-devices       list active Windows render devices
   --config <path>      load simple TOML-style key=value config
   --help               show this help

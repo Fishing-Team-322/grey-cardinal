@@ -10,6 +10,16 @@ P0 is Windows. macOS and Linux adapter stubs are present under `platform/macos` 
 cd native\desktop-agent
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
+ctest --test-dir build --output-on-failure -C Release
+```
+
+Debug:
+
+```powershell
+cd native\desktop-agent
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug
+ctest --test-dir build --output-on-failure -C Debug
 ```
 
 ## Run
@@ -35,8 +45,17 @@ Other useful commands:
 ```powershell
 .\build\Release\grey-cardinal-agent.exe --list-devices
 .\build\Release\grey-cardinal-agent.exe --dry-run --save-chunks .\chunks
+.\build\Release\grey-cardinal-agent.exe --dry-run-save-only --duration-sec 15 --save-chunks .\chunks
 .\build\Release\grey-cardinal-agent.exe --config config.toml
 ```
+
+For a guided Windows validation run:
+
+```powershell
+.\scripts\windows\run_agent_capture_test.ps1 -Seconds 15
+```
+
+Play browser/system audio while the agent runs, then verify WAV chunks appear in `.\chunks` and can be played.
 
 ## Config
 
@@ -47,6 +66,7 @@ server_url = "http://localhost:8020"
 internal_token = "dev-internal-token"
 meeting_id = "demo-meeting"
 chunk_ms = 3000
+duration_sec = 0
 save_chunks = "./chunks"
 dry_run = false
 ```
@@ -83,10 +103,10 @@ The agent logs startup config, selected default render device, audio format, chu
 
 ## Installer
 
-Build Release first, install Inno Setup, then run:
+Install Inno Setup, then run:
 
 ```powershell
-iscc .\native\desktop-agent\installer\windows\grey-cardinal-agent.iss
+.\scripts\windows\build_installer.ps1
 ```
 
 The installer is per-user, creates a Start Menu shortcut, can optionally create a Desktop shortcut, and can optionally add an HKCU Run entry for auto-start.
@@ -98,4 +118,4 @@ The installer is per-user, creates a Start Menu shortcut, can optionally create 
 - Token mismatch: align `--token` with `INTERNAL_API_TOKEN`.
 - Docker not running: start Docker Desktop and rebuild the `full` profile.
 - Device format unsupported: common float32/PCM WASAPI mix formats are supported. Other formats should be converted in a future adapter/resampler pass.
-
+- Current MVP limitations: Windows WASAPI loopback is real; macOS/Linux adapters are planned stubs; mock ASR is the default server path; faster-whisper is optional; VAD and diarization are not implemented yet; chunks are mono PCM16 WAV at the captured sample rate unless a future resampler is added.

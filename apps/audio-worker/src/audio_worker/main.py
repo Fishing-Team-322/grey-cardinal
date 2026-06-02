@@ -23,6 +23,13 @@ def _validate_internal_token(value: str) -> None:
         raise HTTPException(status_code=401, detail="invalid internal token")
 
 
+def _validate_wav_payload(wav_bytes: bytes, audio_format: str) -> None:
+    if audio_format.strip().lower() != "wav":
+        raise HTTPException(status_code=415, detail="unsupported audio format")
+    if len(wav_bytes) < 44 or wav_bytes[0:4] != b"RIFF" or wav_bytes[8:12] != b"WAVE":
+        raise HTTPException(status_code=400, detail="invalid WAV payload")
+
+
 def _save_chunk(wav_bytes: bytes, meeting_id: str, chunk_seq: int) -> str | None:
     if not settings.save_chunks:
         return None
@@ -57,6 +64,8 @@ async def mock_transcript(
 
     event = TranscriptEvent(
         meeting_id=meeting_id,
+        speaker_id="unknown",
+        speaker_name=None,
         text=text,
         ts=datetime.now(timezone.utc),
         is_final=True,
@@ -79,12 +88,15 @@ async def receive_audio_chunk(
     wav_bytes = await request.body()
     if not wav_bytes:
         raise HTTPException(status_code=400, detail="empty audio chunk")
+    _validate_wav_payload(wav_bytes, x_audio_format)
 
     saved_path = _save_chunk(wav_bytes, x_meeting_id, x_chunk_seq)
     text = await asr_engine.transcribe_wav(wav_bytes)
 
     event = TranscriptEvent(
         meeting_id=x_meeting_id,
+        speaker_id="unknown",
+        speaker_name=None,
         text=text,
         ts=datetime.now(timezone.utc),
         is_final=True,
@@ -110,4 +122,3 @@ async def receive_audio_chunk(
         "text": text,
         "sent_to_brain": sent_to_brain,
     }
-

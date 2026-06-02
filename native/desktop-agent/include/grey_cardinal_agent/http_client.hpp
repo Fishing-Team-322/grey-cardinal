@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -25,10 +26,23 @@ struct HttpUploadResult {
     std::string error;
 };
 
-class HttpClient {
+struct AudioChunkRequestPreview {
+    std::string endpoint_path;
+    std::vector<std::pair<std::string, std::string>> headers;
+    std::string content_type = "audio/wav";
+};
+
+AudioChunkRequestPreview build_audio_chunk_request_preview(const AudioChunkUpload& upload);
+
+class IHttpClient {
 public:
-    HttpUploadResult post_audio_chunk(const AudioChunkUpload& upload) const;
+    virtual ~IHttpClient() = default;
+    virtual HttpUploadResult post_audio_chunk(const AudioChunkUpload& upload) const = 0;
+};
+
+class HttpClient final : public IHttpClient {
+public:
+    HttpUploadResult post_audio_chunk(const AudioChunkUpload& upload) const override;
 };
 
 } // namespace grey_cardinal_agent
-

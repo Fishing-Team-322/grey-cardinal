@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -15,6 +16,7 @@ namespace grey_cardinal_agent {
 class ChunkUploader {
 public:
     ChunkUploader(AgentConfig config, Logger& logger);
+    ChunkUploader(AgentConfig config, Logger& logger, IHttpClient& http_client);
 
     void handle_frame(const AudioFrame& frame);
     void flush();
@@ -26,7 +28,8 @@ private:
 
     AgentConfig config_;
     Logger& logger_;
-    HttpClient http_client_;
+    std::unique_ptr<HttpClient> owned_http_client_;
+    IHttpClient* http_client_ = nullptr;
     std::mutex mutex_;
     std::vector<std::byte> buffer_;
     AudioFormat current_format_;

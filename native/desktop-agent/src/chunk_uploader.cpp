@@ -14,7 +14,13 @@
 namespace grey_cardinal_agent {
 
 ChunkUploader::ChunkUploader(AgentConfig config, Logger& logger)
-    : config_(std::move(config)), logger_(logger) {}
+    : config_(std::move(config)),
+      logger_(logger),
+      owned_http_client_(std::make_unique<HttpClient>()),
+      http_client_(owned_http_client_.get()) {}
+
+ChunkUploader::ChunkUploader(AgentConfig config, Logger& logger, IHttpClient& http_client)
+    : config_(std::move(config)), logger_(logger), http_client_(&http_client) {}
 
 void ChunkUploader::handle_frame(const AudioFrame& frame) {
     if (frame.pcm.empty()) {
@@ -94,7 +100,7 @@ void ChunkUploader::upload_pcm_chunk(std::vector<std::byte> pcm, const AudioForm
     };
 
     for (int attempt = 1; attempt <= 3; ++attempt) {
-        const HttpUploadResult result = http_client_.post_audio_chunk(upload);
+        const HttpUploadResult result = http_client_->post_audio_chunk(upload);
         if (result.ok) {
             std::ostringstream message;
             message << "upload ok seq=" << seq << " status=" << result.status_code

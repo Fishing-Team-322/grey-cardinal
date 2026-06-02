@@ -74,7 +74,15 @@ int main(int argc, char** argv) {
         });
 
         logger.info("capture started; press Ctrl+C to stop");
+        const auto started_at = std::chrono::steady_clock::now();
         while (!g_stop_requested) {
+            if (config.duration_sec > 0) {
+                const auto elapsed = std::chrono::steady_clock::now() - started_at;
+                if (elapsed >= std::chrono::seconds(config.duration_sec)) {
+                    logger.info("duration reached; stopping capture");
+                    break;
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
 

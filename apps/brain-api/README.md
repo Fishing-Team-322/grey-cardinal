@@ -37,6 +37,7 @@ uvicorn brain_api.main:app --reload --port 8000
 | POST | `/internal/telegram/callback` | приём нажатия кнопки |
 | POST | `/internal/telegram/command` | приём команды |
 | POST | `/internal/audio/transcript` | приём transcript (P1 задел) |
+| GET | `/internal/audio/transcripts/recent` | internal/dev-only список последних transcript events |
 | GET | `/internal/tasks` | список активных задач |
 | GET | `/internal/tasks/{id}` | задача по UUID или `GC-12` |
 | WS | `/ws/events` | поток событий для dashboard |

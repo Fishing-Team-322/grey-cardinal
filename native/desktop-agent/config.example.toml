@@ -2,6 +2,6 @@ server_url = "http://localhost:8020"
 internal_token = "dev-internal-token"
 meeting_id = "demo-meeting"
 chunk_ms = 3000
+duration_sec = 0
 save_chunks = "./chunks"
 dry_run = false
-

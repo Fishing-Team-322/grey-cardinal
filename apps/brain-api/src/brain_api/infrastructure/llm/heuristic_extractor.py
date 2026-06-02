@@ -26,6 +26,13 @@ _TASK_STEMS = (
     "собери", "собрать", "протестир", "затащи", "доделай", "доделать",
 )
 
+_NON_TASK_INDICATOR_WORDS = {
+    "настроение",
+    "настроения",
+    "настроением",
+    "настроению",
+}
+
 _PRIORITY_HIGH = ("срочно", "asap", "критич", "немедленно", "горит")
 
 _WEEKDAYS = {
@@ -58,7 +65,7 @@ class HeuristicTaskExtractor:
     ) -> TaskExtractionResult:
         lowered = text.lower()
 
-        has_indicator = any(stem in lowered for stem in _TASK_STEMS)
+        has_indicator = _has_task_indicator(lowered)
         username = _USERNAME_RE.search(text)
         assignee = _extract_assignee(text, lowered, username, known_users)
 
@@ -96,6 +103,15 @@ class HeuristicTaskExtractor:
 # --------------------------------------------------------------------------- #
 # Вспомогательные функции
 # --------------------------------------------------------------------------- #
+def _has_task_indicator(lowered: str) -> bool:
+    for stem in _TASK_STEMS:
+        pattern = rf"\b{re.escape(stem)}[\w-]*"
+        for match in re.finditer(pattern, lowered):
+            if match.group(0) not in _NON_TASK_INDICATOR_WORDS:
+                return True
+    return False
+
+
 def _extract_assignee(
     text: str,
     lowered: str,

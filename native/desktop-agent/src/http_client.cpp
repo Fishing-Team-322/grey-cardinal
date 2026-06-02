@@ -127,6 +127,24 @@ std::string last_error_message() {
 
 } // namespace
 
+AudioChunkRequestPreview build_audio_chunk_request_preview(const AudioChunkUpload& upload) {
+    ParsedUrl parsed = parse_url(upload.server_url);
+
+    AudioChunkRequestPreview preview;
+    preview.endpoint_path = endpoint_path(parsed.path);
+    preview.headers = {
+        {"Content-Type", "audio/wav"},
+        {"X-Internal-Token", upload.internal_token},
+        {"X-Meeting-Id", upload.meeting_id},
+        {"X-Chunk-Seq", std::to_string(upload.chunk_seq)},
+        {"X-Audio-Format", "wav"},
+        {"X-Audio-Sample-Rate", std::to_string(upload.format.sample_rate)},
+        {"X-Audio-Channels", std::to_string(upload.format.channels)},
+        {"X-Audio-Bits-Per-Sample", std::to_string(upload.format.bits_per_sample)},
+    };
+    return preview;
+}
+
 HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) const {
 #if defined(_WIN32)
     HttpUploadResult result;
@@ -140,7 +158,8 @@ HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) co
     }
 
     const std::wstring host = widen_utf8(parsed.host);
-    const std::wstring path = widen_utf8(endpoint_path(parsed.path));
+    const AudioChunkRequestPreview request_preview = build_audio_chunk_request_preview(upload);
+    const std::wstring path = widen_utf8(request_preview.endpoint_path);
 
     WinHttpHandle session(WinHttpOpen(
         L"GreyCardinalAgent/0.1",
@@ -181,14 +200,9 @@ HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) co
     }
 
     std::ostringstream headers_ascii;
-    headers_ascii << "Content-Type: audio/wav\r\n"
-                  << "X-Internal-Token: " << upload.internal_token << "\r\n"
-                  << "X-Meeting-Id: " << upload.meeting_id << "\r\n"
-                  << "X-Chunk-Seq: " << upload.chunk_seq << "\r\n"
-                  << "X-Audio-Format: wav\r\n"
-                  << "X-Audio-Sample-Rate: " << upload.format.sample_rate << "\r\n"
-                  << "X-Audio-Channels: " << upload.format.channels << "\r\n"
-                  << "X-Audio-Bits-Per-Sample: " << upload.format.bits_per_sample << "\r\n";
+    for (const auto& [name, value] : request_preview.headers) {
+        headers_ascii << name << ": " << value << "\r\n";
+    }
 
     const std::wstring headers = widen_utf8(headers_ascii.str());
     const auto body_size = static_cast<DWORD>(upload.wav_bytes.size());
