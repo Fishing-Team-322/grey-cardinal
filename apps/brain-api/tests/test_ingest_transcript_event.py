@@ -30,7 +30,8 @@ async def test_non_final_transcript_is_saved_without_proposal(
         response = await IngestTranscriptEvent(uow, extractor, telegram, events, config).execute(
             _event(is_final=False)
         )
-    assert response.actions == []
+    assert response.proposal_created is False
+    assert response.telegram_notified is False
     assert await _count(session_factory, m.TranscriptEventModel) == 1
     assert await _count(session_factory, m.TaskProposalModel) == 0
     assert events.events[-1].event.value == "transcript_line"
@@ -44,8 +45,8 @@ async def test_final_transcript_creates_proposal_and_pushes_to_default_chat(
         response = await IngestTranscriptEvent(uow, extractor, telegram, events, config).execute(
             _event()
         )
-    assert len(response.actions) == 1
-    assert response.actions[0].chat_id == -100123456789
+    assert response.proposal_created is True
+    assert response.telegram_notified is True
     assert telegram.sent[-1][0] == -100123456789
     assert await _count(session_factory, m.TaskProposalModel) == 1
 
@@ -57,5 +58,6 @@ async def test_final_transcript_without_default_chat_has_no_telegram_action(
         response = await IngestTranscriptEvent(uow, extractor, telegram, events, config).execute(
             _event()
         )
-    assert response.actions == []
+    assert response.proposal_created is True
+    assert response.telegram_notified is False
     assert await _count(session_factory, m.TaskProposalModel) == 1

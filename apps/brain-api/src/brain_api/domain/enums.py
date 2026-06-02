@@ -61,6 +61,12 @@ class ReminderKind(StrEnum):
     stale = "stale"
 
 
+class MeetingStatus(StrEnum):
+    active = "active"
+    stopped = "stopped"
+    failed = "failed"
+
+
 # Человекочитаемые подписи статусов/приоритетов для русскоязычного UX.
 STATUS_LABELS_RU: dict[TaskStatus, str] = {
     TaskStatus.proposed: "Предложена",

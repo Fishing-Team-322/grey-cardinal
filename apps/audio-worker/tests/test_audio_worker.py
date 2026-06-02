@@ -3,10 +3,18 @@ from __future__ import annotations
 import io
 import wave
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from audio_worker import main as audio_main
+from grey_cardinal_contracts import (
+    MeetingStatus,
+    MeetingStatusResponse,
+    TranscriptIngestResponse,
+)
+
+NOW = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
 
 def tiny_wav() -> bytes:
@@ -25,7 +33,22 @@ class FakeBrainClient:
 
     async def send_transcript(self, event):
         self.events.append(event)
-        return True
+        return TranscriptIngestResponse(transcript_id="transcript-id")
+
+    async def start_meeting(self, request):
+        return MeetingStatusResponse(
+            public_id="MTG-1",
+            status=MeetingStatus.active,
+            started_at=NOW,
+        )
+
+    async def stop_meeting(self, meeting_public_id, request):
+        return MeetingStatusResponse(
+            public_id=meeting_public_id,
+            status=MeetingStatus.stopped,
+            started_at=NOW,
+            stopped_at=NOW,
+        )
 
 
 class FixedAsrEngine:
@@ -134,3 +157,31 @@ def test_audio_chunk_saves_wav_when_enabled(monkeypatch, tmp_path):
     saved = tmp_path / "meeting_save" / "chunk-000009.wav"
     assert saved.exists()
     assert saved.read_bytes()[0:4] == b"RIFF"
+
+
+def test_mock_transcript_sends_event(monkeypatch):
+    fake_brain = install_fakes(monkeypatch)
+    response = TestClient(audio_main.app).post(
+        "/mock/transcript",
+        json={"text": "Петя, подготовь оплату", "meeting_id": "MTG-1"},
+        headers={"X-Internal-Token": "test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent_to_brain"] is True
+    assert fake_brain.events[-1].meeting_id == "MTG-1"
+
+
+def test_mock_meeting_and_scenario(monkeypatch):
+    fake_brain = install_fakes(monkeypatch)
+    client = TestClient(audio_main.app)
+    headers = {"X-Internal-Token": "test-token"}
+
+    started = client.post("/mock/meeting/start", json={}, headers=headers)
+    scenario = client.post("/mock/scenario", json={"meeting_id": "MTG-1"}, headers=headers)
+    stopped = client.post("/mock/meeting/stop", json={"meeting_id": "MTG-1"}, headers=headers)
+
+    assert started.json()["meeting"]["public_id"] == "MTG-1"
+    assert scenario.json()["sent"] == 3
+    assert len(fake_brain.events) == 3
+    assert stopped.json()["meeting"]["status"] == "stopped"

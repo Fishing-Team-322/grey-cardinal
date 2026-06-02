@@ -26,7 +26,7 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         internal_api_token=os.getenv("INTERNAL_API_TOKEN", "dev-internal-token"),
-        brain_api_base_url=os.getenv("BRAIN_API_BASE_URL", "http://localhost:8010"),
+        brain_api_base_url=os.getenv("BRAIN_API_BASE_URL", "http://localhost:8000"),
         asr_provider=os.getenv("AUDIO_ASR_PROVIDER", "mock").strip().lower(),
         mock_text=os.getenv("AUDIO_MOCK_TEXT", "Петя, сделай оплату к четвергу"),
         save_chunks=_bool_env("AUDIO_WORKER_SAVE_CHUNKS", False),

@@ -4,17 +4,17 @@ Grey Cardinal превращает сообщения Telegram и финальн
 `brain-api` хранит lifecycle задач в PostgreSQL, а интеграция с доской по умолчанию работает
 через стабильный `MockBoardGateway`.
 
-## Архитектура P0
+## Архитектура P1
 
 ```text
 Telegram webhook -> telegram-bot -> brain-api -> PostgreSQL -> MockBoardGateway / YouGile
-audio-worker -> brain-api -> transcript -> proposal -> Telegram action
+audio-worker -> brain-api -> meeting -> transcript -> proposal -> Telegram action
 native desktop-agent -> audio-worker /audio/chunk
 ```
 
 - `telegram-bot` - тонкий transport adapter Telegram.
-- `audio-worker` - service-client `brain-api`; поддерживает mock transcript и WAV chunks.
-- `brain-api` - единственный владелец PostgreSQL и task lifecycle.
+- `audio-worker` - service-client `brain-api`; поддерживает mock meeting/scenario, transcript и WAV chunks.
+- `brain-api` - единственный владелец PostgreSQL, meeting lifecycle и task lifecycle.
 - `frontend-dashboard` - существующий websocket-клиент; на этом этапе функционально не менялся.
 - `native/desktop-agent` - дополнительный Windows WASAPI loopback-клиент для audio-worker.
 
@@ -34,6 +34,12 @@ curl http://localhost:8010/health
 ```bash
 docker compose --profile full up -d --build
 curl http://localhost:8020/health
+```
+
+Backend demo без dashboard:
+
+```bash
+docker compose --profile backend up -d --build
 ```
 
 ## Проверки
@@ -61,7 +67,8 @@ make test-agent
 ## Ручной smoke test
 
 Пошаговые `curl`-команды без реального Telegram находятся в
-[docs/04_P0_SMOKE_TEST.md](docs/04_P0_SMOKE_TEST.md).
+[docs/04_P0_SMOKE_TEST.md](docs/04_P0_SMOKE_TEST.md). P1 meeting/demo flow описан в
+[docs/06_P1_REAL_INTEGRATION_SPINE.md](docs/06_P1_REAL_INTEGRATION_SPINE.md).
 
 Для mock transcript через `audio-worker`:
 

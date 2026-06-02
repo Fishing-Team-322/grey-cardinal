@@ -8,14 +8,14 @@
 
 ## audio-worker
 
-Имеет `/health`, `/mock/transcript` и `/audio/chunk`. Отправляет общий `TranscriptEvent`
-в `brain-api` с `X-Internal-Token`. Реальный capture выполняется внешним native audio-agent.
-Worker не знает о proposal, confirmation и lifecycle задач.
+Имеет `/health`, mock meeting/scenario endpoints и `/audio/chunk`. Отправляет общий
+`TranscriptEvent` в `brain-api` с `X-Internal-Token`. Реальный capture выполняется
+внешним native audio-agent. Worker не знает о proposal, confirmation и lifecycle задач.
 
 ## brain-api
 
-Владеет PostgreSQL, extraction, proposal, confirmation, задачами, reminder/digest use cases,
-board adapters и websocket events.
+Владеет PostgreSQL, meeting/transcript lifecycle, extraction, proposal, confirmation,
+задачами, reminder/digest use cases, board adapters и websocket events.
 
 ## frontend-dashboard
 

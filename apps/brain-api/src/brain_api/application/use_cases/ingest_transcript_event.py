@@ -1,6 +1,6 @@
 """Use case: приём transcript-события (задел под audio-worker, P1).
 
-На P0: сохраняет событие, публикует websocket transcript_line, и — если из текста
+На P1: сохраняет событие, публикует websocket transcript_line, и — если из текста
 извлекается задача — создаёт proposal так же, как из Telegram-сообщения, и
 отправляет его в чат по умолчанию через telegram-bot.
 """
@@ -21,9 +21,9 @@ from brain_api.application.use_cases.send_deadline_reminders import _default_cha
 from brain_api.domain.entities import TranscriptEvent as TranscriptEntity
 from brain_api.domain.enums import TaskSource
 from grey_cardinal_contracts import (
-    ActionsResponse,
     EventName,
     KnownUser,
+    TranscriptIngestResponse,
     WebsocketEvent,
 )
 from grey_cardinal_contracts import (
@@ -46,16 +46,26 @@ class IngestTranscriptEvent:
         self._events = events
         self._config = config
 
-    async def execute(self, event: TranscriptEventContract) -> ActionsResponse:
+    async def execute(self, event: TranscriptEventContract) -> TranscriptIngestResponse:
         uow = self._uow
+        chat_id = await _default_chat_id(uow, self._config)
+        meeting = None
+        if event.meeting_id:
+            meeting = await uow.meetings.get_by_public_id(event.meeting_id)
+        if meeting is None:
+            meeting = await uow.meetings.get_active_for_chat(chat_id)
+
         entity = TranscriptEntity(
             id=uuid4(),
             meeting_id=event.meeting_id,
+            meeting_db_id=meeting.id if meeting else None,
             speaker_id=event.speaker_id,
             speaker_name=event.speaker_name,
             text=event.text,
             ts=event.ts,
             is_final=event.is_final,
+            confidence=event.confidence,
+            source=event.source.value,
             raw_json=event.raw or {},
         )
         await uow.transcripts.add(entity)
@@ -65,6 +75,7 @@ class IngestTranscriptEvent:
                 event=EventName.transcript_line,
                 payload={
                     "meeting_id": event.meeting_id,
+                    "meeting_public_id": meeting.public_id if meeting else None,
                     "speaker_name": event.speaker_name,
                     "text": event.text,
                     "is_final": event.is_final,
@@ -75,7 +86,10 @@ class IngestTranscriptEvent:
         # Извлекаем задачу только из финальных реплик.
         if not event.is_final:
             await uow.commit()
-            return ActionsResponse(actions=[])
+            return TranscriptIngestResponse(
+                transcript_id=str(entity.id),
+                meeting_public_id=meeting.public_id if meeting else None,
+            )
 
         known_users = [
             KnownUser(display_name=u.display_name, telegram_username=u.telegram_username)
@@ -89,9 +103,11 @@ class IngestTranscriptEvent:
         )
         if not extraction.has_task:
             await uow.commit()
-            return ActionsResponse(actions=[])
+            return TranscriptIngestResponse(
+                transcript_id=str(entity.id),
+                meeting_public_id=meeting.public_id if meeting else None,
+            )
 
-        chat_id = await _default_chat_id(uow)
         action = await create_proposal_with_confirmation(
             uow,
             self._events,
@@ -105,7 +121,13 @@ class IngestTranscriptEvent:
         await uow.commit()
 
         # Если есть чат по умолчанию — пушим proposal туда через telegram-bot.
+        notified = chat_id is not None
         if chat_id is not None:
             await self._telegram.send_message(chat_id, action.text, action.reply_markup)
 
-        return ActionsResponse(actions=[action] if chat_id is not None else [])
+        return TranscriptIngestResponse(
+            transcript_id=str(entity.id),
+            meeting_public_id=meeting.public_id if meeting else None,
+            proposal_created=True,
+            telegram_notified=notified,
+        )

@@ -2,7 +2,7 @@
 
 После P0 остаются:
 
-- проверка YouGile adapter на реальном workspace;
+- создать проект/доску/колонки YouGile и выполнить `make yougile-smoke`;
 - production auth и rotation internal token;
 - outbox/retry для board и Telegram side effects;
 - реальный ASR, VAD и diarization в audio pipeline;

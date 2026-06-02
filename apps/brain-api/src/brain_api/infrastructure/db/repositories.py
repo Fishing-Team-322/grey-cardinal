@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -19,6 +19,7 @@ from brain_api.domain.entities import (
     ChatMessage,
     Confirmation,
     DigestLog,
+    Meeting,
     Project,
     ReminderLog,
     Task,
@@ -30,6 +31,7 @@ from brain_api.domain.entities import (
 from brain_api.domain.enums import (
     BoardProvider,
     ConfirmationStatus,
+    MeetingStatus,
     ReminderKind,
     TaskPriority,
     TaskSource,
@@ -91,6 +93,24 @@ def _message(row: m.ChatMessageModel) -> ChatMessage:
         text=row.text,
         raw_json=row.raw_json or {},
         created_at=row.created_at,
+    )
+
+
+def _meeting(row: m.MeetingModel) -> Meeting:
+    return Meeting(
+        id=row.id,
+        public_id=row.public_id,
+        project_id=row.project_id,
+        telegram_chat_id=row.telegram_chat_id,
+        external_source=row.external_source,
+        title=row.title,
+        status=MeetingStatus(row.status),
+        started_at=row.started_at,
+        stopped_at=row.stopped_at,
+        created_by_user_id=row.created_by_user_id,
+        metadata=row.metadata_json or {},
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -209,12 +229,25 @@ class ProjectRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
-    async def ensure_default(self) -> Project:
+    async def ensure_default(self, name: str = "Hackathon Team") -> Project:
         row = await self._s.scalar(select(m.ProjectModel).order_by(m.ProjectModel.created_at))
         if row is None:
-            row = m.ProjectModel(id=uuid4(), name="Default")
+            row = m.ProjectModel(id=uuid4(), name=name)
             self._s.add(row)
             await self._s.flush()
+        elif row.name == "Default" and name:
+            row.name = name
+            await self._s.flush()
+            await self._s.refresh(row)
+        return _project(row)
+
+    async def set_default_chat(self, project_id: UUID, chat_id: UUID) -> Project:
+        row = await self._s.get(m.ProjectModel, project_id)
+        if row is None:
+            raise ValueError(f"Project {project_id} not found")
+        row.default_chat_id = chat_id
+        await self._s.flush()
+        await self._s.refresh(row)
         return _project(row)
 
 
@@ -270,6 +303,109 @@ class ChatRepositoryImpl:
     async def get(self, chat_id: UUID) -> TelegramChat | None:
         row = await self._s.get(m.TelegramChatModel, chat_id)
         return _chat(row) if row else None
+
+    async def list_for_project(self, project_id: UUID) -> list[TelegramChat]:
+        rows = await self._s.scalars(
+            select(m.TelegramChatModel)
+            .where(m.TelegramChatModel.project_id == project_id)
+            .order_by(m.TelegramChatModel.created_at)
+        )
+        return [_chat(row) for row in rows]
+
+
+class MeetingRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, meeting: Meeting) -> Meeting:
+        seq = int(meeting.public_id.removeprefix("MTG-"))
+        row = m.MeetingModel(
+            id=meeting.id,
+            seq=seq,
+            public_id=meeting.public_id,
+            project_id=meeting.project_id,
+            telegram_chat_id=meeting.telegram_chat_id,
+            external_source=meeting.external_source,
+            title=meeting.title,
+            status=meeting.status.value,
+            started_at=meeting.started_at,
+            stopped_at=meeting.stopped_at,
+            created_by_user_id=meeting.created_by_user_id,
+            metadata_json=meeting.metadata,
+        )
+        self._s.add(row)
+        await self._s.flush()
+        return _meeting(row)
+
+    async def get_by_public_id(self, public_id: str) -> Meeting | None:
+        row = await self._s.scalar(
+            select(m.MeetingModel).where(m.MeetingModel.public_id == public_id)
+        )
+        return _meeting(row) if row else None
+
+    async def get(self, meeting_id: UUID) -> Meeting | None:
+        row = await self._s.get(m.MeetingModel, meeting_id)
+        return _meeting(row) if row else None
+
+    async def get_active_for_chat(self, telegram_chat_id: int | None) -> Meeting | None:
+        statement = (
+            select(m.MeetingModel)
+            .outerjoin(
+                m.TelegramChatModel,
+                m.TelegramChatModel.id == m.MeetingModel.telegram_chat_id,
+            )
+            .where(m.MeetingModel.status == MeetingStatus.active.value)
+            .order_by(m.MeetingModel.started_at.desc())
+        )
+        if telegram_chat_id is not None:
+            statement = statement.where(
+                m.TelegramChatModel.telegram_chat_id == telegram_chat_id
+            )
+        row = await self._s.scalar(statement)
+        return _meeting(row) if row else None
+
+    async def list_recent(self, limit: int = 20) -> list[Meeting]:
+        rows = await self._s.scalars(
+            select(m.MeetingModel)
+            .order_by(m.MeetingModel.started_at.desc())
+            .limit(max(1, min(limit, 100)))
+        )
+        return [_meeting(row) for row in rows]
+
+    async def next_sequence(self) -> int:
+        current = await self._s.scalar(select(func.max(m.MeetingModel.seq)))
+        return (current or 0) + 1
+
+    async def update(self, meeting: Meeting) -> Meeting:
+        row = await self._s.get(m.MeetingModel, meeting.id)
+        if row is None:
+            raise ValueError(f"Meeting {meeting.id} not found")
+        row.status = meeting.status.value
+        row.stopped_at = meeting.stopped_at
+        row.metadata_json = meeting.metadata
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _meeting(row)
+
+    async def count_transcripts(self, meeting_id: UUID) -> int:
+        value = await self._s.scalar(
+            select(func.count())
+            .select_from(m.TranscriptEventModel)
+            .where(m.TranscriptEventModel.meeting_db_id == meeting_id)
+        )
+        return int(value or 0)
+
+    async def count_proposals(self, meeting_id: UUID) -> int:
+        value = await self._s.scalar(
+            select(func.count())
+            .select_from(m.TaskProposalModel)
+            .join(
+                m.TranscriptEventModel,
+                m.TranscriptEventModel.id == m.TaskProposalModel.source_transcript_id,
+            )
+            .where(m.TranscriptEventModel.meeting_db_id == meeting_id)
+        )
+        return int(value or 0)
 
 
 class MessageRepositoryImpl:
@@ -562,12 +698,15 @@ class TranscriptRepositoryImpl:
     async def add(self, event: TranscriptEvent) -> TranscriptEvent:
         row = m.TranscriptEventModel(
             id=event.id,
+            meeting_db_id=event.meeting_db_id,
             meeting_id=event.meeting_id,
             speaker_id=event.speaker_id,
             speaker_name=event.speaker_name,
             text=event.text,
             ts=event.ts,
             is_final=event.is_final,
+            confidence=event.confidence,
+            source=event.source,
             raw_json=event.raw_json,
         )
         self._s.add(row)
@@ -584,17 +723,68 @@ class TranscriptRepositoryImpl:
         return [
             TranscriptEvent(
                 id=row.id,
+                meeting_db_id=row.meeting_db_id,
                 meeting_id=row.meeting_id,
                 speaker_id=row.speaker_id,
                 speaker_name=row.speaker_name,
                 text=row.text,
                 ts=row.ts,
                 is_final=row.is_final,
+                confidence=row.confidence,
+                source=row.source,
                 raw_json=row.raw_json,
                 created_at=row.created_at,
             )
             for row in rows
         ]
+
+
+class DebugRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def counts(self) -> dict[str, int]:
+        models = {
+            "users": m.UserModel,
+            "telegram_chats": m.TelegramChatModel,
+            "meetings": m.MeetingModel,
+            "transcripts": m.TranscriptEventModel,
+            "task_proposals": m.TaskProposalModel,
+            "tasks": m.TaskModel,
+            "board_cards": m.BoardCardModel,
+        }
+        return {
+            name: int(
+                await self._s.scalar(select(func.count()).select_from(model)) or 0
+            )
+            for name, model in models.items()
+        }
+
+    async def reset_demo(self) -> dict[str, int]:
+        rows = await self._s.scalars(select(m.MeetingModel))
+        meeting_ids = [row.id for row in rows if (row.metadata_json or {}).get("demo")]
+        if not meeting_ids:
+            return {"meetings": 0, "transcripts": 0}
+        transcript_count = int(
+            await self._s.scalar(
+                select(func.count())
+                .select_from(m.TranscriptEventModel)
+                .where(m.TranscriptEventModel.meeting_db_id.in_(meeting_ids))
+            )
+            or 0
+        )
+        await self._s.execute(
+            delete(m.TranscriptEventModel).where(
+                m.TranscriptEventModel.meeting_db_id.in_(meeting_ids)
+            )
+        )
+        await self._s.execute(
+            delete(m.MeetingModel).where(m.MeetingModel.id.in_(meeting_ids))
+        )
+        return {
+            "meetings": len(meeting_ids),
+            "transcripts": transcript_count,
+        }
 
 
 class ReminderRepositoryImpl:
@@ -696,11 +886,13 @@ class SqlAlchemyUnitOfWork:
         self.projects = ProjectRepositoryImpl(session)
         self.chats = ChatRepositoryImpl(session)
         self.messages = MessageRepositoryImpl(session)
+        self.meetings = MeetingRepositoryImpl(session)
         self.proposals = ProposalRepositoryImpl(session)
         self.confirmations = ConfirmationRepositoryImpl(session)
         self.tasks = TaskRepositoryImpl(session)
         self.board_cards = BoardCardRepositoryImpl(session)
         self.transcripts = TranscriptRepositoryImpl(session)
+        self.debug = DebugRepositoryImpl(session)
         self.reminders = ReminderRepositoryImpl(session)
         self.digests = DigestRepositoryImpl(session)
         self.audit = AuditRepositoryImpl(session)

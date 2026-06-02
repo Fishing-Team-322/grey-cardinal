@@ -14,6 +14,13 @@ POST /internal/telegram/callback
 POST /internal/telegram/command
 POST /internal/audio/transcript
 GET  /internal/audio/transcripts/recent
+POST /internal/meetings/start
+POST /internal/meetings/{meeting_public_id}/stop
+GET  /internal/meetings/{meeting_public_id}
+GET  /internal/meetings/active
+GET  /internal/meetings/recent
+GET  /internal/debug/state
+GET  /internal/debug/health/dependencies
 GET  /internal/tasks
 GET  /internal/tasks/{task_id}
 GET  /ws/events
@@ -32,5 +39,11 @@ POST /internal/answer-callback
 ```text
 GET  /health
 POST /mock/transcript
+POST /mock/meeting/start
+POST /mock/meeting/stop
+POST /mock/scenario
 POST /audio/chunk
 ```
+
+`POST /internal/audio/transcript` возвращает `TranscriptIngestResponse`, а не
+Telegram actions. Debug endpoints доступны только при `APP_ENV=dev`.
