@@ -1,44 +1,38 @@
-# audio-worker (P0 — каркас)
+# Grey Cardinal Audio Worker
 
-На P0 это **только каркас** будущего аудио-сервиса. Реальный захват системного
-звука, ASR и VAD **не реализованы**. Цель — зафиксировать контракты и точку
-входа, чтобы P1 подключался без изменения brain-api.
+`audio-worker` accepts WAV chunks from the host-native desktop agent, runs a small ASR abstraction, and forwards `TranscriptEvent` payloads to `brain-api`.
 
-## Что есть на P0
+## Run with Docker
 
-* `GET /health` — healthcheck;
-* `POST /mock/transcript` — отправляет тестовое transcript-событие в brain-api
-  (`POST /internal/audio/transcript`), как будто это сказали на встрече;
-* CLI `python -m audio_worker.main --text "..."` — то же из консоли;
-* контракты в `audio_worker/contracts.py` (+ описание будущих P1-контрактов).
-
-## Контракт transcript-события
-
-```json
-{
-  "type": "transcript",
-  "meeting_id": "string",
-  "speaker_id": "string|null",
-  "speaker_name": "string|null",
-  "text": "string",
-  "ts": "ISO8601",
-  "is_final": true
-}
+```powershell
+docker compose --profile full up --build
+curl http://localhost:8020/health
 ```
 
-## Проверка задела (audio -> задача)
+## POST `/audio/chunk`
 
-```bash
-# brain-api должен быть запущен
-curl -X POST http://localhost:8020/mock/transcript \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"Петя, подготовь макет до завтра 18:00"}'
+Headers:
+
+- `X-Internal-Token`: must match `INTERNAL_API_TOKEN`
+- `X-Meeting-Id`: meeting id for the transcript event
+- `X-Chunk-Seq`: incrementing chunk number
+- `X-Audio-Format`: `wav`
+
+Body: `audio/wav` bytes.
+
+Smoke test:
+
+```powershell
+.\apps\audio-worker\scripts\send_mock_wav.ps1 -Server http://localhost:8020 -Token dev-internal-token -MeetingId demo-meeting
 ```
 
-brain-api сохранит transcript, опубликует websocket `transcript_line`, извлечёт
-задачу и создаст proposal (отправит его в чат по умолчанию, если он есть).
+## ASR settings
 
-## Будущее (P1)
+- `AUDIO_ASR_PROVIDER=mock|faster_whisper`
+- `AUDIO_MOCK_TEXT=Петя, сделай оплату к четвергу`
+- `AUDIO_WORKER_SAVE_CHUNKS=false`
+- `AUDIO_WORKER_CHUNKS_DIR=/tmp/grey-cardinal-audio-chunks`
+- `AUDIO_FASTER_WHISPER_MODEL=base`
 
-System audio capture (virtual cable) → VAD → ASR → диаризация → `TranscriptEvent`
-→ brain-api → proposal → board. См. `docs/08_NEXT_STAGES.md`.
+`faster-whisper` is optional. The worker imports it only when `AUDIO_ASR_PROVIDER=faster_whisper`, so the default mock mode stays lightweight.
+
