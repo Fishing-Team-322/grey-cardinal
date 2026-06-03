@@ -31,13 +31,20 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 34px;
   border: 1px solid #c9d0d8;
   border-radius: 6px;
   padding: 6px 8px;
   background: #fff;
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
+  color: #344050;
 }
 
 label {
@@ -112,6 +119,26 @@ h2 {
   border-radius: 999px;
   color: #0f5132;
   background: #d1e7dd;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #667383;
+  font-size: 13px;
+}
+
+.kv strong {
+  color: #18202a;
+  font-weight: 600;
+  text-align: right;
 }
 
 .xp {

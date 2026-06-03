@@ -183,6 +183,15 @@ async def ingest_desktop_transcript(
 ) -> TranscriptIngestResponse:
     if request.capture_mode != CaptureMode.microphone:
         raise ValueError("desktop transcripts must use microphone capture mode")
+    if request.payload_source_user_id and request.payload_source_user_id != str(identity.user.id):
+        raise ValueError("desktop transcript user_id does not match authenticated identity")
+    if request.payload_source_device_id and request.payload_source_device_id != str(identity.device_id):
+        raise ValueError("desktop transcript device_id does not match authenticated identity")
+    if (
+        request.payload_source_client_session_id
+        and request.payload_source_client_session_id != str(identity.client_session_id)
+    ):
+        raise ValueError("desktop transcript client_session_id does not match authenticated identity")
 
     meeting = await _ensure_meeting(uow, config, request.meeting_id, identity.user.id)
     ts = request.ts or config.now()

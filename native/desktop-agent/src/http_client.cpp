@@ -60,7 +60,7 @@ ParsedUrl parse_url(const std::string& url) {
     return parsed;
 }
 
-std::string endpoint_path(std::string base_path) {
+std::string endpoint_path(std::string base_path, const std::string& suffix) {
     if (base_path.empty()) {
         base_path = "/";
     }
@@ -68,9 +68,9 @@ std::string endpoint_path(std::string base_path) {
         base_path.pop_back();
     }
     if (base_path == "/") {
-        return "/audio/chunk";
+        return suffix;
     }
-    return base_path + "/audio/chunk";
+    return base_path + suffix;
 }
 
 #if defined(_WIN32)
@@ -123,43 +123,26 @@ std::string last_error_message() {
     output << "WinHTTP error " << error;
     return output.str();
 }
-#endif
 
-} // namespace
-
-AudioChunkRequestPreview build_audio_chunk_request_preview(const AudioChunkUpload& upload) {
-    ParsedUrl parsed = parse_url(upload.server_url);
-
-    AudioChunkRequestPreview preview;
-    preview.endpoint_path = endpoint_path(parsed.path);
-    preview.headers = {
-        {"Content-Type", "audio/wav"},
-        {"X-Internal-Token", upload.internal_token},
-        {"X-Meeting-Id", upload.meeting_id},
-        {"X-Chunk-Seq", std::to_string(upload.chunk_seq)},
-        {"X-Audio-Format", "wav"},
-        {"X-Audio-Sample-Rate", std::to_string(upload.format.sample_rate)},
-        {"X-Audio-Channels", std::to_string(upload.format.channels)},
-        {"X-Audio-Bits-Per-Sample", std::to_string(upload.format.bits_per_sample)},
-    };
-    return preview;
-}
-
-HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) const {
-#if defined(_WIN32)
+HttpUploadResult winhttp_post(
+    const std::string& server_url,
+    const std::string& endpoint,
+    const std::vector<std::pair<std::string, std::string>>& headers,
+    const void* body,
+    DWORD body_size
+) {
     HttpUploadResult result;
 
     ParsedUrl parsed;
     try {
-        parsed = parse_url(upload.server_url);
+        parsed = parse_url(server_url);
     } catch (const std::exception& exc) {
         result.error = exc.what();
         return result;
     }
 
     const std::wstring host = widen_utf8(parsed.host);
-    const AudioChunkRequestPreview request_preview = build_audio_chunk_request_preview(upload);
-    const std::wstring path = widen_utf8(request_preview.endpoint_path);
+    const std::wstring path = widen_utf8(endpoint);
 
     WinHttpHandle session(WinHttpOpen(
         L"GreyCardinalAgent/0.1",
@@ -200,19 +183,18 @@ HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) co
     }
 
     std::ostringstream headers_ascii;
-    for (const auto& [name, value] : request_preview.headers) {
+    for (const auto& [name, value] : headers) {
         headers_ascii << name << ": " << value << "\r\n";
     }
 
-    const std::wstring headers = widen_utf8(headers_ascii.str());
-    const auto body_size = static_cast<DWORD>(upload.wav_bytes.size());
-    auto* body = reinterpret_cast<void*>(const_cast<std::byte*>(upload.wav_bytes.data()));
+    const std::wstring wide_headers = widen_utf8(headers_ascii.str());
+    void* mutable_body = const_cast<void*>(body);
 
     if (!WinHttpSendRequest(
             request.handle,
-            headers.c_str(),
-            static_cast<DWORD>(headers.size()),
-            body,
+            wide_headers.c_str(),
+            static_cast<DWORD>(wide_headers.size()),
+            mutable_body,
             body_size,
             body_size,
             0
@@ -261,6 +243,83 @@ HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) co
     }
 
     return result;
+}
+#endif
+
+} // namespace
+
+AudioChunkRequestPreview build_audio_chunk_request_preview(const AudioChunkUpload& upload) {
+    ParsedUrl parsed = parse_url(upload.server_url);
+
+    AudioChunkRequestPreview preview;
+    preview.endpoint_path = endpoint_path(parsed.path, "/audio/chunk");
+    preview.headers = {
+        {"Content-Type", "audio/wav"},
+        {"X-Internal-Token", upload.internal_token},
+        {"X-Meeting-Id", upload.meeting_id},
+        {"X-Chunk-Seq", std::to_string(upload.chunk_seq)},
+        {"X-Audio-Format", "wav"},
+        {"X-Audio-Sample-Rate", std::to_string(upload.format.sample_rate)},
+        {"X-Audio-Channels", std::to_string(upload.format.channels)},
+        {"X-Audio-Bits-Per-Sample", std::to_string(upload.format.bits_per_sample)},
+    };
+    return preview;
+}
+
+DesktopTranscriptRequestPreview build_desktop_transcript_request_preview(
+    const DesktopTranscriptUpload& upload
+) {
+    ParsedUrl parsed = parse_url(upload.server_url);
+
+    DesktopTranscriptRequestPreview preview;
+    preview.endpoint_path = endpoint_path(parsed.path, "/desktop/transcripts");
+    preview.body = build_desktop_transcript_payload(upload);
+    preview.headers = {
+        {"Content-Type", "application/json"},
+        {"X-Internal-Token", upload.internal_token},
+        {"X-GC-User-Id", upload.user_id},
+        {"X-GC-Device-Id", upload.device_id},
+        {"X-GC-Client-Session-Id", upload.client_session_id},
+    };
+    return preview;
+}
+
+HttpUploadResult HttpClient::post_audio_chunk(const AudioChunkUpload& upload) const {
+#if defined(_WIN32)
+    const AudioChunkRequestPreview request_preview = build_audio_chunk_request_preview(upload);
+    const auto body_size = static_cast<DWORD>(upload.wav_bytes.size());
+    const void* body = upload.wav_bytes.empty() ? nullptr : upload.wav_bytes.data();
+    return winhttp_post(
+        upload.server_url,
+        request_preview.endpoint_path,
+        request_preview.headers,
+        body,
+        body_size
+    );
+#else
+    (void)upload;
+    return {
+        false,
+        0,
+        {},
+        "HTTP upload is not implemented for this platform yet"
+    };
+#endif
+}
+
+HttpUploadResult HttpClient::post_desktop_transcript(const DesktopTranscriptUpload& upload) const {
+#if defined(_WIN32)
+    const DesktopTranscriptRequestPreview request_preview =
+        build_desktop_transcript_request_preview(upload);
+    const auto body_size = static_cast<DWORD>(request_preview.body.size());
+    const void* body = request_preview.body.empty() ? nullptr : request_preview.body.data();
+    return winhttp_post(
+        upload.server_url,
+        request_preview.endpoint_path,
+        request_preview.headers,
+        body,
+        body_size
+    );
 #else
     (void)upload;
     return {

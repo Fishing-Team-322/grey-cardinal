@@ -1,6 +1,7 @@
 #pragma once
 
 #include "grey_cardinal_agent/audio_frame.hpp"
+#include "grey_cardinal_agent/desktop_transcript.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -34,15 +35,28 @@ struct AudioChunkRequestPreview {
 
 AudioChunkRequestPreview build_audio_chunk_request_preview(const AudioChunkUpload& upload);
 
+struct DesktopTranscriptRequestPreview {
+    std::string endpoint_path;
+    std::vector<std::pair<std::string, std::string>> headers;
+    std::string content_type = "application/json";
+    std::string body;
+};
+
+DesktopTranscriptRequestPreview build_desktop_transcript_request_preview(
+    const DesktopTranscriptUpload& upload
+);
+
 class IHttpClient {
 public:
     virtual ~IHttpClient() = default;
     virtual HttpUploadResult post_audio_chunk(const AudioChunkUpload& upload) const = 0;
+    virtual HttpUploadResult post_desktop_transcript(const DesktopTranscriptUpload& upload) const = 0;
 };
 
 class HttpClient final : public IHttpClient {
 public:
     HttpUploadResult post_audio_chunk(const AudioChunkUpload& upload) const override;
+    HttpUploadResult post_desktop_transcript(const DesktopTranscriptUpload& upload) const override;
 };
 
 } // namespace grey_cardinal_agent

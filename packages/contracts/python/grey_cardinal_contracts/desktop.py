@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .tasks import TaskDTO
-from .transcripts import CaptureMode
+from .transcripts import CaptureMode, SpeakerIdentitySource, TranscriptSourceKind
 
 
 class DesktopClientIdentity(BaseModel):
@@ -100,6 +100,71 @@ class DesktopTranscriptRequest(BaseModel):
     vad_confidence: float | None = None
     duration_ms: int | None = None
     raw: dict[str, object] = Field(default_factory=dict)
+    payload_source_kind: TranscriptSourceKind | None = Field(default=None, exclude=True)
+    payload_source_user_id: str | None = Field(default=None, exclude=True)
+    payload_source_device_id: str | None = Field(default=None, exclude=True)
+    payload_source_client_session_id: str | None = Field(default=None, exclude=True)
+    payload_speaker_identity_source: SpeakerIdentitySource | None = Field(
+        default=None, exclude=True
+    )
+    payload_speaker_identity_confidence: float | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_transcript_event_v2_shape(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        if "source" not in value and "speaker" not in value and "asr" not in value and "audio" not in value:
+            return value
+
+        source = value.get("source") if isinstance(value.get("source"), dict) else {}
+        speaker = value.get("speaker") if isinstance(value.get("speaker"), dict) else {}
+        asr = value.get("asr") if isinstance(value.get("asr"), dict) else {}
+        audio = value.get("audio") if isinstance(value.get("audio"), dict) else {}
+        raw = value.get("raw") if isinstance(value.get("raw"), dict) else {}
+
+        return {
+            "meeting_id": value.get("meeting_id"),
+            "text": value.get("text"),
+            "ts": value.get("ts"),
+            "is_final": value.get("is_final", True),
+            "microphone_id": source.get("microphone_id") or value.get("microphone_id") or "default_input",
+            "capture_mode": source.get("capture_mode") or audio.get("source") or value.get("capture_mode") or CaptureMode.microphone,
+            "asr_provider": asr.get("provider") or value.get("asr_provider") or "mock",
+            "asr_confidence": asr.get("confidence", value.get("asr_confidence")),
+            "vad_confidence": audio.get("vad_confidence", value.get("vad_confidence")),
+            "duration_ms": audio.get("duration_ms", value.get("duration_ms")),
+            "raw": raw,
+            "payload_source_kind": source.get("kind"),
+            "payload_source_user_id": source.get("user_id"),
+            "payload_source_device_id": source.get("device_id"),
+            "payload_source_client_session_id": source.get("client_session_id"),
+            "payload_speaker_identity_source": speaker.get("identity_source"),
+            "payload_speaker_identity_confidence": speaker.get("identity_confidence"),
+        }
+
+    @model_validator(mode="after")
+    def validate_transcript_event_v2_identity(self) -> DesktopTranscriptRequest:
+        if self.payload_source_kind is None:
+            return self
+        if self.payload_source_kind != TranscriptSourceKind.desktop_app:
+            raise ValueError("desktop transcripts require desktop_app source")
+        missing = [
+            name
+            for name, value in (
+                ("user_id", self.payload_source_user_id),
+                ("device_id", self.payload_source_device_id),
+                ("client_session_id", self.payload_source_client_session_id),
+            )
+            if value in (None, "")
+        ]
+        if missing:
+            raise ValueError("desktop transcripts require " + ", ".join(missing))
+        if self.payload_speaker_identity_source != SpeakerIdentitySource.authenticated_client:
+            raise ValueError("desktop transcripts require authenticated_client speaker")
+        if self.payload_speaker_identity_confidence != 1.0:
+            raise ValueError("authenticated_client identity requires confidence 1.0")
+        return self
 
 
 class DesktopTaskListResponse(BaseModel):

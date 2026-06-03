@@ -7,7 +7,11 @@ include(cmake/PlatformOptions.cmake)
 include(CTest)
 
 add_library(grey-cardinal-agent-core STATIC
+    src/asr_provider.cpp
+    src/audio_metrics.cpp
     src/config.cpp
+    src/desktop_transcript.cpp
+    src/desktop_transcript_uploader.cpp
     src/logger.cpp
     src/wav_writer.cpp
     src/http_client.cpp

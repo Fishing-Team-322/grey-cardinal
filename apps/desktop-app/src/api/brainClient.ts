@@ -14,6 +14,19 @@ export type RegisterDeviceInput = {
   app_version?: string;
 };
 
+export type MeetingParticipant = {
+  id: string;
+  meeting_id: string;
+  user_id: string;
+  display_name?: string | null;
+  device_id?: string | null;
+  client_session_id?: string | null;
+  status: "joined" | "left" | "disconnected";
+  joined_at: string;
+  left_at?: string | null;
+  last_seen_at?: string | null;
+};
+
 export type DesktopTask = {
   id: string;
   public_id: string;
@@ -39,8 +52,32 @@ export class BrainClient {
     return this.post("/desktop/devices/register", input);
   }
 
-  async joinMeeting(identity: DesktopIdentity, meetingId: string): Promise<unknown> {
-    return this.post(`/desktop/meetings/${encodeURIComponent(meetingId)}/join`, {}, identity);
+  async startSession(identity: DesktopIdentity): Promise<{ client_session_id: string; status: string }> {
+    return this.post(
+      "/desktop/sessions/start",
+      {
+        user_id: identity.user_id,
+        device_id: identity.device_id,
+        workspace_id: identity.workspace_id ?? null
+      },
+      identity
+    );
+  }
+
+  async joinMeeting(identity: DesktopIdentity, meetingId: string): Promise<MeetingParticipant> {
+    return this.post(
+      `/desktop/meetings/${encodeURIComponent(meetingId)}/join`,
+      { display_name: identity.display_name, metadata: { app: "desktop-app", version: "0.1.0" } },
+      identity
+    );
+  }
+
+  async leaveMeeting(identity: DesktopIdentity, meetingId: string): Promise<MeetingParticipant> {
+    return this.post(
+      `/desktop/meetings/${encodeURIComponent(meetingId)}/leave`,
+      { reason: "desktop_app_leave" },
+      identity
+    );
   }
 
   async heartbeat(identity: DesktopIdentity, meetingId?: string): Promise<unknown> {
@@ -56,14 +93,34 @@ export class BrainClient {
       "/desktop/transcripts",
       {
         meeting_id: meetingId,
+        workspace_id: identity.workspace_id ?? null,
+        source: {
+          kind: "desktop_app",
+          user_id: identity.user_id,
+          device_id: identity.device_id,
+          client_session_id: identity.client_session_id,
+          microphone_id: "mock_microphone",
+          capture_mode: "microphone",
+          platform: "windows",
+          app_version: "0.1.0"
+        },
+        speaker: {
+          resolved_user_id: identity.user_id,
+          resolved_name: identity.display_name,
+          identity_source: "authenticated_client",
+          identity_confidence: 1.0
+        },
         text,
         is_final: true,
-        microphone_id: "mock_microphone",
-        capture_mode: "microphone",
-        asr_provider: "mock",
-        asr_confidence: 0.91,
-        vad_confidence: 0.88,
-        duration_ms: 3200
+        asr: {
+          provider: "mock",
+          confidence: 1.0
+        },
+        audio: {
+          source: "microphone",
+          duration_ms: 3200
+        },
+        raw: { ui_manual_send: true }
       },
       identity
     );

@@ -1,6 +1,11 @@
 # Grey Cardinal Desktop Agent
 
-The desktop agent is a thin host-native audio client. The architecture default is now `microphone`, but this native C++ MVP still implements only the legacy Windows WASAPI loopback adapter. That adapter is explicitly `system_loopback_experimental` and must not be used as source of truth for speaker identity.
+The desktop agent is a thin host-native audio client for the desktop-first flow.
+The v0 Windows path captures the real default microphone, saves/debugs WAV chunks,
+runs mock ASR over those chunks, and posts trusted desktop transcripts to
+`brain-api` `/desktop/transcripts`. The legacy WASAPI render loopback path remains
+available as `system_loopback_experimental` and must not be used as source of
+truth for speaker identity.
 
 P0 is Windows. macOS and Linux adapter stubs are present under `platform/macos` and `platform/linux`.
 
@@ -24,7 +29,7 @@ ctest --test-dir build --output-on-failure -C Debug
 
 ## Run
 
-Start the Docker pipeline first:
+Start `brain-api` first:
 
 ```powershell
 docker compose --profile full up --build
@@ -34,64 +39,89 @@ Then run the agent in another terminal:
 
 ```powershell
 .\build\Release\grey-cardinal-agent.exe `
-  --capture-mode system_loopback_experimental `
-  --server http://localhost:8020 `
+  --capture-mode microphone `
+  --server http://localhost:8010 `
   --token dev-internal-token `
-  --meeting-id demo-meeting `
+  --user-id <uuid> `
+  --device-id <uuid> `
+  --client-session-id <uuid> `
+  --display-name "Петя" `
+  --meeting-id MTG-1 `
   --save-chunks .\chunks
 ```
 
 Other useful commands:
 
 ```powershell
-.\build\Release\grey-cardinal-agent.exe --list-devices
-.\build\Release\grey-cardinal-agent.exe --capture-mode system_loopback_experimental --dry-run --save-chunks .\chunks
-.\build\Release\grey-cardinal-agent.exe --capture-mode system_loopback_experimental --dry-run-save-only --duration-sec 15 --save-chunks .\chunks
+.\build\Release\grey-cardinal-agent.exe --list-input-devices
+.\build\Release\grey-cardinal-agent.exe --capture-mode microphone --duration-sec 10 --save-chunks C:\Temp\gc-mic --dry-run
 .\build\Release\grey-cardinal-agent.exe --config config.toml
 ```
 
 For a guided Windows validation run:
 
 ```powershell
-.\scripts\windows\run_agent_capture_test.ps1 -Seconds 15
+.\scripts\windows\record_mic_test.ps1
 ```
 
-Play browser/system audio while the agent runs, then verify WAV chunks appear in `.\chunks` and can be played.
+Speak while the agent runs, then verify WAV chunks appear in
+`C:\Temp\GreyCardinal\mic-test` and can be played.
 
 ## Config
 
-Copy `config.example.toml` to `config.toml`:
+The default Windows config path is:
 
-```toml
-server_url = "http://localhost:8020"
-internal_token = "dev-internal-token"
-meeting_id = "demo-meeting"
-capture_mode = "microphone"
-chunk_ms = 3000
-duration_sec = 0
-save_chunks = "./chunks"
-dry_run = false
+```text
+%LOCALAPPDATA%\GreyCardinal\Agent\config.toml
 ```
 
-The parser is intentionally small and supports the simple TOML-style `key = value` fields above.
+Example:
+
+```toml
+brain_api_url = "http://localhost:8010"
+internal_token = "dev-internal-token"
+
+user_id = ""
+device_id = ""
+client_session_id = ""
+workspace_id = ""
+display_name = ""
+meeting_id = "MTG-1"
+
+capture_mode = "microphone"
+input_device_id = ""
+chunk_ms = 3000
+asr_provider = "mock"
+mock_phrases = [
+  "Я подготовлю оплату до завтра 18:00",
+  "Беру websocket на себя до пятницы",
+  "Аня, проверь интеграцию с YouGile сегодня вечером"
+]
+```
+
+CLI flags override config values.
 
 ## Upload Contract
 
-The agent sends:
+Microphone desktop mode sends:
 
 ```text
-POST {server_url}/audio/chunk
-Content-Type: audio/wav
+POST {brain_api_url}/desktop/transcripts
+Content-Type: application/json
 X-Internal-Token: <token>
-X-Meeting-Id: <meeting_id>
-X-Chunk-Seq: <seq>
-X-Audio-Format: wav
-X-Audio-Sample-Rate: <sample_rate>
-X-Audio-Channels: 1
-X-Audio-Bits-Per-Sample: 16
+X-GC-User-Id: <user_id>
+X-GC-Device-Id: <device_id>
+X-GC-Client-Session-Id: <client_session_id>
 ```
 
-For P0 the Windows adapter converts the WASAPI mix format to mono PCM16 WAV at the device sample rate. Resampling to 16 kHz is a planned improvement behind the existing `AudioFrame`/`ChunkUploader` boundary.
+The JSON body is TranscriptEvent v2-shaped and includes `source.kind=desktop_app`,
+`speaker.identity_source=authenticated_client`, `identity_confidence=1.0`,
+`asr.provider=mock`, and microphone audio metadata. The server resolves trusted
+speaker identity from the headers/session and rejects non-microphone desktop
+capture.
+
+`system_loopback_experimental` still uses the legacy `/audio/chunk` upload path
+for compatibility with the old audio-worker validation flow.
 
 ## Logs
 
@@ -101,7 +131,9 @@ Windows logs are appended to:
 %LOCALAPPDATA%\GreyCardinal\Agent\logs\agent.log
 ```
 
-The agent logs startup config, selected default render device, audio format, chunk creation, upload responses, server errors, and capture errors. It never logs raw audio.
+The agent logs startup config, selected default input device, audio format,
+`mic_rms=...` per chunk, saved WAV paths, upload responses, server errors, and
+capture errors. It never logs raw audio text beyond mock ASR phrases.
 
 ## Installer
 
@@ -115,10 +147,9 @@ The installer is per-user, creates a Start Menu shortcut, can optionally create 
 
 ## Troubleshooting
 
-- No system audio: verify Windows is playing through the default render device and run `--list-devices`.
-- Server unavailable: confirm Docker is running and `curl http://localhost:8020/health` returns ok.
+- No microphone audio: verify Windows microphone permissions/input level and run `--list-input-devices`.
+- Server unavailable: confirm brain-api is running and `curl http://localhost:8010/health` returns ok.
 - Token mismatch: align `--token` with `INTERNAL_API_TOKEN`.
 - Docker not running: start Docker Desktop and rebuild the `full` profile.
-- Default microphone mode: native C++ microphone capture is not implemented yet; use `apps/desktop-app` mock microphone flow for desktop-first validation.
-- Device format unsupported: common float32/PCM WASAPI mix formats are supported in `system_loopback_experimental`. Other formats should be converted in a future adapter/resampler pass.
-- Current MVP limitations: Windows WASAPI loopback is real; macOS/Linux adapters are planned stubs; mock ASR is the default server path; faster-whisper is optional; VAD and diarization are not implemented yet; chunks are mono PCM16 WAV at the captured sample rate unless a future resampler is added.
+- Device format unsupported: common float32/PCM WASAPI mix formats are converted to mono PCM16. Other formats should be converted in a future adapter/resampler pass.
+- Current MVP limitations: Windows microphone capture is real; ASR is mock by default; faster-whisper/SpeechKit are placeholders; VAD and diarization are not implemented yet; chunks are mono PCM16 WAV at the captured sample rate unless a future resampler is added.
