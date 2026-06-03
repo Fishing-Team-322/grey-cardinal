@@ -1,0 +1,262 @@
+/* =========================================================================
+   RotFront — Color & Type Tokens
+   Federated intelligence platform · dark SOC / investigation aesthetic
+   ========================================================================= */
+
+/* ---- Fonts ----------------------------------------------------------------
+   Primary UI:  IBM Plex Sans   (geometric humanist — IBM Carbon foundation)
+   Data / mono: IBM Plex Mono   (tabular, evidence keys, IDs, hashes)
+   Report long-form: IBM Plex Serif (printed PDF reports, executive summary)
+
+   All loaded from Google Fonts. If self-hosting later, drop ttf/woff2 in
+   /fonts and swap the @import for @font-face declarations.
+--------------------------------------------------------------------------- */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600;700&display=swap");
+
+:root {
+  /* ─── Brand / accent ──────────────────────────────────────────────────── */
+  --rf-crimson:        #c8253a;   /* primary accent — destructive, urgent, brand */
+  --rf-crimson-hi:     #e23a52;   /* hover / focus */
+  --rf-crimson-lo:     #8c1825;   /* pressed / deep */
+  --rf-crimson-wash:   rgba(200, 37, 58, 0.12); /* tinted background */
+
+  /* ─── Graphite surfaces (layered dark) ────────────────────────────────── */
+  --rf-bg-0:           #0a0b0d;   /* page — near black */
+  --rf-bg-1:           #111317;   /* primary surface (cards, panels) */
+  --rf-bg-2:           #181b21;   /* raised surface, table rows */
+  --rf-bg-3:           #21252c;   /* hover, input fields */
+  --rf-bg-4:           #2b3038;   /* pressed, selected, popovers */
+
+  /* ─── Borders / dividers ──────────────────────────────────────────────── */
+  --rf-line-1:         #1d2128;   /* hairline divider */
+  --rf-line-2:         #2a2f38;   /* default border */
+  --rf-line-3:         #3a414c;   /* hover border, focus ring base */
+  --rf-line-focus:     #c8253a;   /* focused input border */
+
+  /* ─── Foreground neutrals ─────────────────────────────────────────────── */
+  --rf-fg-0:           #f4f5f7;   /* highest emphasis — headings */
+  --rf-fg-1:           #d8dbe1;   /* body text */
+  --rf-fg-2:           #9aa0ad;   /* secondary, captions, labels */
+  --rf-fg-3:           #6c7280;   /* tertiary, hints, placeholders */
+  --rf-fg-4:           #474c56;   /* disabled, deep mute */
+
+  /* ─── Semantic status colors ──────────────────────────────────────────── */
+  /* Critical / error  — used sparingly, distinct from brand crimson */
+  --rf-danger:         #e5484d;
+  --rf-danger-bg:      rgba(229, 72, 77, 0.10);
+  --rf-danger-line:    rgba(229, 72, 77, 0.32);
+
+  /* Warning */
+  --rf-warn:           #d68b1c;
+  --rf-warn-bg:        rgba(214, 139, 28, 0.10);
+  --rf-warn-line:      rgba(214, 139, 28, 0.32);
+
+  /* Success / running / healthy */
+  --rf-ok:             #3da37a;
+  --rf-ok-bg:          rgba(61, 163, 122, 0.10);
+  --rf-ok-line:        rgba(61, 163, 122, 0.32);
+
+  /* Informational / queued */
+  --rf-info:           #3b82c4;
+  --rf-info-bg:        rgba(59, 130, 196, 0.10);
+  --rf-info-line:      rgba(59, 130, 196, 0.32);
+
+  /* Neutral / muted state */
+  --rf-mute:           #6c7280;
+  --rf-mute-bg:        rgba(108, 114, 128, 0.12);
+  --rf-mute-line:      rgba(108, 114, 128, 0.30);
+
+  /* ─── Evidence strength gradient (0–1) ────────────────────────────────── */
+  --rf-ev-0:           #474c56;   /* unverified */
+  --rf-ev-1:           #6c7280;
+  --rf-ev-2:           #8a7a3e;
+  --rf-ev-3:           #b08a2a;
+  --rf-ev-4:           #6f9c5a;
+  --rf-ev-5:           #3da37a;   /* corroborated, high confidence */
+
+  /* ─── Typography families ─────────────────────────────────────────────── */
+  --rf-font-sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --rf-font-mono:  "IBM Plex Mono", "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --rf-font-serif: "IBM Plex Serif", "Source Serif Pro", Georgia, "Times New Roman", serif;
+
+  /* ─── Type scale (UI density: compact) ────────────────────────────────── */
+  --rf-fs-micro:   10px;   /* uppercase eyebrow, badge */
+  --rf-fs-xs:      11px;   /* table meta, timestamps */
+  --rf-fs-sm:      12px;   /* dense table body, captions */
+  --rf-fs-base:    13px;   /* default UI body */
+  --rf-fs-md:      14px;   /* prominent body, form labels */
+  --rf-fs-lg:      16px;   /* section subheading */
+  --rf-fs-xl:      18px;   /* H3 */
+  --rf-fs-2xl:     22px;   /* H2 */
+  --rf-fs-3xl:     28px;   /* H1 / page title */
+  --rf-fs-4xl:     36px;   /* report title, KPI hero */
+  --rf-fs-5xl:     48px;   /* dashboard hero metric */
+
+  /* ─── Line heights ────────────────────────────────────────────────────── */
+  --rf-lh-tight:   1.15;
+  --rf-lh-snug:    1.30;
+  --rf-lh-base:    1.45;
+  --rf-lh-loose:   1.65;
+
+  /* ─── Weights ─────────────────────────────────────────────────────────── */
+  --rf-fw-light:   300;
+  --rf-fw-reg:     400;
+  --rf-fw-med:     500;
+  --rf-fw-semi:    600;
+  --rf-fw-bold:    700;
+
+  /* ─── Letter spacing ──────────────────────────────────────────────────── */
+  --rf-ls-tight:   -0.01em;
+  --rf-ls-normal:  0;
+  --rf-ls-wide:    0.04em;       /* eyebrow caps */
+  --rf-ls-mono:    0.02em;       /* tabular mono */
+
+  /* ─── Spacing (4px base) ──────────────────────────────────────────────── */
+  --rf-sp-1:   4px;
+  --rf-sp-2:   8px;
+  --rf-sp-3:   12px;
+  --rf-sp-4:   16px;
+  --rf-sp-5:   20px;
+  --rf-sp-6:   24px;
+  --rf-sp-8:   32px;
+  --rf-sp-10:  40px;
+  --rf-sp-12:  48px;
+  --rf-sp-16:  64px;
+
+  /* ─── Radii ──────────────────────────────────────────────────────────── */
+  --rf-r-0:    0px;
+  --rf-r-1:    2px;          /* most chips, inputs, tags */
+  --rf-r-2:    4px;          /* buttons, cards */
+  --rf-r-3:    6px;          /* panels, modals */
+  --rf-r-4:    10px;         /* report cover, hero */
+  --rf-r-pill: 999px;
+
+  /* ─── Shadows (subtle — dark UI relies on borders, not glow) ──────────── */
+  --rf-shadow-1:  0 1px 0 0 rgba(0,0,0,0.4);
+  --rf-shadow-2:  0 1px 2px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.4);
+  --rf-shadow-3:  0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.4);
+  --rf-shadow-pop: 0 16px 48px rgba(0,0,0,0.6), 0 0 0 1px var(--rf-line-3);
+
+  /* Focus ring */
+  --rf-ring:    0 0 0 2px rgba(200, 37, 58, 0.45);
+
+  /* Inner gloss for important callouts */
+  --rf-inset:   inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+/* =========================================================================
+   Semantic typography classes — apply directly
+   ========================================================================= */
+.rf-h1 {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-3xl);
+  font-weight: var(--rf-fw-semi);
+  line-height: var(--rf-lh-tight);
+  letter-spacing: var(--rf-ls-tight);
+  color: var(--rf-fg-0);
+}
+.rf-h2 {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-2xl);
+  font-weight: var(--rf-fw-semi);
+  line-height: var(--rf-lh-tight);
+  letter-spacing: var(--rf-ls-tight);
+  color: var(--rf-fg-0);
+}
+.rf-h3 {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-xl);
+  font-weight: var(--rf-fw-semi);
+  line-height: var(--rf-lh-snug);
+  color: var(--rf-fg-0);
+}
+.rf-h4 {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-lg);
+  font-weight: var(--rf-fw-semi);
+  line-height: var(--rf-lh-snug);
+  color: var(--rf-fg-0);
+}
+.rf-body {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-base);
+  font-weight: var(--rf-fw-reg);
+  line-height: var(--rf-lh-base);
+  color: var(--rf-fg-1);
+}
+.rf-body-sm {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-sm);
+  font-weight: var(--rf-fw-reg);
+  line-height: var(--rf-lh-base);
+  color: var(--rf-fg-1);
+}
+.rf-caption {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-xs);
+  font-weight: var(--rf-fw-reg);
+  line-height: var(--rf-lh-base);
+  color: var(--rf-fg-2);
+}
+.rf-eyebrow {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-micro);
+  font-weight: var(--rf-fw-semi);
+  letter-spacing: var(--rf-ls-wide);
+  text-transform: uppercase;
+  color: var(--rf-fg-2);
+}
+.rf-mono {
+  font-family: var(--rf-font-mono);
+  font-size: var(--rf-fs-sm);
+  font-weight: var(--rf-fw-reg);
+  letter-spacing: var(--rf-ls-mono);
+  color: var(--rf-fg-1);
+}
+.rf-mono-xs {
+  font-family: var(--rf-font-mono);
+  font-size: var(--rf-fs-xs);
+  font-weight: var(--rf-fw-reg);
+  letter-spacing: var(--rf-ls-mono);
+  color: var(--rf-fg-2);
+}
+.rf-metric {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-4xl);
+  font-weight: var(--rf-fw-light);
+  line-height: 1;
+  letter-spacing: var(--rf-ls-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--rf-fg-0);
+}
+.rf-metric-hero {
+  font-family: var(--rf-font-sans);
+  font-size: var(--rf-fs-5xl);
+  font-weight: var(--rf-fw-light);
+  line-height: 1;
+  letter-spacing: var(--rf-ls-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--rf-fg-0);
+}
+
+/* Report (serif) variants */
+.rf-report-title {
+  font-family: var(--rf-font-serif);
+  font-size: var(--rf-fs-4xl);
+  font-weight: var(--rf-fw-bold);
+  line-height: var(--rf-lh-tight);
+  letter-spacing: -0.015em;
+}
+.rf-report-h2 {
+  font-family: var(--rf-font-serif);
+  font-size: var(--rf-fs-2xl);
+  font-weight: var(--rf-fw-semi);
+  line-height: var(--rf-lh-tight);
+}
+.rf-report-body {
+  font-family: var(--rf-font-serif);
+  font-size: 11pt;
+  font-weight: var(--rf-fw-reg);
+  line-height: var(--rf-lh-loose);
+  color: #18181a;
+}
