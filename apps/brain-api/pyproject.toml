@@ -16,6 +16,7 @@ dependencies = [
     "alembic>=1.13",
     "asyncpg>=0.29",
     "httpx>=0.27",
+    "python-multipart>=0.0.9",
     "grey-cardinal-contracts",
 ]
 

@@ -1,23 +1,29 @@
-brain_api_url = "http://localhost:8010"
-internal_token = "dev-internal-token"
+# Grey Cardinal Desktop Agent — config.example.toml
+# Copy to %LOCALAPPDATA%\GreyCardinal\Agent\config.toml and edit.
 
-user_id = ""
-device_id = ""
-client_session_id = ""
-workspace_id = ""
-display_name = ""
-meeting_id = "MTG-1"
+# Backend URL
+backend_url = "http://localhost:8000"
 
+# Agent identifier sent with every upload
+agent_id = "desktop-agent-001"
+
+# Meeting ID; leave empty to auto-generate UUID on each recording session
+meeting_id = ""
+
+# Capture mode: microphone (default) | system_loopback
 capture_mode = "microphone"
-input_device_id = ""
-chunk_ms = 3000
-asr_provider = "mock"
-mock_phrases = [
-  "Я подготовлю оплату до завтра 18:00",
-  "Беру websocket на себя до пятницы",
-  "Аня, проверь интеграцию с YouGile сегодня вечером"
-]
 
+# Select specific input device (optional)
+# input_device_id = ""
+# input_device_index = -1
+# input_device_name = ""
+
+# Record for N seconds then stop automatically (0 = until Ctrl+C)
 duration_sec = 0
-save_chunks = "./chunks"
+
+# Directory where WAV files are saved after recording
+# Leave empty to use %TEMP%\grey-cardinal
+output_dir = ""
+
+# If true: record and save WAV locally but skip upload (for testing)
 dry_run = false

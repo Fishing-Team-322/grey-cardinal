@@ -14,7 +14,9 @@ from brain_api.api.routes import (
     internal_audio,
     internal_telegram,
     meetings,
+    public_api,
     tasks,
+    telemost,
     websocket,
 )
 from brain_api.config import get_settings
@@ -51,6 +53,8 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Grey Cardinal - brain-api", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
+    app.include_router(public_api.router)
+    app.include_router(telemost.router)
     app.include_router(debug.router)
     app.include_router(desktop.router)
     app.include_router(internal_telegram.router)
