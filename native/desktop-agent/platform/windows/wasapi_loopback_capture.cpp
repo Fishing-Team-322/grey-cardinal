@@ -135,6 +135,16 @@ DWORD stream_flags_for_endpoint(WindowsWasapiEndpointKind endpoint_kind) {
         : 0;
 }
 
+bool name_contains_icase(const std::string& haystack, const std::string& needle) {
+    if (needle.empty()) { return true; }
+    auto to_lower = [](const std::string& s) {
+        std::string out = s;
+        for (char& c : out) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+        return out;
+    };
+    return to_lower(haystack).find(to_lower(needle)) != std::string::npos;
+}
+
 const char* endpoint_label(WindowsWasapiEndpointKind endpoint_kind) {
     return endpoint_kind == WindowsWasapiEndpointKind::InputMicrophone
         ? "microphone"
@@ -264,9 +274,14 @@ std::vector<std::byte> convert_to_mono_pcm16(
 
 WindowsWasapiCapture::WindowsWasapiCapture(
     WindowsWasapiEndpointKind endpoint_kind,
-    std::string device_id
+    std::string device_id,
+    int device_index,
+    std::string device_name_substr
 )
-    : endpoint_kind_(endpoint_kind), device_id_(std::move(device_id)) {}
+    : endpoint_kind_(endpoint_kind),
+      device_id_(std::move(device_id)),
+      device_index_(device_index),
+      device_name_substr_(std::move(device_name_substr)) {}
 
 WindowsWasapiCapture::~WindowsWasapiCapture() {
     stop();
@@ -289,11 +304,19 @@ std::vector<AudioDeviceInfo> WindowsWasapiCapture::list_devices() {
             reinterpret_cast<void**>(&enumerator)
         ), "CoCreateInstance(MMDeviceEnumerator)");
 
-        std::string default_id;
         const EDataFlow data_flow = data_flow_for_endpoint(endpoint_kind_);
+
+        std::string default_id;
         if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(data_flow, eConsole, &default_device))) {
             default_id = device_id(default_device);
         }
+
+        IMMDevice* comms_device = nullptr;
+        std::string comms_id;
+        if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(data_flow, eCommunications, &comms_device))) {
+            comms_id = device_id(comms_device);
+        }
+        release_if_needed(comms_device);
 
         throw_if_failed(
             enumerator->EnumAudioEndpoints(data_flow, DEVICE_STATE_ACTIVE, &collection),
@@ -302,16 +325,17 @@ std::vector<AudioDeviceInfo> WindowsWasapiCapture::list_devices() {
 
         UINT count = 0;
         throw_if_failed(collection->GetCount(&count), "IMMDeviceCollection::GetCount");
-        for (UINT index = 0; index < count; ++index) {
-            IMMDevice* device = nullptr;
-            if (SUCCEEDED(collection->Item(index, &device))) {
-                const std::string id = device_id(device);
-                devices.push_back({
-                    id,
-                    device_name(device),
-                    !default_id.empty() && id == default_id
-                });
-                release_if_needed(device);
+        for (UINT idx = 0; idx < count; ++idx) {
+            IMMDevice* dev = nullptr;
+            if (SUCCEEDED(collection->Item(idx, &dev))) {
+                const std::string id = device_id(dev);
+                const bool is_def = !default_id.empty() && id == default_id;
+                const bool is_comms = !comms_id.empty() && id == comms_id;
+                std::string role;
+                if (is_def) role = "default";
+                if (is_comms) role = role.empty() ? "communications" : "default+communications";
+                devices.push_back({id, device_name(dev), is_def, is_comms, role, static_cast<int>(idx)});
+                release_if_needed(dev);
             }
         }
     } catch (...) {
@@ -375,11 +399,47 @@ void WindowsWasapiCapture::capture_loop(AudioFrameCallback callback) {
         ), "CoCreateInstance(MMDeviceEnumerator)");
 
         const EDataFlow data_flow = data_flow_for_endpoint(endpoint_kind_);
+
         if (!device_id_.empty()) {
             const std::wstring requested_id = utf8_to_utf16(device_id_);
             throw_if_failed(enumerator->GetDevice(requested_id.c_str(), &device), "GetDevice");
+        } else if (device_index_ >= 0 || !device_name_substr_.empty()) {
+            IMMDeviceCollection* tmp_collection = nullptr;
+            throw_if_failed(
+                enumerator->EnumAudioEndpoints(data_flow, DEVICE_STATE_ACTIVE, &tmp_collection),
+                "EnumAudioEndpoints(select)"
+            );
+            UINT count = 0;
+            if (SUCCEEDED(tmp_collection->GetCount(&count))) {
+                for (UINT idx = 0; idx < count; ++idx) {
+                    IMMDevice* candidate = nullptr;
+                    if (SUCCEEDED(tmp_collection->Item(idx, &candidate))) {
+                        bool matched = false;
+                        if (device_index_ >= 0 && static_cast<int>(idx) == device_index_) {
+                            matched = true;
+                        } else if (!device_name_substr_.empty()) {
+                            matched = name_contains_icase(device_name(candidate), device_name_substr_);
+                        }
+                        if (matched) { device = candidate; break; }
+                        release_if_needed(candidate);
+                    }
+                }
+            }
+            release_if_needed(tmp_collection);
+            if (device == nullptr) {
+                throw std::runtime_error(
+                    "no input device matched index=" + std::to_string(device_index_) +
+                    " name_substr=\"" + device_name_substr_ + "\""
+                );
+            }
         } else {
-            throw_if_failed(enumerator->GetDefaultAudioEndpoint(data_flow, eConsole, &device), "GetDefaultAudioEndpoint");
+            HRESULT hr = enumerator->GetDefaultAudioEndpoint(data_flow, eCommunications, &device);
+            if (FAILED(hr)) {
+                throw_if_failed(
+                    enumerator->GetDefaultAudioEndpoint(data_flow, eConsole, &device),
+                    "GetDefaultAudioEndpoint(eConsole)"
+                );
+            }
         }
         throw_if_failed(device->Activate(
             __uuidof(IAudioClient),

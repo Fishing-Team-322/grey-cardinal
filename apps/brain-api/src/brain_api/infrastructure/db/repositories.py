@@ -238,6 +238,23 @@ def _board_card(row: m.BoardCardModel) -> BoardCard:
     )
 
 
+def _transcript_event(row: m.TranscriptEventModel) -> TranscriptEvent:
+    return TranscriptEvent(
+        id=row.id,
+        meeting_db_id=row.meeting_db_id,
+        meeting_id=row.meeting_id,
+        speaker_id=row.speaker_id,
+        speaker_name=row.speaker_name,
+        text=row.text,
+        ts=row.ts,
+        is_final=row.is_final,
+        confidence=row.confidence,
+        source=row.source,
+        raw_json=row.raw_json,
+        created_at=row.created_at,
+    )
+
+
 def _xp_event(row: m.UserXpEventModel) -> UserXpEvent:
     return UserXpEvent(
         id=row.id,
@@ -780,6 +797,28 @@ class ProposalRepositoryImpl:
         )
         return _proposal(row) if row else None
 
+    async def list_pending_for_user(self, user_id: UUID, limit: int = 20) -> list[TaskProposal]:
+        """Return proposals whose pending confirmation belongs to this user via transcript."""
+        rows = await self._s.scalars(
+            select(m.TaskProposalModel)
+            .join(
+                m.ConfirmationModel,
+                m.ConfirmationModel.proposal_id == m.TaskProposalModel.id,
+            )
+            .join(
+                m.TranscriptEventModel,
+                m.TranscriptEventModel.id == m.TaskProposalModel.source_transcript_id,
+                isouter=True,
+            )
+            .where(
+                m.ConfirmationModel.status == "pending",
+                m.TranscriptEventModel.speaker_id == user_id,
+            )
+            .order_by(m.TaskProposalModel.created_at.desc())
+            .limit(limit)
+        )
+        return [_proposal(r) for r in rows]
+
 
 class ConfirmationRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
@@ -814,6 +853,15 @@ class ConfirmationRepositoryImpl:
         await self._s.flush()
         await self._s.refresh(row)
         return _confirmation(row)
+
+    async def get_pending_for_proposal(self, proposal_id: UUID) -> Confirmation | None:
+        row = await self._s.scalar(
+            select(m.ConfirmationModel).where(
+                m.ConfirmationModel.proposal_id == proposal_id,
+                m.ConfirmationModel.status == "pending",
+            )
+        )
+        return _confirmation(row) if row else None
 
 
 class TaskRepositoryImpl:
@@ -1043,23 +1091,16 @@ class TranscriptRepositoryImpl:
             .order_by(m.TranscriptEventModel.created_at.desc())
             .limit(max(1, min(limit, 100)))
         )
-        return [
-            TranscriptEvent(
-                id=row.id,
-                meeting_db_id=row.meeting_db_id,
-                meeting_id=row.meeting_id,
-                speaker_id=row.speaker_id,
-                speaker_name=row.speaker_name,
-                text=row.text,
-                ts=row.ts,
-                is_final=row.is_final,
-                confidence=row.confidence,
-                source=row.source,
-                raw_json=row.raw_json,
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
+        return [_transcript_event(row) for row in rows]
+
+    async def list_recent_for_user(self, user_id: UUID, limit: int = 20) -> list[TranscriptEvent]:
+        rows = await self._s.scalars(
+            select(m.TranscriptEventModel)
+            .where(m.TranscriptEventModel.speaker_id == user_id)
+            .order_by(m.TranscriptEventModel.created_at.desc())
+            .limit(max(1, min(limit, 100)))
+        )
+        return [_transcript_event(row) for row in rows]
 
 
 class DebugRepositoryImpl:

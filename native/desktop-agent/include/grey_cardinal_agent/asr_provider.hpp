@@ -39,10 +39,29 @@ private:
     std::size_t next_index_ = 0;
 };
 
+// NOTE: faster_whisper_http is an interface stub for demo.
+// Configure asr_url to point to a running faster-whisper HTTP server.
+// The server must accept: POST /transcribe  Content-Type: audio/wav
+// and return: {"text": "...", "confidence": 0.9, "provider": "faster-whisper"}
 class FasterWhisperHttpProvider final : public IAsrProvider {
 public:
+    explicit FasterWhisperHttpProvider(std::string asr_url = "http://localhost:8030/transcribe");
     AsrResult transcribe(const AsrInput& input) override;
     std::string provider_name() const override;
+private:
+    std::string asr_url_;
+};
+
+// NOTE: whisper_cli calls an external command with a WAV file path.
+// Configure asr_command with %WAV% as placeholder, e.g.:
+//   whisper %WAV% --model base --output-format txt --language ru
+class WhisperCliProvider final : public IAsrProvider {
+public:
+    explicit WhisperCliProvider(std::string asr_command);
+    AsrResult transcribe(const AsrInput& input) override;
+    std::string provider_name() const override;
+private:
+    std::string asr_command_;
 };
 
 class SpeechKitProvider final : public IAsrProvider {

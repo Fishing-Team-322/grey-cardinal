@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -16,6 +19,22 @@ namespace grey_cardinal_agent {
 namespace {
 
 constexpr double kNearSilentRms = 0.001;
+
+// Apply gain to PCM16 samples in-place (saturating clamp).
+void apply_gain_pcm16(std::vector<std::byte>& pcm, float gain) {
+    if (gain == 1.0f || pcm.size() < sizeof(std::int16_t)) {
+        return;
+    }
+    const std::size_t sample_count = pcm.size() / sizeof(std::int16_t);
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        std::int16_t sample = 0;
+        std::memcpy(&sample, pcm.data() + i * sizeof(std::int16_t), sizeof(sample));
+        const float scaled = static_cast<float>(sample) * gain;
+        const float clamped = std::max(-32768.0f, std::min(32767.0f, scaled));
+        sample = static_cast<std::int16_t>(std::lroundf(clamped));
+        std::memcpy(pcm.data() + i * sizeof(std::int16_t), &sample, sizeof(sample));
+    }
+}
 
 std::string platform_name() {
 #if defined(_WIN32)
@@ -131,7 +150,25 @@ void DesktopTranscriptUploader::process_pcm_chunk(
     const AudioFormat& format
 ) {
     const std::uint64_t seq = next_seq_++;
+
+    // Apply mic gain before computing metrics and writing WAV
+    if (config_.mic_gain != 1.0f) {
+        apply_gain_pcm16(pcm, config_.mic_gain);
+    }
+
     const double rms = calculate_rms(format, pcm);
+    // Calculate peak
+    double peak = 0.0;
+    if (format.bits_per_sample == 16 && pcm.size() >= sizeof(std::int16_t)) {
+        const std::size_t sample_count = pcm.size() / sizeof(std::int16_t);
+        for (std::size_t i = 0; i < sample_count; ++i) {
+            std::int16_t s = 0;
+            std::memcpy(&s, pcm.data() + i * sizeof(std::int16_t), sizeof(s));
+            const double normalized = std::abs(static_cast<double>(s)) / 32768.0;
+            if (normalized > peak) { peak = normalized; }
+        }
+    }
+
     const int duration_ms = duration_ms_for_pcm(format, pcm.size());
     std::vector<std::byte> wav = WavWriter::write_wav(format, pcm);
 
@@ -149,10 +186,15 @@ void DesktopTranscriptUploader::process_pcm_chunk(
     created << "desktop chunk created seq=" << seq
             << " wav_bytes=" << wav.size()
             << " duration_ms=" << duration_ms
-            << " mic_rms=" << std::fixed << std::setprecision(6) << rms;
+            << " mic_rms=" << std::fixed << std::setprecision(6) << rms
+            << " mic_peak=" << std::fixed << std::setprecision(6) << peak
+            << " mic_gain=" << config_.mic_gain;
     logger_.info(created.str());
     if (rms <= kNearSilentRms) {
-        logger_.warn("mic_rms is near zero; check selected microphone, input level, and permissions");
+        logger_.warn(
+            "WARNING microphone seems silent (mic_rms=" + std::to_string(rms) +
+            "); try another input device or increase Windows input volume"
+        );
     }
 
     const AsrResult asr = asr_provider_.transcribe(AsrInput{

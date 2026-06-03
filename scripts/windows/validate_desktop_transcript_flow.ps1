@@ -5,6 +5,10 @@ param(
     [string]$TelegramUsername = "petya",
     [string]$MeetingId = "MTG-1",
     [int]$Seconds = 10,
+    # Microphone device selection (passed through to agent)
+    [int]$DeviceIndex = -1,
+    [string]$DeviceId = "",
+    [string]$DeviceName = "",
     [switch]$StartDocker,
     [switch]$DownAfter
 )
@@ -105,6 +109,13 @@ try {
 
     Write-Step "starting native agent microphone + mock ASR for $Seconds second(s)"
     $workspaceId = if ($identity.workspace_id) { $identity.workspace_id } else { "" }
+
+    # Pass device selection args
+    $extraDeviceArgs = @{}
+    if ($DeviceId)         { $extraDeviceArgs["-InputDeviceId"] = $DeviceId }
+    if ($DeviceIndex -ge 0){ $extraDeviceArgs["-InputDeviceIndex"] = $DeviceIndex }
+    # (DeviceName not in start_desktop_agent_for_identity.ps1 but can be added later)
+
     $previousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
@@ -119,7 +130,9 @@ try {
             -MeetingId $MeetingId `
             -CaptureMode microphone `
             -DurationSec $Seconds `
-            -SaveChunks $runDir 2>&1 | Tee-Object -FilePath $agentLog
+            -SaveChunks $runDir `
+            @extraDeviceArgs `
+            2>&1 | Tee-Object -FilePath $agentLog
         $agentExitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference

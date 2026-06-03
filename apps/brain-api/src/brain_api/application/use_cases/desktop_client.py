@@ -8,14 +8,27 @@ from brain_api.application.config import AppConfig
 from brain_api.application.ports import EventPublisher, TaskExtractor, TelegramGateway, UnitOfWork
 from brain_api.application.use_cases._shared import create_proposal_with_confirmation
 from brain_api.application.use_cases.gamification import GamificationService
-from brain_api.domain.entities import Meeting, User
+from brain_api.domain.entities import Meeting, Task, User
 from brain_api.domain.entities import TranscriptEvent as TranscriptEntity
-from brain_api.domain.enums import ClientSessionStatus, MeetingStatus, TaskSource, XpEventKind
+from brain_api.domain.enums import (
+    ClientSessionStatus,
+    ConfirmationStatus,
+    MeetingStatus,
+    TaskSource,
+    TaskStatus,
+    XpEventKind,
+)
 from grey_cardinal_contracts import (
     CaptureMode,
+    DesktopConfirmProposalResponse,
     DesktopGamificationStateResponse,
     DesktopHeartbeatResponse,
+    DesktopProposalDTO,
+    DesktopProposalListResponse,
+    DesktopRecentTranscriptsResponse,
+    DesktopRejectProposalResponse,
     DesktopTaskListResponse,
+    DesktopTranscriptDTO,
     DesktopTranscriptRequest,
     EventName,
     KnownUser,
@@ -310,15 +323,54 @@ async def ingest_desktop_transcript(
         reason="Создано предложение задачи из речи",
         idempotency_key=f"task_created_from_speech:{entity.id}",
     )
+
+    # Auto-confirm mode: for demo/dev, immediately create a task from the proposal.
+    # Activated by DESKTOP_AUTO_CONFIRM_PROPOSALS=true in settings.
+    auto_confirmed_task_id: str | None = None
+    if config.desktop_auto_confirm_proposals:
+        confirmation_id = _confirmation_id_from_action(action)
+        if confirmation_id:
+            try:
+                conf = await uow.confirmations.get(UUID(confirmation_id))
+                if conf is not None and conf.status == ConfirmationStatus.pending:
+                    proposal_obj = await uow.proposals.get(conf.proposal_id)
+                    if proposal_obj is not None:
+                        from brain_api.domain.services import format_public_id
+                        project = await uow.projects.ensure_default(config.default_workspace_name)
+                        seq = await uow.tasks.next_sequence()
+                        now = config.now()
+                        auto_task = Task(
+                            id=uuid4(),
+                            public_id=format_public_id(seq),
+                            title=proposal_obj.title,
+                            description=proposal_obj.description,
+                            status=TaskStatus.todo,
+                            priority=proposal_obj.priority,
+                            source=proposal_obj.source,
+                            project_id=project.id,
+                            assignee_id=proposal_obj.assignee_id,
+                            assignee_text=proposal_obj.assignee_text,
+                            deadline=proposal_obj.deadline,
+                            created_from_proposal_id=proposal_obj.id,
+                            last_status_update_at=now,
+                        )
+                        await uow.tasks.add(auto_task)
+                        conf.status = ConfirmationStatus.accepted
+                        conf.created_task_id = auto_task.id
+                        await uow.confirmations.update(conf)
+                        auto_confirmed_task_id = auto_task.public_id
+            except Exception:
+                pass  # auto-confirm failure must not break the transcript ingest
+
     await uow.commit()
-    _ = action
+    confirmation_id = _confirmation_id_from_action(action)
     return TranscriptIngestResponse(
         transcript_id=str(entity.id),
         meeting_public_id=meeting.public_id,
         proposal_created=True,
         telegram_notified=False,
         trusted_speaker=True,
-        confirmation_id=_confirmation_id_from_action(action),
+        confirmation_id=confirmation_id,
     )
 
 
@@ -447,3 +499,137 @@ def _confirmation_id_from_action(action) -> str | None:
     if ":" not in data:
         return None
     return data.split(":", 1)[1]
+
+
+# ---------------------------------------------------------------------------
+# Desktop proposals (P4 — demo-ready v0)
+# ---------------------------------------------------------------------------
+
+async def list_desktop_proposals(
+    uow: UnitOfWork,
+    identity: DesktopIdentity,
+) -> DesktopProposalListResponse:
+    """Return pending task proposals for this user from desktop transcripts."""
+    proposals = await uow.proposals.list_pending_for_user(identity.user.id)
+    items = []
+    for proposal in proposals:
+        conf = await uow.confirmations.get_pending_for_proposal(proposal.id)
+        items.append(
+            DesktopProposalDTO(
+                proposal_id=str(proposal.id),
+                confirmation_id=str(conf.id) if conf else None,
+                title=proposal.title,
+                description=proposal.description,
+                assignee_text=proposal.assignee_text,
+                priority=proposal.priority.value,
+                raw_text=proposal.raw_text,
+                source=proposal.source.value,
+                created_at=proposal.created_at,
+            )
+        )
+    return DesktopProposalListResponse(items=items)
+
+
+async def confirm_desktop_proposal(
+    uow: UnitOfWork,
+    config: AppConfig,
+    identity: DesktopIdentity,
+    proposal_id: UUID,
+) -> DesktopConfirmProposalResponse:
+    """Confirm a pending proposal — creates a task."""
+    proposal = await uow.proposals.get(proposal_id)
+    if proposal is None:
+        raise ValueError(f"proposal {proposal_id} not found")
+
+    conf = await uow.confirmations.get_pending_for_proposal(proposal_id)
+    if conf is None:
+        raise ValueError(f"no pending confirmation found for proposal {proposal_id}")
+
+    if conf.status != ConfirmationStatus.pending:
+        raise ValueError(f"confirmation is not pending (status={conf.status.value})")
+
+    from brain_api.domain.services import format_public_id
+
+    project = await uow.projects.ensure_default(config.default_workspace_name)
+    seq = await uow.tasks.next_sequence()
+    now = config.now()
+    task = Task(
+        id=uuid4(),
+        public_id=format_public_id(seq),
+        title=proposal.title,
+        description=proposal.description,
+        status=TaskStatus.todo,
+        priority=proposal.priority,
+        source=proposal.source,
+        project_id=project.id,
+        assignee_id=proposal.assignee_id,
+        assignee_text=proposal.assignee_text,
+        deadline=proposal.deadline,
+        source_message_id=proposal.source_message_id,
+        created_from_proposal_id=proposal.id,
+        last_status_update_at=now,
+    )
+    await uow.tasks.add(task)
+
+    conf.status = ConfirmationStatus.accepted
+    conf.created_task_id = task.id
+    await uow.confirmations.update(conf)
+
+    await GamificationService().grant(
+        uow,
+        user_id=identity.user.id,
+        workspace_id=identity.workspace_id,
+        task_id=task.id,
+        kind=XpEventKind.task_confirmed,
+        reason=f"Подтвердили задачу {task.public_id} через desktop",
+        idempotency_key=f"task_confirmed:{task.id}",
+    )
+    await uow.commit()
+    return DesktopConfirmProposalResponse(
+        ok=True,
+        task_public_id=task.public_id,
+        task_title=task.title,
+        message=f"proposal confirmed; task {task.public_id} created",
+    )
+
+
+async def reject_desktop_proposal(
+    uow: UnitOfWork,
+    identity: DesktopIdentity,
+    proposal_id: UUID,
+) -> DesktopRejectProposalResponse:
+    """Reject a pending proposal."""
+    _ = identity
+    proposal = await uow.proposals.get(proposal_id)
+    if proposal is None:
+        raise ValueError(f"proposal {proposal_id} not found")
+
+    conf = await uow.confirmations.get_pending_for_proposal(proposal_id)
+    if conf is None:
+        raise ValueError(f"no pending confirmation for proposal {proposal_id}")
+
+    conf.status = ConfirmationStatus.rejected
+    await uow.confirmations.update(conf)
+    await uow.commit()
+    return DesktopRejectProposalResponse(ok=True, message="proposal rejected")
+
+
+async def list_desktop_recent_transcripts(
+    uow: UnitOfWork,
+    identity: DesktopIdentity,
+    limit: int = 20,
+) -> DesktopRecentTranscriptsResponse:
+    """Return recent desktop transcripts for this user."""
+    events = await uow.transcripts.list_recent_for_user(identity.user.id, limit=limit)
+    return DesktopRecentTranscriptsResponse(
+        items=[
+            DesktopTranscriptDTO(
+                id=str(event.id),
+                meeting_id=event.meeting_id or "",
+                text=event.text,
+                asr_provider=event.raw_json.get("asr", {}).get("provider") if event.raw_json else None,
+                created_at=event.created_at,
+            )
+            for event in events
+        ]
+    )

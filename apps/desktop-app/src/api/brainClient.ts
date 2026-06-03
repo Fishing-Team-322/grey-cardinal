@@ -42,6 +42,26 @@ export type GamificationState = {
   recent_events: Array<{ kind: string; points: number; reason: string }>;
 };
 
+export type DesktopProposal = {
+  proposal_id: string;
+  confirmation_id: string | null;
+  title: string;
+  description?: string | null;
+  assignee_text?: string | null;
+  priority: string;
+  raw_text: string;
+  source: string;
+  created_at?: string | null;
+};
+
+export type DesktopTranscriptItem = {
+  id: string;
+  meeting_id: string;
+  text: string;
+  asr_provider?: string | null;
+  created_at?: string | null;
+};
+
 export class BrainClient {
   constructor(
     private readonly baseUrl: string,
@@ -132,6 +152,28 @@ export class BrainClient {
 
   async gamification(identity: DesktopIdentity): Promise<GamificationState> {
     return this.get("/desktop/gamification/me", identity);
+  }
+
+  async listProposals(identity: DesktopIdentity): Promise<{ items: DesktopProposal[] }> {
+    return this.get("/desktop/proposals", identity);
+  }
+
+  async confirmProposal(
+    identity: DesktopIdentity,
+    proposalId: string
+  ): Promise<{ ok: boolean; task_public_id?: string | null; message: string }> {
+    return this.post(`/desktop/proposals/${encodeURIComponent(proposalId)}/confirm`, {}, identity);
+  }
+
+  async rejectProposal(
+    identity: DesktopIdentity,
+    proposalId: string
+  ): Promise<{ ok: boolean; message: string }> {
+    return this.post(`/desktop/proposals/${encodeURIComponent(proposalId)}/reject`, {}, identity);
+  }
+
+  async recentTranscripts(identity: DesktopIdentity, limit = 10): Promise<{ items: DesktopTranscriptItem[] }> {
+    return this.get(`/desktop/transcripts/recent?limit=${limit}`, identity);
   }
 
   private async get<T>(path: string, identity?: DesktopIdentity): Promise<T> {

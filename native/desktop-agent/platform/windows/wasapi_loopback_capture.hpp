@@ -17,7 +17,9 @@ class WindowsWasapiCapture final : public IAudioCapture {
 public:
     explicit WindowsWasapiCapture(
         WindowsWasapiEndpointKind endpoint_kind,
-        std::string device_id = {}
+        std::string device_id = {},
+        int device_index = -1,
+        std::string device_name_substr = {}
     );
     ~WindowsWasapiCapture() override;
 
@@ -33,6 +35,8 @@ private:
 
     WindowsWasapiEndpointKind endpoint_kind_;
     std::string device_id_;
+    int device_index_;
+    std::string device_name_substr_;
     std::atomic_bool running_{false};
     std::thread worker_;
 };
