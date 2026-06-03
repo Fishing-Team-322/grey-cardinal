@@ -116,5 +116,30 @@ services:
     depends_on:
       - brain-api
 
+  # Real ASR service for desktop-agent faster_whisper_http provider.
+  # Usage: docker compose --profile desktop up asr-service
+  # Agent config: asr_provider = "faster_whisper_http"
+  #               asr_url      = "http://localhost:8030/transcribe"
+  asr-service:
+    build:
+      context: apps/asr-service
+      dockerfile: Dockerfile
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-base}
+    profiles: ["desktop", "full"]
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+    ports:
+      - "8030:8030"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
 volumes:
   postgres_data:

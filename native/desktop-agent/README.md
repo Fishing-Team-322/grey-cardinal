@@ -1,13 +1,20 @@
-# Grey Cardinal Desktop Agent
+# Grey Cardinal Desktop Audio Agent
 
-The desktop agent is a thin host-native audio client for the desktop-first flow.
-The v0 Windows path captures the real default microphone, saves/debugs WAV chunks,
-runs mock ASR over those chunks, and posts trusted desktop transcripts to
-`brain-api` `/desktop/transcripts`. The legacy WASAPI render loopback path remains
-available as `system_loopback_experimental` and must not be used as source of
-truth for speaker identity.
+A lightweight Windows audio capture agent. Its only job is to record microphone
+(or system loopback) audio and upload the resulting WAV file to the backend.
+All transcription, speaker diarization, and task extraction happen server-side.
 
-P0 is Windows. macOS and Linux adapter stubs are present under `platform/macos` and `platform/linux`.
+## Architecture
+
+```
+Desktop Agent
+  → records audio (WASAPI)
+  → saves temp WAV file
+  → POST /api/audio/upload   (multipart/form-data)
+  → backend processes everything
+```
+
+The agent has **no AI/LLM code**, no local speech recognition, and no task logic.
 
 ## Build
 
@@ -18,138 +25,130 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
 
-Debug:
-
-```powershell
-cd native\desktop-agent
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --config Debug
-ctest --test-dir build --output-on-failure -C Debug
-```
-
 ## Run
 
-Start `brain-api` first:
-
-```powershell
-docker compose --profile full up --build
-```
-
-Then run the agent in another terminal:
+Minimal — record until Ctrl+C and upload:
 
 ```powershell
 .\build\Release\grey-cardinal-agent.exe `
-  --capture-mode microphone `
-  --server http://localhost:8010 `
-  --token dev-internal-token `
-  --user-id <uuid> `
-  --device-id <uuid> `
-  --client-session-id <uuid> `
-  --display-name "Петя" `
-  --meeting-id MTG-1 `
-  --save-chunks .\chunks
+  --backend http://localhost:8010 `
+  --agent-id "agent-001"
 ```
 
-Other useful commands:
+Record for 60 seconds then upload automatically:
 
 ```powershell
-.\build\Release\grey-cardinal-agent.exe --list-input-devices
-.\build\Release\grey-cardinal-agent.exe --capture-mode microphone --duration-sec 10 --save-chunks C:\Temp\gc-mic --dry-run
-.\build\Release\grey-cardinal-agent.exe --config config.toml
+.\build\Release\grey-cardinal-agent.exe `
+  --backend http://localhost:8010 `
+  --agent-id "agent-001" `
+  --meeting-id "meet-abc123" `
+  --duration-sec 60
 ```
 
-For a guided Windows validation run:
+Record and save WAV locally without uploading (for testing):
 
 ```powershell
-.\scripts\windows\record_mic_test.ps1
+.\build\Release\grey-cardinal-agent.exe `
+  --backend http://localhost:8010 `
+  --duration-sec 10 `
+  --output-dir C:\recordings `
+  --dry-run
 ```
 
-Speak while the agent runs, then verify WAV chunks appear in
-`C:\Temp\GreyCardinal\mic-test` and can be played.
+List available input devices:
 
-## Config
-
-The default Windows config path is:
-
-```text
-%LOCALAPPDATA%\GreyCardinal\Agent\config.toml
+```powershell
+.\build\Release\grey-cardinal-agent.exe --list-devices
 ```
 
-Example:
+## Config file
+
+Default path: `%LOCALAPPDATA%\GreyCardinal\Agent\config.toml`
 
 ```toml
-brain_api_url = "http://localhost:8010"
-internal_token = "dev-internal-token"
-
-user_id = ""
-device_id = ""
-client_session_id = ""
-workspace_id = ""
-display_name = ""
-meeting_id = "MTG-1"
-
-capture_mode = "microphone"
-input_device_id = ""
-chunk_ms = 3000
-asr_provider = "mock"
-mock_phrases = [
-  "Я подготовлю оплату до завтра 18:00",
-  "Беру websocket на себя до пятницы",
-  "Аня, проверь интеграцию с YouGile сегодня вечером"
-]
+backend_url  = "http://localhost:8010"
+agent_id     = "agent-001"
+meeting_id   = ""               # auto-generated UUID if empty
+capture_mode = "microphone"     # microphone | system_loopback
+duration_sec = 0                # 0 = until Ctrl+C
+output_dir   = ""               # empty = %TEMP%\grey-cardinal
+dry_run      = false
 ```
 
-CLI flags override config values.
+CLI flags override config file values.
 
-## Upload Contract
+## Upload endpoint
 
-Microphone desktop mode sends:
-
-```text
-POST {brain_api_url}/desktop/transcripts
-Content-Type: application/json
-X-Internal-Token: <token>
-X-GC-User-Id: <user_id>
-X-GC-Device-Id: <device_id>
-X-GC-Client-Session-Id: <client_session_id>
+```
+POST {backend_url}/api/audio/upload
+Content-Type: multipart/form-data
 ```
 
-The JSON body is TranscriptEvent v2-shaped and includes `source.kind=desktop_app`,
-`speaker.identity_source=authenticated_client`, `identity_confidence=1.0`,
-`asr.provider=mock`, and microphone audio metadata. The server resolves trusted
-speaker identity from the headers/session and rejects non-microphone desktop
-capture.
+Form fields:
 
-`system_loopback_experimental` still uses the legacy `/audio/chunk` upload path
-for compatibility with the old audio-worker validation flow.
+| Field        | Type   | Example                        |
+|-------------|--------|--------------------------------|
+| `audio`     | file   | recording.wav (audio/wav)      |
+| `agent_id`  | string | `"agent-001"`                  |
+| `meeting_id`| string | `"550e8400-e29b-41d4-a716-..."` |
+| `source`    | string | `"desktop_agent"`              |
+| `started_at`| string | `"2024-01-15T10:30:00Z"`       |
+| `ended_at`  | string | `"2024-01-15T10:35:00Z"`       |
+
+Expected response:
+
+```json
+{
+  "ok": true,
+  "audio_id": "audio_123",
+  "message": "Audio uploaded successfully"
+}
+```
+
+### curl example
+
+```bash
+curl -X POST http://localhost:8010/api/audio/upload \
+  -F "audio=@recording.wav;type=audio/wav" \
+  -F "agent_id=agent-001" \
+  -F "meeting_id=550e8400-e29b-41d4-a716-446655440000" \
+  -F "source=desktop_agent" \
+  -F "started_at=2024-01-15T10:30:00Z" \
+  -F "ended_at=2024-01-15T10:35:00Z"
+```
+
+## Status output
+
+The agent prints one status line to stdout at each transition:
+
+```
+[recording]
+[uploading]
+[uploaded: audio_id=audio_123]
+[error: upload failed]
+```
 
 ## Logs
 
-Windows logs are appended to:
-
-```text
+```
 %LOCALAPPDATA%\GreyCardinal\Agent\logs\agent.log
 ```
 
-The agent logs startup config, selected default input device, audio format,
-`mic_rms=...` per chunk, saved WAV paths, upload responses, server errors, and
-capture errors. It never logs raw audio text beyond mock ASR phrases.
+## Module overview
 
-## Installer
-
-Install Inno Setup, then run:
-
-```powershell
-.\scripts\windows\build_installer.ps1
-```
-
-The installer is per-user, creates a Start Menu shortcut, can optionally create a Desktop shortcut, and can optionally add an HKCU Run entry for auto-start.
+| Module          | File(s)                        | Responsibility                        |
+|----------------|-------------------------------|---------------------------------------|
+| `AudioRecorder` | `audio_recorder.hpp/.cpp`     | Accumulates frames, writes WAV file   |
+| `Uploader`      | `uploader.hpp/.cpp`           | multipart POST to backend             |
+| `Config`        | `config.hpp/.cpp`             | Parses config file and CLI args       |
+| `Logger`        | `logger.hpp/.cpp`             | Timestamped log to stdout + file      |
+| `WavWriter`     | `wav_writer.hpp/.cpp`         | Encodes PCM → WAV bytes               |
+| WASAPI capture  | `platform/windows/...`        | Windows microphone / loopback capture |
 
 ## Troubleshooting
 
-- No microphone audio: verify Windows microphone permissions/input level and run `--list-input-devices`.
-- Server unavailable: confirm brain-api is running and `curl http://localhost:8010/health` returns ok.
-- Token mismatch: align `--token` with `INTERNAL_API_TOKEN`.
-- Docker not running: start Docker Desktop and rebuild the `full` profile.
-- Device format unsupported: common float32/PCM WASAPI mix formats are converted to mono PCM16. Other formats should be converted in a future adapter/resampler pass.
-- Current MVP limitations: Windows microphone capture is real; ASR is mock by default; faster-whisper/SpeechKit are placeholders; VAD and diarization are not implemented yet; chunks are mono PCM16 WAV at the captured sample rate unless a future resampler is added.
+- **No audio captured**: check Windows microphone permissions and run `--list-devices`.
+- **Backend unreachable**: verify the server is running; the agent retries 3 times then
+  prints the error and preserves the WAV file locally.
+- **Wrong device**: use `--input-device-name` or `--input-device-index` to select a
+  specific device from `--list-devices` output.

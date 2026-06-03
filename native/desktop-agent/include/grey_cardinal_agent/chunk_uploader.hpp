@@ -1,3 +1,5 @@
+// DEPRECATED: removed in v0.2 — replaced by AudioRecorder + Uploader.
+// This file is no longer compiled.
 #pragma once
 
 #include "grey_cardinal_agent/audio_frame.hpp"

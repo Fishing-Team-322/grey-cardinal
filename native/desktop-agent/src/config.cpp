@@ -2,13 +2,22 @@
 
 #include <cstdlib>
 #include <cctype>
+#include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <objbase.h>
+#else
+#include <random>
+#endif
 
 namespace grey_cardinal_agent {
 namespace {
@@ -44,69 +53,13 @@ bool parse_bool(std::string value) {
     return value == "1" || value == "true" || value == "yes" || value == "on";
 }
 
-std::vector<std::string> parse_string_array(const std::string& value) {
-    const auto start = value.find('[');
-    const auto end = value.rfind(']');
-    if (start == std::string::npos || end == std::string::npos || end <= start) {
-        throw std::runtime_error("invalid string array value");
-    }
-
-    std::vector<std::string> items;
-    std::string current;
-    bool in_quote = false;
-    bool escape = false;
-
-    for (std::size_t index = start + 1; index < end; ++index) {
-        const char ch = value[index];
-        if (!in_quote) {
-            if (ch == '"') {
-                in_quote = true;
-                current.clear();
-            }
-            continue;
-        }
-
-        if (escape) {
-            current.push_back(ch);
-            escape = false;
-            continue;
-        }
-        if (ch == '\\') {
-            escape = true;
-            continue;
-        }
-        if (ch == '"') {
-            in_quote = false;
-            items.push_back(current);
-            current.clear();
-            continue;
-        }
-        current.push_back(ch);
-    }
-
-    if (in_quote) {
-        throw std::runtime_error("unterminated string in array value");
-    }
-    return items;
-}
-
 void apply_key_value(AgentConfig& config, const std::string& key, const std::string& raw_value) {
     const std::string value = unquote(raw_value);
 
-    if (key == "brain_api_url" || key == "server_url") {
-        config.server_url = value;
-    } else if (key == "internal_token") {
-        config.internal_token = value;
-    } else if (key == "user_id") {
-        config.user_id = value;
-    } else if (key == "device_id") {
-        config.device_id = value;
-    } else if (key == "client_session_id") {
-        config.client_session_id = value;
-    } else if (key == "workspace_id") {
-        config.workspace_id = value;
-    } else if (key == "display_name") {
-        config.display_name = value;
+    if (key == "backend_url" || key == "brain_api_url" || key == "server_url") {
+        config.backend_url = value;
+    } else if (key == "agent_id") {
+        config.agent_id = value;
     } else if (key == "meeting_id") {
         config.meeting_id = value;
     } else if (key == "capture_mode") {
@@ -117,25 +70,14 @@ void apply_key_value(AgentConfig& config, const std::string& key, const std::str
         config.input_device_index = std::stoi(value);
     } else if (key == "input_device_name") {
         config.input_device_name = value;
-    } else if (key == "mic_gain") {
-        config.mic_gain = std::stof(value);
-    } else if (key == "chunk_ms") {
-        config.chunk_ms = std::stoi(value);
-    } else if (key == "asr_provider") {
-        config.asr_provider = value;
-    } else if (key == "asr_url") {
-        config.asr_url = value;
-    } else if (key == "asr_command") {
-        config.asr_command = value;
-    } else if (key == "mock_phrases") {
-        config.mock_phrases = parse_string_array(raw_value);
     } else if (key == "duration_sec") {
         config.duration_sec = std::stoi(value);
-    } else if (key == "save_chunks") {
-        config.save_chunks = value;
+    } else if (key == "output_dir") {
+        config.output_dir = value;
     } else if (key == "dry_run") {
         config.dry_run = parse_bool(value);
     }
+    // Unknown keys are silently ignored for forward compatibility.
 }
 
 void load_config_file(AgentConfig& config, const std::filesystem::path& path) {
@@ -145,46 +87,22 @@ void load_config_file(AgentConfig& config, const std::filesystem::path& path) {
     }
 
     std::string line;
-    std::string array_key;
-    std::string array_value;
     while (std::getline(input, line)) {
         const auto comment = line.find('#');
         if (comment != std::string::npos) {
             line = line.substr(0, comment);
         }
-
         line = trim(std::move(line));
         if (line.empty()) {
             continue;
         }
-
-        if (!array_key.empty()) {
-            array_value += " " + line;
-            if (line.find(']') != std::string::npos) {
-                apply_key_value(config, array_key, array_value);
-                array_key.clear();
-                array_value.clear();
-            }
-            continue;
-        }
-
         const auto equals = line.find('=');
         if (equals == std::string::npos) {
             continue;
         }
-
         const std::string key = trim(line.substr(0, equals));
-        const std::string value = trim(line.substr(equals + 1));
-        if (value.find('[') != std::string::npos && value.find(']') == std::string::npos) {
-            array_key = key;
-            array_value = value;
-            continue;
-        }
-        apply_key_value(config, key, value);
-    }
-
-    if (!array_key.empty()) {
-        throw std::runtime_error("unterminated array value for " + array_key);
+        const std::string raw_value = trim(line.substr(equals + 1));
+        apply_key_value(config, key, raw_value);
     }
 }
 
@@ -196,18 +114,13 @@ std::string getenv_or_empty(const char* name) {
 }
 
 void apply_environment_defaults(AgentConfig& config) {
-    if (
-        config.config_path.empty() &&
-        !getenv_or_empty("GREY_CARDINAL_BRAIN_API_URL").empty()
-    ) {
-        const std::string url = getenv_or_empty("GREY_CARDINAL_BRAIN_API_URL");
-        config.server_url = url;
+    const std::string url = getenv_or_empty("GREY_CARDINAL_BACKEND_URL");
+    if (!url.empty() && config.backend_url == "http://localhost:8010") {
+        config.backend_url = url;
     }
-    if (config.internal_token.empty()) {
-        config.internal_token = getenv_or_empty("GREY_CARDINAL_INTERNAL_TOKEN");
-    }
-    if (config.internal_token.empty()) {
-        config.internal_token = getenv_or_empty("INTERNAL_API_TOKEN");
+    const std::string agent_id = getenv_or_empty("GREY_CARDINAL_AGENT_ID");
+    if (!agent_id.empty() && config.agent_id == "desktop-agent") {
+        config.agent_id = agent_id;
     }
 }
 
@@ -230,7 +143,6 @@ std::filesystem::path find_config_arg(const std::vector<std::string>& args) {
 }
 
 void apply_cli_args(AgentConfig& config, const std::vector<std::string>& args) {
-    bool cli_mock_phrases_overridden = false;
     for (std::size_t index = 1; index < args.size(); ++index) {
         const std::string& arg = args[index];
 
@@ -245,24 +157,10 @@ void apply_cli_args(AgentConfig& config, const std::vector<std::string>& args) {
             config.help = true;
         } else if (arg == "--config") {
             config.config_path = require_value(arg);
-        } else if (arg == "--server" || arg == "--brain-api-url") {
-            config.server_url = require_value(arg);
-        } else if (arg == "--token") {
-            config.internal_token = require_value(arg);
-        } else if (arg == "--user-id") {
-            config.user_id = require_value(arg);
-        } else if (arg == "--device-id") {
-            config.device_id = require_value(arg);
-        } else if (arg == "--client-session-id") {
-            config.client_session_id = require_value(arg);
-        } else if (arg == "--workspace-id") {
-            config.workspace_id = require_value(arg);
-        } else if (arg == "--display-name") {
-            config.display_name = require_value(arg);
-        } else if (arg == "--chunk-ms") {
-            config.chunk_ms = std::stoi(require_value(arg));
-        } else if (arg == "--duration-sec") {
-            config.duration_sec = std::stoi(require_value(arg));
+        } else if (arg == "--backend" || arg == "--backend-url") {
+            config.backend_url = require_value(arg);
+        } else if (arg == "--agent-id") {
+            config.agent_id = require_value(arg);
         } else if (arg == "--meeting-id") {
             config.meeting_id = require_value(arg);
         } else if (arg == "--capture-mode") {
@@ -273,23 +171,11 @@ void apply_cli_args(AgentConfig& config, const std::vector<std::string>& args) {
             config.input_device_index = std::stoi(require_value(arg));
         } else if (arg == "--input-device-name") {
             config.input_device_name = require_value(arg);
-        } else if (arg == "--mic-gain") {
-            config.mic_gain = std::stof(require_value(arg));
-        } else if (arg == "--asr-provider") {
-            config.asr_provider = require_value(arg);
-        } else if (arg == "--asr-url") {
-            config.asr_url = require_value(arg);
-        } else if (arg == "--asr-command") {
-            config.asr_command = require_value(arg);
-        } else if (arg == "--mock-phrase") {
-            if (!cli_mock_phrases_overridden) {
-                config.mock_phrases.clear();
-                cli_mock_phrases_overridden = true;
-            }
-            config.mock_phrases.push_back(require_value(arg));
-        } else if (arg == "--save-chunks") {
-            config.save_chunks = require_value(arg);
-        } else if (arg == "--dry-run" || arg == "--dry-run-save-only") {
+        } else if (arg == "--duration-sec") {
+            config.duration_sec = std::stoi(require_value(arg));
+        } else if (arg == "--output-dir") {
+            config.output_dir = require_value(arg);
+        } else if (arg == "--dry-run") {
             config.dry_run = true;
         } else if (arg == "--list-input-devices" || arg == "--list-devices") {
             config.list_devices = true;
@@ -320,17 +206,8 @@ AgentConfig load_config_from_args(int argc, char** argv) {
     apply_environment_defaults(config);
     apply_cli_args(config, args);
 
-    if (config.chunk_ms <= 0) {
-        throw std::runtime_error("--chunk-ms must be greater than zero");
-    }
     if (config.duration_sec < 0) {
         throw std::runtime_error("--duration-sec must be zero or greater");
-    }
-    if (config.asr_provider.empty()) {
-        throw std::runtime_error("asr_provider must not be empty");
-    }
-    if (config.asr_provider == "mock" && config.mock_phrases.empty()) {
-        throw std::runtime_error("mock ASR requires at least one mock phrase");
     }
 
     return config;
@@ -350,14 +227,8 @@ CaptureMode parse_capture_mode(const std::string& value) {
     if (value == "microphone") {
         return CaptureMode::Microphone;
     }
-    if (value == "system_loopback_experimental") {
-        return CaptureMode::SystemLoopbackExperimental;
-    }
-    if (value == "mixed_meeting_experimental") {
-        return CaptureMode::MixedMeetingExperimental;
-    }
-    if (value == "mock") {
-        return CaptureMode::Mock;
+    if (value == "system_loopback" || value == "system_loopback_experimental") {
+        return CaptureMode::SystemLoopback;
     }
     throw std::runtime_error("unsupported capture mode: " + value);
 }
@@ -366,82 +237,109 @@ std::string capture_mode_value(CaptureMode mode) {
     switch (mode) {
     case CaptureMode::Microphone:
         return "microphone";
-    case CaptureMode::SystemLoopbackExperimental:
-        return "system_loopback_experimental";
-    case CaptureMode::MixedMeetingExperimental:
-        return "mixed_meeting_experimental";
-    case CaptureMode::Mock:
-        return "mock";
+    case CaptureMode::SystemLoopback:
+        return "system_loopback";
     }
     return "microphone";
 }
 
-bool has_desktop_identity(const AgentConfig& config) {
-    return !config.user_id.empty() &&
-           !config.device_id.empty() &&
-           !config.client_session_id.empty();
-}
-
 std::string config_summary(const AgentConfig& config) {
     std::ostringstream output;
-    output << "server_url=" << config.server_url
-           << " meeting_id=" << config.meeting_id
+    output << "backend_url=" << config.backend_url
+           << " agent_id=" << config.agent_id
+           << " meeting_id=" << (config.meeting_id.empty() ? "<auto-uuid>" : config.meeting_id)
            << " capture_mode=" << capture_mode_value(config.capture_mode)
            << " input_device_id=" << (config.input_device_id.empty() ? "<default>" : "<set>")
            << " input_device_index=" << config.input_device_index
-           << " input_device_name=" << (config.input_device_name.empty() ? "<not-set>" : config.input_device_name)
-           << " mic_gain=" << config.mic_gain
-           << " chunk_ms=" << config.chunk_ms
            << " duration_sec=" << config.duration_sec
-           << " asr_provider=" << config.asr_provider
+           << " output_dir=" << (config.output_dir.empty() ? "<temp>" : config.output_dir.string())
            << " dry_run=" << (config.dry_run ? "true" : "false")
-           << " save_chunks=" << (config.save_chunks.empty() ? "<disabled>" : config.save_chunks.string())
-           << " token=" << (config.internal_token.empty() ? "<empty>" : "<set>")
-           << " desktop_identity=" << (has_desktop_identity(config) ? "<set>" : "<missing>")
            << " config_path=" << (config.config_path.empty() ? "<default-not-found>" : config.config_path.string());
     return output.str();
 }
 
 std::string help_text() {
-    return R"(Grey Cardinal desktop audio agent
+    return R"(Grey Cardinal desktop audio capture agent
 
 Usage:
+  grey-cardinal-agent.exe [options]
   grey-cardinal-agent.exe --config config.toml
-  grey-cardinal-agent.exe --server http://localhost:8010 --token dev-internal-token --user-id <uuid> --device-id <uuid> --client-session-id <uuid>
-  grey-cardinal-agent.exe --capture-mode microphone --duration-sec 10 --save-chunks C:\Temp\gc-mic --dry-run
-  grey-cardinal-agent.exe --list-input-devices
+  grey-cardinal-agent.exe --backend http://localhost:8010 --agent-id agent-001
 
 Options:
-  --server <url>       brain-api base URL, default http://localhost:8010
-  --brain-api-url <url> alias for --server
-  --token <token>      internal token, also read from config/env
-  --user-id <uuid>     authenticated desktop user id
-  --device-id <uuid>   authenticated desktop device id
-  --client-session-id <uuid> authenticated desktop client session id
-  --workspace-id <uuid-or-empty> optional workspace id
-  --display-name <n>   display name used in transcript payload
-  --capture-mode <m>   microphone (default), system_loopback_experimental, mixed_meeting_experimental, or mock
-  --input-device-id <id>    Windows input device id (exact), default input if omitted
-  --input-device-index <n>  Windows input device index (0-based, from --list-input-devices)
-  --input-device-name <sub> Windows input device name substring match (case-insensitive)
-  --mic-gain <f>            microphone gain multiplier, default 1.0
-  --asr-url <url>           ASR HTTP server URL (for faster_whisper_http)
-  --asr-command <cmd>       ASR CLI command with %WAV% placeholder (for whisper_cli)
-  --asr-provider <p>   mock (default); real providers are adapter placeholders
-  --mock-phrase <text> replace configured mock phrases; may be repeated
-  --chunk-ms <ms>      chunk duration, default 3000
-  --duration-sec <s>   capture for N seconds then exit, default 0 means until Ctrl+C
-  --meeting-id <id>    meeting id, default MTG-1
-  --save-chunks <dir>  write WAV chunks for debugging
-  --dry-run            capture and log chunks but skip upload
-  --dry-run-save-only  alias for --dry-run, useful with --save-chunks
-  --list-input-devices list active Windows input devices
-  --config <path>      load simple TOML-style key=value config
-  --help               show this help
+  --backend <url>          Backend base URL (default: http://localhost:8010)
+  --backend-url <url>      Alias for --backend
+  --agent-id <id>          Agent identifier sent with uploads (default: desktop-agent)
+  --meeting-id <id>        Meeting ID; auto-generated UUID if omitted
+  --capture-mode <mode>    microphone (default) | system_loopback
+  --input-device-id <id>   Select input device by Windows device ID
+  --input-device-index <n> Select input device by index (from --list-devices)
+  --input-device-name <s>  Select input device by name substring match
+  --duration-sec <s>       Record for N seconds then stop (0 = until Ctrl+C)
+  --output-dir <dir>       Directory to save WAV files (%TEMP%\grey-cardinal if omitted)
+  --dry-run                Record and save WAV, but skip upload
+  --list-input-devices     List available Windows input devices and exit
+  --list-devices           Alias for --list-input-devices
+  --config <path>          Load TOML-style key=value config file
+  --help                   Show this help
 
 Default config path:
   %LOCALAPPDATA%\GreyCardinal\Agent\config.toml
+
+Upload endpoint:
+  POST {backend_url}/api/audio/upload
+  Content-Type: multipart/form-data
+  Fields: audio, agent_id, meeting_id, source, started_at, ended_at
 )";
+}
+
+std::string generate_uuid() {
+#if defined(_WIN32)
+    GUID guid{};
+    CoCreateGuid(&guid);
+    char buffer[37];
+    snprintf(
+        buffer,
+        sizeof(buffer),
+        "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        static_cast<unsigned long>(guid.Data1),
+        guid.Data2,
+        guid.Data3,
+        guid.Data4[0], guid.Data4[1],
+        guid.Data4[2], guid.Data4[3], guid.Data4[4],
+        guid.Data4[5], guid.Data4[6], guid.Data4[7]
+    );
+    return buffer;
+#else
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_int_distribution<std::uint32_t> dist(0, 0xffffffffU);
+    char buffer[37];
+    const std::uint32_t a = dist(rng);
+    const std::uint32_t b = dist(rng);
+    const std::uint32_t c = dist(rng);
+    const std::uint32_t d = dist(rng);
+    snprintf(
+        buffer, sizeof(buffer),
+        "%08x-%04x-4%03x-8%03x-%04x%08x",
+        a, (b >> 16) & 0xffff, b & 0x0fff,
+        (c >> 20) & 0x0fff, c & 0xffff, d
+    );
+    return buffer;
+#endif
+}
+
+std::string format_iso8601(std::chrono::system_clock::time_point tp) {
+    const auto time = std::chrono::system_clock::to_time_t(tp);
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm, &time);
+#else
+    gmtime_r(&time, &tm);
+#endif
+    std::ostringstream ss;
+    ss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    return ss.str();
 }
 
 } // namespace grey_cardinal_agent

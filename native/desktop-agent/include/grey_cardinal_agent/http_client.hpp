@@ -59,4 +59,15 @@ public:
     HttpUploadResult post_desktop_transcript(const DesktopTranscriptUpload& upload) const override;
 };
 
+/**
+ * Send raw bytes to an arbitrary URL.
+ * Used by ASR providers (faster_whisper_http, etc.) to POST WAV audio.
+ * This is a free function that does not require an IHttpClient instance.
+ */
+HttpUploadResult http_post_bytes(
+    const std::string& url,
+    const std::string& content_type,
+    const std::vector<std::byte>& body
+);
+
 } // namespace grey_cardinal_agent

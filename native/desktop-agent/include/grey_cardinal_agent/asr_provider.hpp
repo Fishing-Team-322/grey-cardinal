@@ -1,3 +1,5 @@
+// DEPRECATED: removed in v0.2 — all speech recognition happens on the backend.
+// This file is no longer compiled. See src/uploader.cpp for the new upload path.
 #pragma once
 
 #include "grey_cardinal_agent/audio_frame.hpp"

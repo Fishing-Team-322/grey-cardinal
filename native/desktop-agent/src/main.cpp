@@ -1,15 +1,12 @@
-#include "grey_cardinal_agent/asr_provider.hpp"
-#include "grey_cardinal_agent/chunk_uploader.hpp"
+#include "grey_cardinal_agent/audio_recorder.hpp"
 #include "grey_cardinal_agent/config.hpp"
-#include "grey_cardinal_agent/desktop_transcript_uploader.hpp"
 #include "grey_cardinal_agent/logger.hpp"
+#include "grey_cardinal_agent/uploader.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <csignal>
-#include <exception>
 #include <iostream>
-#include <memory>
 #include <thread>
 
 #if defined(_WIN32)
@@ -24,48 +21,8 @@ void handle_signal(int) {
     g_stop_requested = true;
 }
 
-std::unique_ptr<grey_cardinal_agent::IAsrProvider> make_asr_provider(
-    const grey_cardinal_agent::AgentConfig& config
-) {
-    using namespace grey_cardinal_agent;
-    if (config.asr_provider == "mock") {
-        return std::make_unique<MockAsrProvider>(config.mock_phrases);
-    }
-    if (config.asr_provider == "faster_whisper_http") {
-        const std::string url = config.asr_url.empty()
-            ? "http://localhost:8030/transcribe"
-            : config.asr_url;
-        return std::make_unique<FasterWhisperHttpProvider>(url);
-    }
-    if (config.asr_provider == "whisper_cli") {
-        return std::make_unique<WhisperCliProvider>(config.asr_command);
-    }
-    if (config.asr_provider == "speechkit") {
-        return std::make_unique<SpeechKitProvider>();
-    }
-    throw std::runtime_error("unsupported ASR provider: " + config.asr_provider);
-}
-
-bool desktop_upload_config_is_valid(
-    const grey_cardinal_agent::AgentConfig& config,
-    grey_cardinal_agent::Logger& logger
-) {
-    if (config.dry_run) {
-        return true;
-    }
-    bool ok = true;
-    if (config.internal_token.empty()) {
-        logger.error("internal token is required for desktop transcript uploads");
-        ok = false;
-    }
-    if (!grey_cardinal_agent::has_desktop_identity(config)) {
-        logger.error("user_id, device_id, and client_session_id are required for desktop transcript uploads");
-        ok = false;
-    }
-    if (config.display_name.empty()) {
-        logger.warn("display_name is empty; server will still resolve identity from headers");
-    }
-    return ok;
+void print_status(const std::string& status) {
+    std::cout << "[" << status << "]\n" << std::flush;
 }
 
 } // namespace
@@ -75,167 +32,155 @@ int main(int argc, char** argv) {
 
     try {
         AgentConfig config = load_config_from_args(argc, argv);
+
         if (config.help) {
             std::cout << help_text();
             return 0;
         }
 
         Logger logger(Logger::default_log_path());
-        logger.info("Grey Cardinal desktop agent starting");
+        logger.info("Grey Cardinal desktop audio agent starting");
         logger.info("log_file=" + logger.path().string());
         logger.info("config " + config_summary(config));
-        if (config.asr_provider == "mock") {
-            logger.warn(
-                "ASR: mock -- transcripts are simulated phrases, not real speech recognition. "
-                "Set asr_provider=faster_whisper_http or whisper_cli for real ASR."
-            );
-        } else {
-            logger.info("ASR: " + config.asr_provider);
-        }
 
-        if (config.capture_mode == CaptureMode::MixedMeetingExperimental) {
-            logger.warn("mixed_meeting_experimental is not implemented in v0");
-            std::cerr << "capture mode mixed_meeting_experimental is not implemented in v0\n";
-            return 2;
+        // Auto-generate meeting_id if not provided.
+        if (config.meeting_id.empty()) {
+            config.meeting_id = generate_uuid();
+            logger.info("meeting_id auto-generated: " + config.meeting_id);
         }
 
 #if defined(_WIN32)
-        WindowsWasapiEndpointKind endpoint_kind =
-            config.capture_mode == CaptureMode::SystemLoopbackExperimental
+        const WindowsWasapiEndpointKind endpoint_kind =
+            config.capture_mode == CaptureMode::SystemLoopback
                 ? WindowsWasapiEndpointKind::RenderLoopback
                 : WindowsWasapiEndpointKind::InputMicrophone;
+
         WindowsWasapiCapture capture(
             endpoint_kind,
             config.input_device_id,
             config.input_device_index,
             config.input_device_name
         );
+
         const auto devices = capture.list_devices();
+
         if (config.list_devices) {
             std::cout << "Input devices:\n";
             for (const auto& device : devices) {
                 const char* marker = device.is_default ? "* " : "  ";
-                std::cout << marker << "[" << device.index << "] ";
-                if (!device.role.empty()) {
-                    std::cout << device.role << ": ";
-                }
-                std::cout << device.name << "\n"
+                std::cout << marker << "[" << device.index << "] " << device.name << "\n"
                           << "    id: " << device.id << "\n";
-                if (!device.role.empty()) {
-                    std::cout << "    role: " << device.role << "\n";
-                }
             }
             return 0;
         }
+
+        // Log selected device.
+        for (const auto& device : devices) {
+            if (device.is_default_communications || device.is_default) {
+                logger.info("capture device: " + device.name + " id=" + device.id);
+                break;
+            }
+        }
+        if (!config.input_device_id.empty()) {
+            logger.info("capture device override id=" + config.input_device_id);
+        } else if (config.input_device_index >= 0) {
+            logger.info("capture device override index=" + std::to_string(config.input_device_index));
+        }
 #else
         if (config.list_devices) {
-            std::cerr << "device listing is not implemented for this platform yet\n";
+            std::cerr << "device listing is not implemented for this platform\n";
             return 2;
         }
-        std::cerr << "desktop agent capture is not implemented for this platform yet\n";
+        std::cerr << "audio capture is not implemented for this platform\n";
         return 2;
 #endif
 
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
 
-        const auto started_at = std::chrono::steady_clock::now();
+        // ── IDLE → RECORDING ─────────────────────────────────────────────────
 
-        if (config.capture_mode == CaptureMode::SystemLoopbackExperimental) {
-            logger.warn(
-                "system_loopback_experimental is legacy/dev only and is not trusted for desktop speaker identity"
-            );
-            for (const auto& device : devices) {
-                if (device.is_default) {
-                    logger.info("selected render loopback device " + device.name);
+        AudioRecorder recorder(config, logger);
+        recorder.start();
+
+        print_status("recording");
+        logger.info(
+            "recording started"
+            " meeting_id=" + config.meeting_id +
+            " mode=" + capture_mode_value(config.capture_mode) +
+            (config.duration_sec > 0
+                ? " duration_sec=" + std::to_string(config.duration_sec)
+                : " (Ctrl+C to stop)")
+        );
+
+#if defined(_WIN32)
+        capture.start([&recorder](const AudioFrame& frame) {
+            recorder.handle_frame(frame);
+        });
+#endif
+
+        const auto rec_started = std::chrono::steady_clock::now();
+        while (!g_stop_requested) {
+            if (config.duration_sec > 0) {
+                const auto elapsed = std::chrono::steady_clock::now() - rec_started;
+                if (elapsed >= std::chrono::seconds(config.duration_sec)) {
+                    logger.info("duration reached; stopping");
                     break;
                 }
             }
-            ChunkUploader uploader(config, logger);
-            capture.start([&uploader](const AudioFrame& frame) {
-                uploader.handle_frame(frame);
-            });
-
-            logger.info("loopback capture started; press Ctrl+C to stop");
-            while (!g_stop_requested) {
-                if (config.duration_sec > 0) {
-                    const auto elapsed = std::chrono::steady_clock::now() - started_at;
-                    if (elapsed >= std::chrono::seconds(config.duration_sec)) {
-                        logger.info("duration reached; stopping capture");
-                        break;
-                    }
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-
-            logger.info("stopping loopback capture");
-            capture.stop();
-            uploader.flush();
-        } else {
-            if (!desktop_upload_config_is_valid(config, logger)) {
-                return 2;
-            }
-            auto asr_provider = make_asr_provider(config);
-            DesktopTranscriptUploader uploader(config, logger, *asr_provider);
-
-            if (config.capture_mode == CaptureMode::Mock) {
-                logger.warn(
-                    "mock capture mode uses no audio and is for development only; "
-                    "use capture_mode=microphone with asr_provider=mock for trusted v0"
-                );
-                logger.info("mock capture started; press Ctrl+C to stop");
-                while (!g_stop_requested) {
-                    if (config.duration_sec > 0) {
-                        const auto elapsed = std::chrono::steady_clock::now() - started_at;
-                        if (elapsed >= std::chrono::seconds(config.duration_sec)) {
-                            logger.info("duration reached; stopping mock capture");
-                            break;
-                        }
-                    }
-                    uploader.emit_mock_tick();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(config.chunk_ms));
-                }
-            } else {
-                for (const auto& device : devices) {
-                    if (device.is_default_communications || device.is_default) {
-                        logger.info("selected_input_device_name=" + device.name);
-                        logger.info("selected_input_device_id=" + device.id);
-                        logger.info("selected_input_device_role=" + (device.role.empty() ? "default" : device.role));
-                        logger.info("mic_gain=" + std::to_string(config.mic_gain));
-                        break;
-                    }
-                }
-                if (!config.input_device_id.empty()) {
-                    logger.info("selected_input_device_id=<explicit:" + config.input_device_id + ">");
-                } else if (config.input_device_index >= 0) {
-                    logger.info("selected_input_device_index=" + std::to_string(config.input_device_index));
-                } else if (!config.input_device_name.empty()) {
-                    logger.info("selected_input_device_name_filter=" + config.input_device_name);
-                }
-                capture.start([&uploader](const AudioFrame& frame) {
-                    uploader.handle_frame(frame);
-                });
-
-                logger.info("microphone capture started; press Ctrl+C to stop");
-                while (!g_stop_requested) {
-                    if (config.duration_sec > 0) {
-                        const auto elapsed = std::chrono::steady_clock::now() - started_at;
-                        if (elapsed >= std::chrono::seconds(config.duration_sec)) {
-                            logger.info("duration reached; stopping microphone capture");
-                            break;
-                        }
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                }
-
-                logger.info("stopping microphone capture");
-                capture.stop();
-                uploader.flush();
-            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
 
-        logger.info("agent stopped");
-        return 0;
+        // ── RECORDING → SAVING ────────────────────────────────────────────────
+
+        logger.info("stopping capture");
+#if defined(_WIN32)
+        capture.stop();
+#endif
+        recorder.stop();
+
+        const auto wav_path = recorder.outputFilePath();
+        if (wav_path.empty()) {
+            logger.error("no audio data captured; nothing to upload");
+            print_status("error: no audio captured");
+            return 1;
+        }
+
+        logger.info("audio saved: " + wav_path.string());
+
+        // ── SAVING → UPLOADING ────────────────────────────────────────────────
+
+        print_status("uploading");
+        logger.info("uploading to " + config.backend_url);
+
+        const UploadMetadata metadata{
+            config.agent_id,
+            config.meeting_id,
+            format_iso8601(recorder.startedAt()),
+            format_iso8601(recorder.endedAt()),
+        };
+
+        Uploader uploader(config, logger);
+        const UploadResult upload_result = uploader.uploadAudio(wav_path, metadata);
+
+        // ── UPLOADING → UPLOADED / ERROR ──────────────────────────────────────
+
+        if (upload_result.ok) {
+            logger.info(
+                "upload complete"
+                " audio_id=" + upload_result.audio_id +
+                " message=" + upload_result.message
+            );
+            print_status("uploaded: audio_id=" + upload_result.audio_id);
+            return 0;
+        } else {
+            logger.error("upload failed: " + upload_result.error);
+            std::cerr << "Upload failed: " << upload_result.error << "\n"
+                      << "File preserved at: " << wav_path.string() << "\n";
+            print_status("error: upload failed");
+            return 1;
+        }
+
     } catch (const std::exception& exc) {
         std::cerr << "grey-cardinal-agent error: " << exc.what() << '\n';
         return 1;

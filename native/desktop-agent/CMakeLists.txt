@@ -1,21 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(grey-cardinal-agent VERSION 0.1.0 LANGUAGES CXX)
+project(grey-cardinal-agent VERSION 0.2.0 LANGUAGES CXX)
 
 include(cmake/PlatformOptions.cmake)
 
 include(CTest)
 
+# Core library: config, recording, upload, WAV writing, logging.
+# No ASR, no task extraction, no transcript processing.
 add_library(grey-cardinal-agent-core STATIC
-    src/asr_provider.cpp
-    src/audio_metrics.cpp
     src/config.cpp
-    src/desktop_transcript.cpp
-    src/desktop_transcript_uploader.cpp
+    src/audio_recorder.cpp
+    src/uploader.cpp
     src/logger.cpp
     src/wav_writer.cpp
-    src/http_client.cpp
-    src/chunk_uploader.cpp
 )
 
 target_include_directories(grey-cardinal-agent-core
@@ -37,6 +35,7 @@ if(WIN32)
     target_link_libraries(grey-cardinal-agent-core
         PUBLIC
             winhttp
+            ole32      # CoCreateGuid for UUID generation
     )
 
     add_executable(grey-cardinal-agent
@@ -62,7 +61,6 @@ if(WIN32)
     target_link_libraries(grey-cardinal-agent
         PRIVATE
             grey-cardinal-agent-core
-            ole32
             avrt
             mmdevapi
             propsys

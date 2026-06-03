@@ -331,4 +331,35 @@ HttpUploadResult HttpClient::post_desktop_transcript(const DesktopTranscriptUplo
 #endif
 }
 
+HttpUploadResult http_post_bytes(
+    const std::string& url,
+    const std::string& content_type,
+    const std::vector<std::byte>& body
+) {
+#if defined(_WIN32)
+    // Split URL into server base + path using parse_url
+    ParsedUrl parsed;
+    try {
+        parsed = parse_url(url);
+    } catch (const std::exception& exc) {
+        return {false, 0, {}, exc.what()};
+    }
+
+    const std::string server_base = (parsed.https ? "https" : "http") + std::string("://") +
+                                    parsed.host + ":" + std::to_string(parsed.port);
+    const std::vector<std::pair<std::string, std::string>> headers = {
+        {"Content-Type", content_type},
+    };
+
+    const DWORD body_size = static_cast<DWORD>(body.size());
+    const void* body_ptr = body.empty() ? nullptr : body.data();
+    return winhttp_post(server_base, parsed.path, headers, body_ptr, body_size);
+#else
+    (void)url;
+    (void)content_type;
+    (void)body;
+    return {false, 0, {}, "http_post_bytes not implemented on this platform"};
+#endif
+}
+
 } // namespace grey_cardinal_agent
