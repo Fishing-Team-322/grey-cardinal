@@ -15,23 +15,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from brain_api.application.text_policy import has_action_verb
 from grey_cardinal_contracts import KnownUser, TaskExtractionResult, TaskPriority
-
-# Стемы-индикаторы поручения (без учёта окончаний).
-_TASK_STEMS = (
-    "подготов", "сделай", "сдела", "сделать", "проверь", "провер", "нужно",
-    "надо", "должен", "должна", "должны", "добав", "напиш", "написать",
-    "исправ", "оформ", "созда", "отправ", "залить", "выложить", "выложи",
-    "обнов", "сверст", "почин", "реализ", "запили", "запус", "настро",
-    "собери", "собрать", "протестир", "затащи", "доделай", "доделать",
-)
-
-_NON_TASK_INDICATOR_WORDS = {
-    "настроение",
-    "настроения",
-    "настроением",
-    "настроению",
-}
 
 _PRIORITY_HIGH = ("срочно", "asap", "критич", "немедленно", "горит")
 
@@ -65,7 +50,7 @@ class HeuristicTaskExtractor:
     ) -> TaskExtractionResult:
         lowered = text.lower()
 
-        has_indicator = _has_task_indicator(lowered)
+        has_indicator = has_action_verb(text)
         username = _USERNAME_RE.search(text)
         assignee = _extract_assignee(text, lowered, username, known_users)
 
@@ -103,15 +88,6 @@ class HeuristicTaskExtractor:
 # --------------------------------------------------------------------------- #
 # Вспомогательные функции
 # --------------------------------------------------------------------------- #
-def _has_task_indicator(lowered: str) -> bool:
-    for stem in _TASK_STEMS:
-        pattern = rf"\b{re.escape(stem)}[\w-]*"
-        for match in re.finditer(pattern, lowered):
-            if match.group(0) not in _NON_TASK_INDICATOR_WORDS:
-                return True
-    return False
-
-
 def _extract_assignee(
     text: str,
     lowered: str,
@@ -220,8 +196,11 @@ def _build_title(
 
     # Убрать ведущее «Имя,».
     if assignee and not assignee.startswith("@"):
-        result = re.sub(rf"^{re.escape(assignee)}\s*,?\s*", "", result).strip()
         result = re.sub(rf"^{re.escape(assignee)}\s+должн[аы]?\s+", "", result).strip()
+        result = re.sub(rf"^{re.escape(assignee)}\s*,?\s*", "", result).strip()
+
+    # Убрать оставшееся ведущее «должна/должен/должны».
+    result = re.sub(r"^должн[аыо]?\s+", "", result, flags=re.IGNORECASE).strip()
 
     # Убрать хвост-дедлайн (фразу «до завтра 18:00», «к пятнице» и т.п.).
     result = re.sub(

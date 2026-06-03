@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
-from brain_api.application.rendering import render_status_changed
+from brain_api.application.rendering import BOARD_SYNC_FAILED_TEXT, render_status_changed
 from brain_api.application.use_cases.gamification import GamificationService
 from brain_api.domain.entities import AuditLog, Task
 from brain_api.domain.enums import TaskStatus, XpEventKind
@@ -54,7 +54,7 @@ class UpdateTaskStatus:
             task.completed_at = now
         await self._uow.tasks.update(task)
 
-        await self._sync_board(task, new_status)
+        board_synced = await self._sync_board(task, new_status)
 
         await self._uow.audit.add(
             AuditLog(
@@ -97,7 +97,10 @@ class UpdateTaskStatus:
                     idempotency_key=f"task_completed:{task.id}",
                 )
         await self._uow.commit()
-        return _msg(chat_id, render_status_changed(task))
+        text = render_status_changed(task)
+        if not board_synced:
+            text = f"{text}\n\n{BOARD_SYNC_FAILED_TEXT}"
+        return _msg(chat_id, text)
 
     async def _resolve_task(self, ref: str) -> Task | None:
         sequence = parse_public_id(ref)
@@ -115,10 +118,11 @@ class UpdateTaskStatus:
         except (ValueError, AttributeError):
             return None
 
-    async def _sync_board(self, task: Task, status: TaskStatus) -> None:
+    async def _sync_board(self, task: Task, status: TaskStatus) -> bool:
+        """Синхронизировать карточку на доске. True — успех/нет карточки, False — ошибка."""
         card = await self._uow.board_cards.get_by_task(task.id)
         if card is None:
-            return
+            return True
         try:
             if status == TaskStatus.done:
                 await self._board.close_card(card.external_card_id)
@@ -136,6 +140,8 @@ class UpdateTaskStatus:
                     payload={"error": str(exc), "status": status.value},
                 )
             )
+            return False
+        return True
 
 
 def _msg(chat_id: int, text: str) -> ActionsResponse:

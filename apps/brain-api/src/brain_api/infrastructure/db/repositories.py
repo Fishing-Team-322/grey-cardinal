@@ -1015,6 +1015,18 @@ class TaskRepositoryImpl:
         )
         return int(result or 0)
 
+    async def list_completed_since(self, since: datetime) -> list[Task]:
+        rows = await self._s.scalars(
+            select(m.TaskModel)
+            .where(
+                m.TaskModel.status == TaskStatus.done.value,
+                m.TaskModel.completed_at.is_not(None),
+                m.TaskModel.completed_at >= since,
+            )
+            .order_by(m.TaskModel.seq)
+        )
+        return [_task(r) for r in rows]
+
     async def count_overdue(self, now: datetime) -> int:
         result = await self._s.scalar(
             select(func.count())
@@ -1188,6 +1200,28 @@ class ReminderRepositoryImpl:
             )
         )
 
+    async def count_for_user_since(
+        self, recipient_telegram_user_id: int, since: datetime
+    ) -> int:
+        result = await self._s.scalar(
+            select(func.count())
+            .select_from(m.ReminderLogModel)
+            .where(
+                m.ReminderLogModel.recipient_telegram_user_id == recipient_telegram_user_id,
+                m.ReminderLogModel.sent_at >= since,
+            )
+        )
+        return int(result or 0)
+
+    async def last_sent_to_user(
+        self, recipient_telegram_user_id: int
+    ) -> datetime | None:
+        return await self._s.scalar(
+            select(func.max(m.ReminderLogModel.sent_at)).where(
+                m.ReminderLogModel.recipient_telegram_user_id == recipient_telegram_user_id,
+            )
+        )
+
 
 class DigestRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
@@ -1212,6 +1246,18 @@ class DigestRepositoryImpl:
             .select_from(m.DigestLogModel)
             .where(
                 m.DigestLogModel.telegram_chat_id == chat_id,
+                m.DigestLogModel.sent_at >= start,
+            )
+        )
+        return bool(result)
+
+    async def sent_today_for_user(self, telegram_user_id: int, day: datetime) -> bool:
+        start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        result = await self._s.scalar(
+            select(func.count())
+            .select_from(m.DigestLogModel)
+            .where(
+                m.DigestLogModel.telegram_user_id == telegram_user_id,
                 m.DigestLogModel.sent_at >= start,
             )
         )

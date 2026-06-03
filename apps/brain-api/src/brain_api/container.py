@@ -47,6 +47,14 @@ class Container:
             default_workspace_name=settings.default_workspace_name,
             default_telegram_chat_id=settings.default_telegram_chat_id,
             desktop_auto_confirm_proposals=settings.desktop_auto_confirm_proposals,
+            task_extraction_min_confidence=settings.task_extraction_min_confidence,
+            task_extraction_require_action_verb=settings.task_extraction_require_action_verb,
+            duplicate_similarity_threshold=settings.duplicate_similarity_threshold,
+            reminder_min_interval_minutes=settings.reminder_min_interval_minutes,
+            reminder_max_daily_per_user=settings.reminder_max_daily_per_user,
+            reminder_quiet_hours_start=settings.reminder_quiet_hours_start,
+            reminder_quiet_hours_end=settings.reminder_quiet_hours_end,
+            demo_core_auto_confirm=settings.demo_core_auto_confirm,
         )
 
         self.engine: AsyncEngine = create_engine(settings.database_url, echo=settings.db_echo)

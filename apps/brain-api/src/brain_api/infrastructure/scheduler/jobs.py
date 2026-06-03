@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from brain_api.application.use_cases.send_deadline_reminders import SendDeadlineReminders
-from brain_api.application.use_cases.send_evening_digest import SendEveningDigest
+from brain_api.application.use_cases.send_personal_evening_digests import (
+    SendPersonalEveningDigests,
+)
 from brain_api.application.use_cases.send_stale_status_reminders import SendStaleStatusReminders
 
 if TYPE_CHECKING:
@@ -27,8 +29,11 @@ async def run_stale_reminders(container: Container) -> None:
 
 
 async def run_evening_digest(container: Container) -> None:
+    # Планировщик рассылает персональные дайджесты каждому пользователю с задачами.
     async with container.make_uow() as uow:
-        await SendEveningDigest(uow, container.telegram_gateway, container.config).execute()
+        await SendPersonalEveningDigests(
+            uow, container.telegram_gateway, container.config
+        ).execute()
 
 
 def register_jobs(scheduler, container: Container) -> None:

@@ -18,6 +18,22 @@ class AppConfig:
     # Demo/dev mode: auto-confirm desktop proposals so tasks appear in GET /desktop/tasks.
     desktop_auto_confirm_proposals: bool = False
 
+    # Политика извлечения задач.
+    task_extraction_min_confidence: float = 0.65
+    task_extraction_require_action_verb: bool = True
+
+    # Детекция дублей.
+    duplicate_similarity_threshold: float = 0.72
+
+    # Анти-спам политика напоминаний.
+    reminder_min_interval_minutes: int = 120
+    reminder_max_daily_per_user: int = 3
+    reminder_quiet_hours_start: str = "22:00"
+    reminder_quiet_hours_end: str = "09:00"
+
+    # Dev-only auto-confirm для /demo_core.
+    demo_core_auto_confirm: bool = True
+
     def now(self) -> datetime:
         """Текущее время в настроенной таймзоне (tz-aware)."""
         return datetime.now(ZoneInfo(self.timezone))

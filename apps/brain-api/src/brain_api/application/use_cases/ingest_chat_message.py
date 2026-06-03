@@ -1,4 +1,9 @@
-"""Use case: приём нормализованного Telegram-сообщения из чата."""
+"""Use case: приём нормализованного Telegram-сообщения из чата.
+
+Поток: сохранить сообщение -> извлечь задачу -> policy-фильтр -> детекция дубля
+-> proposal с подтверждением. Болтовня и низкоуверенные срабатывания не доходят
+до чата; дубли отвечают «такая задача уже есть» и не создают вторую карточку.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +11,22 @@ from uuid import uuid4
 
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import EventPublisher, TaskExtractor, UnitOfWork
-from brain_api.application.use_cases._shared import create_proposal_with_confirmation
-from brain_api.domain.entities import ChatMessage
+from brain_api.application.rendering import render_duplicate_warning
+from brain_api.application.text_policy import evaluate_task_extraction
+from brain_api.application.use_cases._shared import (
+    create_proposal_with_confirmation,
+    match_assignee,
+)
+from brain_api.application.use_cases.find_similar_task import FindSimilarTask
+from brain_api.domain.entities import AuditLog, ChatMessage
 from brain_api.domain.enums import TaskSource
 from grey_cardinal_contracts import (
     ActionsResponse,
+    EventName,
     KnownUser,
+    SendMessageAction,
     TelegramMessageEvent,
+    WebsocketEvent,
 )
 
 
@@ -72,9 +86,70 @@ class IngestChatMessage:
             known_users=known_users,
         )
 
-        if not extraction.has_task:
+        # Policy-слой: отсекаем болтовню и низкоуверенные срабатывания до чата.
+        decision = evaluate_task_extraction(extraction, event.text, self._config)
+        if not decision.create_proposal:
+            if extraction.has_task:
+                # Был сигнал, но policy не пропустил — оставляем audit-след, в чат молчим.
+                await uow.audit.add(
+                    AuditLog(
+                        id=uuid4(),
+                        actor_type="system",
+                        action="task_extraction_suppressed",
+                        entity_type="chat_message",
+                        entity_id=message.id,
+                        payload={
+                            "reason": decision.reason,
+                            "confidence": extraction.confidence,
+                            "title": extraction.title,
+                        },
+                    )
+                )
             await uow.commit()
             return ActionsResponse(actions=[])
+
+        # Детекция дубля: сопоставляем исполнителя и ищем похожую активную задачу.
+        known = await uow.users.list_known()
+        assignee_text, assignee_id = match_assignee(extraction.assignee, known)
+        new_title = extraction.title or event.text[:120]
+        similar = await FindSimilarTask(uow, self._config).execute(
+            title=new_title,
+            assignee_id=assignee_id,
+            assignee_text=assignee_text,
+            deadline=extraction.deadline,
+            project_id=project.id,
+        )
+        if similar.is_duplicate and similar.task is not None:
+            await self._events.publish(
+                WebsocketEvent(
+                    event=EventName.duplicate_task_detected,
+                    payload={
+                        "existing_task_id": str(similar.task.id),
+                        "public_id": similar.task.public_id,
+                        "new_title": new_title,
+                        "score": similar.score,
+                    },
+                )
+            )
+            await uow.audit.add(
+                AuditLog(
+                    id=uuid4(),
+                    actor_type="system",
+                    action="duplicate_task_detected",
+                    entity_type="task",
+                    entity_id=similar.task.id,
+                    payload={
+                        "public_id": similar.task.public_id,
+                        "new_title": new_title,
+                        "score": similar.score,
+                    },
+                )
+            )
+            await uow.commit()
+            text = render_duplicate_warning(similar.task, self._config.timezone)
+            return ActionsResponse(
+                actions=[SendMessageAction(chat_id=event.chat.id, text=text)]
+            )
 
         action = await create_proposal_with_confirmation(
             uow,

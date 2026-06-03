@@ -45,6 +45,22 @@ class Settings(BaseSettings):
     default_workspace_name: str = "Hackathon Team"
     default_telegram_chat_id: int | None = None
 
+    # Политика извлечения задач: порог уверенности и требование глагола-поручения.
+    task_extraction_min_confidence: float = 0.65
+    task_extraction_require_action_verb: bool = True
+
+    # Порог похожести для детекции дублей (см. FindSimilarTask).
+    duplicate_similarity_threshold: float = 0.72
+
+    # Анти-спам политика напоминаний.
+    reminder_min_interval_minutes: int = 120
+    reminder_max_daily_per_user: int = 3
+    reminder_quiet_hours_start: str = "22:00"
+    reminder_quiet_hours_end: str = "09:00"
+
+    # Dev-only: /demo_core автоматически подтверждает proposal, чтобы показать карточку.
+    demo_core_auto_confirm: bool = True
+
     # Demo/dev mode: automatically confirm proposals from desktop transcripts.
     # When True, the desktop transcript pipeline confirms proposals immediately,
     # making tasks visible in GET /desktop/tasks without manual confirmation.

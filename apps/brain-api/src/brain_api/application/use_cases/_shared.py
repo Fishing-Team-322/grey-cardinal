@@ -17,8 +17,11 @@ from grey_cardinal_contracts import (
 )
 
 
-def _match_assignee(assignee: str | None, known: list[User]) -> tuple[str | None, UUID | None]:
-    """Сопоставить текст ответственного с известным пользователем."""
+def match_assignee(assignee: str | None, known: list[User]) -> tuple[str | None, UUID | None]:
+    """Сопоставить текст ответственного с известным пользователем.
+
+    Возвращает (отображаемый текст, id пользователя | None).
+    """
     if not assignee:
         return None, None
     needle = assignee.strip().lstrip("@").lower()
@@ -31,6 +34,10 @@ def _match_assignee(assignee: str | None, known: list[User]) -> tuple[str | None
         if user.display_name and needle and needle in user.display_name.lower():
             return assignee, user.id
     return assignee, None
+
+
+# Обратная совместимость для внутренних вызовов.
+_match_assignee = match_assignee
 
 
 async def create_proposal_with_confirmation(
