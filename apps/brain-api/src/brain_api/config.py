@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     default_workspace_name: str = "Hackathon Team"
     default_telegram_chat_id: int | None = None
 
+    # Demo/dev mode: automatically confirm proposals from desktop transcripts.
+    # When True, the desktop transcript pipeline confirms proposals immediately,
+    # making tasks visible in GET /desktop/tasks without manual confirmation.
+    # WARNING: do not enable in production.
+    desktop_auto_confirm_proposals: bool = False
+
     @property
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key and self.llm_base_url and self.llm_model)

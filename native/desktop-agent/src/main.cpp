@@ -32,7 +32,13 @@ std::unique_ptr<grey_cardinal_agent::IAsrProvider> make_asr_provider(
         return std::make_unique<MockAsrProvider>(config.mock_phrases);
     }
     if (config.asr_provider == "faster_whisper_http") {
-        return std::make_unique<FasterWhisperHttpProvider>();
+        const std::string url = config.asr_url.empty()
+            ? "http://localhost:8030/transcribe"
+            : config.asr_url;
+        return std::make_unique<FasterWhisperHttpProvider>(url);
+    }
+    if (config.asr_provider == "whisper_cli") {
+        return std::make_unique<WhisperCliProvider>(config.asr_command);
     }
     if (config.asr_provider == "speechkit") {
         return std::make_unique<SpeechKitProvider>();
@@ -78,6 +84,14 @@ int main(int argc, char** argv) {
         logger.info("Grey Cardinal desktop agent starting");
         logger.info("log_file=" + logger.path().string());
         logger.info("config " + config_summary(config));
+        if (config.asr_provider == "mock") {
+            logger.warn(
+                "ASR: mock -- transcripts are simulated phrases, not real speech recognition. "
+                "Set asr_provider=faster_whisper_http or whisper_cli for real ASR."
+            );
+        } else {
+            logger.info("ASR: " + config.asr_provider);
+        }
 
         if (config.capture_mode == CaptureMode::MixedMeetingExperimental) {
             logger.warn("mixed_meeting_experimental is not implemented in v0");
@@ -90,12 +104,26 @@ int main(int argc, char** argv) {
             config.capture_mode == CaptureMode::SystemLoopbackExperimental
                 ? WindowsWasapiEndpointKind::RenderLoopback
                 : WindowsWasapiEndpointKind::InputMicrophone;
-        WindowsWasapiCapture capture(endpoint_kind, config.input_device_id);
+        WindowsWasapiCapture capture(
+            endpoint_kind,
+            config.input_device_id,
+            config.input_device_index,
+            config.input_device_name
+        );
         const auto devices = capture.list_devices();
         if (config.list_devices) {
+            std::cout << "Input devices:\n";
             for (const auto& device : devices) {
-                std::cout << (device.is_default ? "* " : "  ")
-                          << device.name << " [" << device.id << "]\n";
+                const char* marker = device.is_default ? "* " : "  ";
+                std::cout << marker << "[" << device.index << "] ";
+                if (!device.role.empty()) {
+                    std::cout << device.role << ": ";
+                }
+                std::cout << device.name << "\n"
+                          << "    id: " << device.id << "\n";
+                if (!device.role.empty()) {
+                    std::cout << "    role: " << device.role << "\n";
+                }
             }
             return 0;
         }
@@ -169,10 +197,20 @@ int main(int argc, char** argv) {
                 }
             } else {
                 for (const auto& device : devices) {
-                    if (device.is_default) {
-                        logger.info("selected input device " + device.name);
+                    if (device.is_default_communications || device.is_default) {
+                        logger.info("selected_input_device_name=" + device.name);
+                        logger.info("selected_input_device_id=" + device.id);
+                        logger.info("selected_input_device_role=" + (device.role.empty() ? "default" : device.role));
+                        logger.info("mic_gain=" + std::to_string(config.mic_gain));
                         break;
                     }
+                }
+                if (!config.input_device_id.empty()) {
+                    logger.info("selected_input_device_id=<explicit:" + config.input_device_id + ">");
+                } else if (config.input_device_index >= 0) {
+                    logger.info("selected_input_device_index=" + std::to_string(config.input_device_index));
+                } else if (!config.input_device_name.empty()) {
+                    logger.info("selected_input_device_name_filter=" + config.input_device_name);
                 }
                 capture.start([&uploader](const AudioFrame& frame) {
                     uploader.handle_frame(frame);

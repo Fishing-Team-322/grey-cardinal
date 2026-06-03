@@ -12,6 +12,10 @@ struct AudioDeviceInfo {
     std::string id;
     std::string name;
     bool is_default = false;
+    bool is_default_communications = false;
+    // "default", "communications", "default+communications", or empty
+    std::string role;
+    int index = 0;
 };
 
 using AudioFrameCallback = std::function<void(const AudioFrame&)>;

@@ -13,6 +13,9 @@ param(
     [ValidateSet("microphone", "mock")]
     [string]$CaptureMode = "microphone",
     [string]$InputDeviceId = "",
+    [int]$InputDeviceIndex = -1,
+    [string]$InputDeviceName = "",
+    [float]$MicGain = 1.0,
     [int]$DurationSec = 0,
     [string]$SaveChunks = "",
     [switch]$DryRun,
@@ -54,6 +57,18 @@ try {
         -InputDeviceId $InputDeviceId
 
     $args = @("--config", "$configPath")
+    if ($InputDeviceId) {
+        $args += @("--input-device-id", $InputDeviceId)
+    }
+    if ($InputDeviceIndex -ge 0) {
+        $args += @("--input-device-index", "$InputDeviceIndex")
+    }
+    if ($InputDeviceName) {
+        $args += @("--input-device-name", $InputDeviceName)
+    }
+    if ($MicGain -ne 1.0) {
+        $args += @("--mic-gain", "$MicGain")
+    }
     if ($DurationSec -gt 0) {
         $args += @("--duration-sec", "$DurationSec")
     }

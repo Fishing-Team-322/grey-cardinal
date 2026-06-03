@@ -113,10 +113,20 @@ void apply_key_value(AgentConfig& config, const std::string& key, const std::str
         config.capture_mode = parse_capture_mode(value);
     } else if (key == "input_device_id") {
         config.input_device_id = value;
+    } else if (key == "input_device_index") {
+        config.input_device_index = std::stoi(value);
+    } else if (key == "input_device_name") {
+        config.input_device_name = value;
+    } else if (key == "mic_gain") {
+        config.mic_gain = std::stof(value);
     } else if (key == "chunk_ms") {
         config.chunk_ms = std::stoi(value);
     } else if (key == "asr_provider") {
         config.asr_provider = value;
+    } else if (key == "asr_url") {
+        config.asr_url = value;
+    } else if (key == "asr_command") {
+        config.asr_command = value;
     } else if (key == "mock_phrases") {
         config.mock_phrases = parse_string_array(raw_value);
     } else if (key == "duration_sec") {
@@ -259,8 +269,18 @@ void apply_cli_args(AgentConfig& config, const std::vector<std::string>& args) {
             config.capture_mode = parse_capture_mode(require_value(arg));
         } else if (arg == "--input-device-id") {
             config.input_device_id = require_value(arg);
+        } else if (arg == "--input-device-index") {
+            config.input_device_index = std::stoi(require_value(arg));
+        } else if (arg == "--input-device-name") {
+            config.input_device_name = require_value(arg);
+        } else if (arg == "--mic-gain") {
+            config.mic_gain = std::stof(require_value(arg));
         } else if (arg == "--asr-provider") {
             config.asr_provider = require_value(arg);
+        } else if (arg == "--asr-url") {
+            config.asr_url = require_value(arg);
+        } else if (arg == "--asr-command") {
+            config.asr_command = require_value(arg);
         } else if (arg == "--mock-phrase") {
             if (!cli_mock_phrases_overridden) {
                 config.mock_phrases.clear();
@@ -368,6 +388,9 @@ std::string config_summary(const AgentConfig& config) {
            << " meeting_id=" << config.meeting_id
            << " capture_mode=" << capture_mode_value(config.capture_mode)
            << " input_device_id=" << (config.input_device_id.empty() ? "<default>" : "<set>")
+           << " input_device_index=" << config.input_device_index
+           << " input_device_name=" << (config.input_device_name.empty() ? "<not-set>" : config.input_device_name)
+           << " mic_gain=" << config.mic_gain
            << " chunk_ms=" << config.chunk_ms
            << " duration_sec=" << config.duration_sec
            << " asr_provider=" << config.asr_provider
@@ -398,7 +421,12 @@ Options:
   --workspace-id <uuid-or-empty> optional workspace id
   --display-name <n>   display name used in transcript payload
   --capture-mode <m>   microphone (default), system_loopback_experimental, mixed_meeting_experimental, or mock
-  --input-device-id <id> Windows input device id, default input if omitted
+  --input-device-id <id>    Windows input device id (exact), default input if omitted
+  --input-device-index <n>  Windows input device index (0-based, from --list-input-devices)
+  --input-device-name <sub> Windows input device name substring match (case-insensitive)
+  --mic-gain <f>            microphone gain multiplier, default 1.0
+  --asr-url <url>           ASR HTTP server URL (for faster_whisper_http)
+  --asr-command <cmd>       ASR CLI command with %WAV% placeholder (for whisper_cli)
   --asr-provider <p>   mock (default); real providers are adapter placeholders
   --mock-phrase <text> replace configured mock phrases; may be repeated
   --chunk-ms <ms>      chunk duration, default 3000

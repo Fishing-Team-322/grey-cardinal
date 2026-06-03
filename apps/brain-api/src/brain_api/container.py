@@ -46,6 +46,7 @@ class Container:
             evening_digest_hour=settings.evening_digest_hour,
             default_workspace_name=settings.default_workspace_name,
             default_telegram_chat_id=settings.default_telegram_chat_id,
+            desktop_auto_confirm_proposals=settings.desktop_auto_confirm_proposals,
         )
 
         self.engine: AsyncEngine = create_engine(settings.database_url, echo=settings.db_echo)
@@ -104,5 +105,5 @@ class Container:
                 "BOARD_PROVIDER=yougile, но не настроен (%s) — откат на MockBoardGateway",
                 ", ".join(cfg.missing_required),
             )
-        logger.info("Board provider: Mock")
+        logger.info("Board provider: mock")
         return MockBoardGateway()

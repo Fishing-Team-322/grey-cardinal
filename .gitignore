@@ -10,3 +10,44 @@ native/desktop-agent/build/
 chunks/
 native/desktop-agent/chunks/
 
+# Node / frontend
+node_modules/
+apps/*/node_modules/
+apps/desktop-app/node_modules/
+apps/desktop-app/dist/
+apps/desktop-app/.vite/
+
+# Logs
+*.log
+logs/
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# CMake / native builds
+native/desktop-agent/build/
+build/
+cmake-build-*/
+
+# Windows / local agent
+chunks/
+C:/Temp/
+*.wav
+*.pdb
+*.ilk
+*.obj
+*.exe
+*.dll
+
+# Local app data/config examples
+.env
+.env.*
+!.env.example
+config.local.*

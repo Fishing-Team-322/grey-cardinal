@@ -7,20 +7,28 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from brain_api.api.deps import get_container, verify_internal_token
 from brain_api.application.use_cases.desktop_client import (
     DesktopIdentity,
+    confirm_desktop_proposal,
     desktop_tasks,
     gamification_state,
     heartbeat,
     ingest_desktop_transcript,
     join_meeting,
     leave_meeting,
+    list_desktop_proposals,
+    list_desktop_recent_transcripts,
     register_device,
+    reject_desktop_proposal,
     resolve_desktop_identity,
 )
 from brain_api.container import Container
 from grey_cardinal_contracts import (
+    DesktopConfirmProposalResponse,
     DesktopGamificationStateResponse,
     DesktopHeartbeatRequest,
     DesktopHeartbeatResponse,
+    DesktopProposalListResponse,
+    DesktopRecentTranscriptsResponse,
+    DesktopRejectProposalResponse,
     DesktopTaskListResponse,
     DesktopTranscriptRequest,
     JoinMeetingRequest,
@@ -219,3 +227,54 @@ async def gamification(
 ) -> DesktopGamificationStateResponse:
     async with container.make_uow() as uow:
         return await gamification_state(uow, identity)
+
+
+@router.get("/proposals", response_model=DesktopProposalListResponse)
+async def proposals(
+    identity: DesktopIdentity = Depends(_identity),
+    container: Container = Depends(get_container),
+) -> DesktopProposalListResponse:
+    """List pending task proposals for this user from desktop transcripts."""
+    async with container.make_uow() as uow:
+        return await list_desktop_proposals(uow, identity)
+
+
+@router.post("/proposals/{proposal_id}/confirm", response_model=DesktopConfirmProposalResponse)
+async def confirm_proposal(
+    proposal_id: UUID,
+    identity: DesktopIdentity = Depends(_identity),
+    container: Container = Depends(get_container),
+) -> DesktopConfirmProposalResponse:
+    """Confirm a pending proposal, creating a task."""
+    async with container.make_uow() as uow:
+        try:
+            return await confirm_desktop_proposal(
+                uow, container.config, identity, proposal_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/proposals/{proposal_id}/reject", response_model=DesktopRejectProposalResponse)
+async def reject_proposal(
+    proposal_id: UUID,
+    identity: DesktopIdentity = Depends(_identity),
+    container: Container = Depends(get_container),
+) -> DesktopRejectProposalResponse:
+    """Reject a pending proposal."""
+    async with container.make_uow() as uow:
+        try:
+            return await reject_desktop_proposal(uow, identity, proposal_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/transcripts/recent", response_model=DesktopRecentTranscriptsResponse)
+async def recent_transcripts(
+    limit: int = 20,
+    identity: DesktopIdentity = Depends(_identity),
+    container: Container = Depends(get_container),
+) -> DesktopRecentTranscriptsResponse:
+    """Return recent desktop transcript events for this user."""
+    async with container.make_uow() as uow:
+        return await list_desktop_recent_transcripts(uow, identity, limit=limit)

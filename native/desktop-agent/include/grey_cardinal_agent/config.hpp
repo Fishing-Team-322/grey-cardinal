@@ -24,6 +24,11 @@ struct AgentConfig {
     std::string meeting_id = "MTG-1";
     CaptureMode capture_mode = CaptureMode::Microphone;
     std::string input_device_id;
+    int input_device_index = -1;     // -1 = not set
+    std::string input_device_name;   // substring match
+    float mic_gain = 1.0f;
+    std::string asr_url;      // for faster_whisper_http
+    std::string asr_command;  // for whisper_cli
     int chunk_ms = 3000;
     int duration_sec = 0;
     std::string asr_provider = "mock";

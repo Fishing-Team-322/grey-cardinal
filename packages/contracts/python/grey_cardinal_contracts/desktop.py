@@ -184,3 +184,53 @@ class DesktopGamificationStateResponse(BaseModel):
     points_total: int = 0
     level: int = 1
     recent_events: list[XpEventDTO] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Proposals (P4 — demo-ready v0)
+# ---------------------------------------------------------------------------
+
+class DesktopProposalDTO(BaseModel):
+    """A pending task proposal waiting for confirmation."""
+    proposal_id: str
+    confirmation_id: str | None = None
+    title: str
+    description: str | None = None
+    assignee_text: str | None = None
+    priority: str = "medium"
+    raw_text: str
+    source: str = "meeting_transcript"
+    created_at: datetime | None = None
+
+
+class DesktopProposalListResponse(BaseModel):
+    """Response for GET /desktop/proposals"""
+    items: list[DesktopProposalDTO] = Field(default_factory=list)
+
+
+class DesktopConfirmProposalResponse(BaseModel):
+    """Response for POST /desktop/proposals/{id}/confirm"""
+    ok: bool = True
+    task_public_id: str | None = None
+    task_title: str | None = None
+    message: str = "proposal confirmed"
+
+
+class DesktopRejectProposalResponse(BaseModel):
+    """Response for POST /desktop/proposals/{id}/reject"""
+    ok: bool = True
+    message: str = "proposal rejected"
+
+
+class DesktopTranscriptDTO(BaseModel):
+    """A recent desktop transcript event."""
+    id: str
+    meeting_id: str
+    text: str
+    asr_provider: str | None = None
+    created_at: datetime | None = None
+
+
+class DesktopRecentTranscriptsResponse(BaseModel):
+    """Response for GET /desktop/transcripts/recent"""
+    items: list[DesktopTranscriptDTO] = Field(default_factory=list)
