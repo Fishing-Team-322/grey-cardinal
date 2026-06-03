@@ -51,6 +51,35 @@ std::string utf16_to_utf8(const wchar_t* value) {
     return output;
 }
 
+std::wstring utf8_to_utf16(const std::string& value) {
+    if (value.empty()) {
+        return {};
+    }
+
+    const int needed = MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0
+    );
+    if (needed <= 0) {
+        return std::wstring(value.begin(), value.end());
+    }
+
+    std::wstring output(static_cast<std::size_t>(needed), L'\0');
+    MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        value.data(),
+        static_cast<int>(value.size()),
+        output.data(),
+        needed
+    );
+    return output;
+}
+
 void throw_if_failed(HRESULT hr, const char* operation) {
     if (FAILED(hr)) {
         throw std::runtime_error(std::string(operation) + " failed with HRESULT " + std::to_string(hr));
@@ -94,6 +123,22 @@ std::string device_id(IMMDevice* device) {
         CoTaskMemFree(raw_id);
     }
     return id;
+}
+
+EDataFlow data_flow_for_endpoint(WindowsWasapiEndpointKind endpoint_kind) {
+    return endpoint_kind == WindowsWasapiEndpointKind::InputMicrophone ? eCapture : eRender;
+}
+
+DWORD stream_flags_for_endpoint(WindowsWasapiEndpointKind endpoint_kind) {
+    return endpoint_kind == WindowsWasapiEndpointKind::RenderLoopback
+        ? AUDCLNT_STREAMFLAGS_LOOPBACK
+        : 0;
+}
+
+const char* endpoint_label(WindowsWasapiEndpointKind endpoint_kind) {
+    return endpoint_kind == WindowsWasapiEndpointKind::InputMicrophone
+        ? "microphone"
+        : "loopback";
 }
 
 bool is_pcm_subformat(const GUID& guid) {
@@ -217,11 +262,17 @@ std::vector<std::byte> convert_to_mono_pcm16(
 
 } // namespace
 
-WindowsWasapiLoopbackCapture::~WindowsWasapiLoopbackCapture() {
+WindowsWasapiCapture::WindowsWasapiCapture(
+    WindowsWasapiEndpointKind endpoint_kind,
+    std::string device_id
+)
+    : endpoint_kind_(endpoint_kind), device_id_(std::move(device_id)) {}
+
+WindowsWasapiCapture::~WindowsWasapiCapture() {
     stop();
 }
 
-std::vector<AudioDeviceInfo> WindowsWasapiLoopbackCapture::list_devices() {
+std::vector<AudioDeviceInfo> WindowsWasapiCapture::list_devices() {
     const bool should_uninitialize = initialize_com_for_thread();
 
     IMMDeviceEnumerator* enumerator = nullptr;
@@ -239,11 +290,15 @@ std::vector<AudioDeviceInfo> WindowsWasapiLoopbackCapture::list_devices() {
         ), "CoCreateInstance(MMDeviceEnumerator)");
 
         std::string default_id;
-        if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &default_device))) {
+        const EDataFlow data_flow = data_flow_for_endpoint(endpoint_kind_);
+        if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(data_flow, eConsole, &default_device))) {
             default_id = device_id(default_device);
         }
 
-        throw_if_failed(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection), "EnumAudioEndpoints");
+        throw_if_failed(
+            enumerator->EnumAudioEndpoints(data_flow, DEVICE_STATE_ACTIVE, &collection),
+            "EnumAudioEndpoints"
+        );
 
         UINT count = 0;
         throw_if_failed(collection->GetCount(&count), "IMMDeviceCollection::GetCount");
@@ -279,7 +334,7 @@ std::vector<AudioDeviceInfo> WindowsWasapiLoopbackCapture::list_devices() {
     return devices;
 }
 
-void WindowsWasapiLoopbackCapture::start(AudioFrameCallback callback) {
+void WindowsWasapiCapture::start(AudioFrameCallback callback) {
     if (running_.exchange(true)) {
         return;
     }
@@ -289,14 +344,14 @@ void WindowsWasapiLoopbackCapture::start(AudioFrameCallback callback) {
     });
 }
 
-void WindowsWasapiLoopbackCapture::stop() {
+void WindowsWasapiCapture::stop() {
     running_ = false;
     if (worker_.joinable()) {
         worker_.join();
     }
 }
 
-void WindowsWasapiLoopbackCapture::capture_loop(AudioFrameCallback callback) {
+void WindowsWasapiCapture::capture_loop(AudioFrameCallback callback) {
     bool should_uninitialize = false;
     IMMDeviceEnumerator* enumerator = nullptr;
     IMMDevice* device = nullptr;
@@ -319,7 +374,13 @@ void WindowsWasapiLoopbackCapture::capture_loop(AudioFrameCallback callback) {
             reinterpret_cast<void**>(&enumerator)
         ), "CoCreateInstance(MMDeviceEnumerator)");
 
-        throw_if_failed(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device), "GetDefaultAudioEndpoint");
+        const EDataFlow data_flow = data_flow_for_endpoint(endpoint_kind_);
+        if (!device_id_.empty()) {
+            const std::wstring requested_id = utf8_to_utf16(device_id_);
+            throw_if_failed(enumerator->GetDevice(requested_id.c_str(), &device), "GetDevice");
+        } else {
+            throw_if_failed(enumerator->GetDefaultAudioEndpoint(data_flow, eConsole, &device), "GetDefaultAudioEndpoint");
+        }
         throw_if_failed(device->Activate(
             __uuidof(IAudioClient),
             CLSCTX_ALL,
@@ -336,12 +397,12 @@ void WindowsWasapiLoopbackCapture::capture_loop(AudioFrameCallback callback) {
         const REFERENCE_TIME buffer_duration = 10000000;
         throw_if_failed(audio_client->Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_LOOPBACK,
+            stream_flags_for_endpoint(endpoint_kind_),
             buffer_duration,
             0,
             mix_format,
             nullptr
-        ), "IAudioClient::Initialize(loopback)");
+        ), "IAudioClient::Initialize");
 
         throw_if_failed(audio_client->GetService(
             __uuidof(IAudioCaptureClient),
@@ -386,7 +447,8 @@ void WindowsWasapiLoopbackCapture::capture_loop(AudioFrameCallback callback) {
         audio_client->Stop();
     } catch (const std::exception& exc) {
         running_ = false;
-        std::cerr << "WASAPI capture error: " << exc.what() << '\n';
+        std::cerr << "WASAPI " << endpoint_label(endpoint_kind_)
+                  << " capture error: " << exc.what() << '\n';
         if (audio_client != nullptr) {
             audio_client->Stop();
         }

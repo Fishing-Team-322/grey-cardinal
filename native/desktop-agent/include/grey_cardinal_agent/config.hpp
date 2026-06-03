@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace grey_cardinal_agent {
 
@@ -13,12 +14,24 @@ enum class CaptureMode {
 };
 
 struct AgentConfig {
-    std::string server_url = "http://localhost:8020";
+    std::string server_url = "http://localhost:8010";
     std::string internal_token;
-    std::string meeting_id = "local-windows-demo";
+    std::string user_id;
+    std::string device_id;
+    std::string client_session_id;
+    std::string workspace_id;
+    std::string display_name;
+    std::string meeting_id = "MTG-1";
     CaptureMode capture_mode = CaptureMode::Microphone;
+    std::string input_device_id;
     int chunk_ms = 3000;
     int duration_sec = 0;
+    std::string asr_provider = "mock";
+    std::vector<std::string> mock_phrases = {
+        "Я подготовлю оплату до завтра 18:00",
+        "Беру websocket на себя до пятницы",
+        "Аня, проверь интеграцию с YouGile сегодня вечером",
+    };
     std::filesystem::path save_chunks;
     bool dry_run = false;
     bool list_devices = false;
@@ -27,8 +40,10 @@ struct AgentConfig {
 };
 
 AgentConfig load_config_from_args(int argc, char** argv);
+std::filesystem::path default_config_path();
 CaptureMode parse_capture_mode(const std::string& value);
 std::string capture_mode_value(CaptureMode mode);
+bool has_desktop_identity(const AgentConfig& config);
 std::string config_summary(const AgentConfig& config);
 std::string help_text();
 

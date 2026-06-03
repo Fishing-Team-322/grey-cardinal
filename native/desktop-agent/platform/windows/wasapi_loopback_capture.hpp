@@ -3,17 +3,26 @@
 #include "grey_cardinal_agent/audio_capture.hpp"
 
 #include <atomic>
+#include <string>
 #include <thread>
 
 namespace grey_cardinal_agent {
 
-class WindowsWasapiLoopbackCapture final : public IAudioCapture {
-public:
-    WindowsWasapiLoopbackCapture() = default;
-    ~WindowsWasapiLoopbackCapture() override;
+enum class WindowsWasapiEndpointKind {
+    InputMicrophone,
+    RenderLoopback,
+};
 
-    WindowsWasapiLoopbackCapture(const WindowsWasapiLoopbackCapture&) = delete;
-    WindowsWasapiLoopbackCapture& operator=(const WindowsWasapiLoopbackCapture&) = delete;
+class WindowsWasapiCapture final : public IAudioCapture {
+public:
+    explicit WindowsWasapiCapture(
+        WindowsWasapiEndpointKind endpoint_kind,
+        std::string device_id = {}
+    );
+    ~WindowsWasapiCapture() override;
+
+    WindowsWasapiCapture(const WindowsWasapiCapture&) = delete;
+    WindowsWasapiCapture& operator=(const WindowsWasapiCapture&) = delete;
 
     std::vector<AudioDeviceInfo> list_devices() override;
     void start(AudioFrameCallback callback) override;
@@ -22,6 +31,8 @@ public:
 private:
     void capture_loop(AudioFrameCallback callback);
 
+    WindowsWasapiEndpointKind endpoint_kind_;
+    std::string device_id_;
     std::atomic_bool running_{false};
     std::thread worker_;
 };

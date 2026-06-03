@@ -25,8 +25,22 @@ or local `brain-api` on `http://localhost:8010`.
 
 1. Register a dev identity/device.
 2. Join a meeting such as `MTG-1`.
-3. Start mock microphone.
-4. Send a mock phrase through `POST /desktop/transcripts`.
-5. Review transcript, task list, and gamification state.
+3. Start the native microphone agent from the generated command/script.
+4. The agent captures real microphone WAV chunks, runs mock ASR, and posts v2-shaped desktop transcripts through `POST /desktop/transcripts`.
+5. Review transcript status, task list, and gamification state.
 
-The mock microphone flow uses authenticated desktop identity and `capture_mode=microphone`. It does not use voice recognition as source of truth.
+Without Tauri, process launch is script-based:
+
+```powershell
+scripts\windows\start_desktop_agent_for_identity.ps1 `
+  -BrainUrl "http://localhost:8010" `
+  -Token "dev-internal-token" `
+  -UserId "<uuid>" `
+  -DeviceId "<uuid>" `
+  -ClientSessionId "<uuid>" `
+  -DisplayName "Петя" `
+  -MeetingId "MTG-1" `
+  -CaptureMode microphone
+```
+
+ASR is still mock in v0. Speaker identity comes from the authenticated desktop session, not from voice recognition.

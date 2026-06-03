@@ -1,8 +1,23 @@
-server_url = "http://localhost:8020"
+brain_api_url = "http://localhost:8010"
 internal_token = "dev-internal-token"
-meeting_id = "demo-meeting"
+
+user_id = ""
+device_id = ""
+client_session_id = ""
+workspace_id = ""
+display_name = ""
+meeting_id = "MTG-1"
+
 capture_mode = "microphone"
+input_device_id = ""
 chunk_ms = 3000
+asr_provider = "mock"
+mock_phrases = [
+  "Я подготовлю оплату до завтра 18:00",
+  "Беру websocket на себя до пятницы",
+  "Аня, проверь интеграцию с YouGile сегодня вечером"
+]
+
 duration_sec = 0
 save_chunks = "./chunks"
 dry_run = false

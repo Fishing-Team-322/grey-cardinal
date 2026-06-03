@@ -9,6 +9,7 @@ from grey_cardinal_contracts import (
     CaptureMode,
     DesktopClientIdentity,
     DesktopGamificationStateResponse,
+    DesktopTranscriptRequest,
     RegisterDeviceRequest,
     RegisterDeviceResponse,
     SpeakerIdentitySource,
@@ -82,6 +83,64 @@ def test_transcript_event_v2_rejects_voice_guess_as_desktop_identity() -> None:
             },
             text="Петя говорит",
             ts=datetime.now(UTC),
+        )
+
+
+def test_desktop_transcript_request_accepts_v2_payload_shape() -> None:
+    request = DesktopTranscriptRequest.model_validate(
+        {
+            "meeting_id": "MTG-1",
+            "workspace_id": None,
+            "source": {
+                "kind": "desktop_app",
+                "user_id": "user-1",
+                "device_id": "device-1",
+                "client_session_id": "session-1",
+                "microphone_id": "default_input",
+                "capture_mode": "microphone",
+                "platform": "windows",
+                "app_version": "0.1.0",
+            },
+            "speaker": {
+                "resolved_user_id": "user-1",
+                "resolved_name": "Петя",
+                "identity_source": "authenticated_client",
+                "identity_confidence": 1.0,
+            },
+            "text": "Я подготовлю оплату до завтра 18:00",
+            "is_final": True,
+            "asr": {"provider": "mock", "confidence": 1.0},
+            "audio": {"source": "microphone", "duration_ms": 3000},
+            "raw": {},
+        }
+    )
+
+    assert request.meeting_id == "MTG-1"
+    assert request.microphone_id == "default_input"
+    assert request.capture_mode == CaptureMode.microphone
+    assert request.asr_provider == "mock"
+    assert request.asr_confidence == 1.0
+    assert request.payload_source_user_id == "user-1"
+
+
+def test_desktop_transcript_request_rejects_untrusted_v2_speaker() -> None:
+    with pytest.raises(ValidationError, match="authenticated_client"):
+        DesktopTranscriptRequest.model_validate(
+            {
+                "meeting_id": "MTG-1",
+                "source": {
+                    "kind": "desktop_app",
+                    "user_id": "user-1",
+                    "device_id": "device-1",
+                    "client_session_id": "session-1",
+                    "capture_mode": "microphone",
+                },
+                "speaker": {
+                    "identity_source": "unknown",
+                    "identity_confidence": 0.0,
+                },
+                "text": "test",
+            }
         )
 
 
