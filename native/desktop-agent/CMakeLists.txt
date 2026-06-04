@@ -67,12 +67,14 @@ if(WIN32)
             uuid
     )
 
-    # System-tray application (pairing, status, Start/Stop, heartbeat).
+    # System-tray application (pairing, status, real Start/Stop recording, heartbeat).
     add_executable(grey-cardinal-tray WIN32
         src/tray/tray_app.cpp
         src/tray/tray.rc
+        platform/windows/wasapi_loopback_capture.cpp
     )
     target_compile_features(grey-cardinal-tray PRIVATE cxx_std_20)
+    target_include_directories(grey-cardinal-tray PRIVATE platform/windows)
     target_compile_definitions(grey-cardinal-tray
         PRIVATE
             _CRT_SECURE_NO_WARNINGS
@@ -80,14 +82,20 @@ if(WIN32)
             WIN32_LEAN_AND_MEAN
             UNICODE
             _UNICODE
+            GREY_CARDINAL_WINDOWS_CAPTURE_ENABLED=1
     )
     target_link_libraries(grey-cardinal-tray
         PRIVATE
+            grey-cardinal-agent-core
             winhttp
             shell32
             user32
             comctl32
             ole32
+            avrt
+            mmdevapi
+            propsys
+            uuid
     )
     install(TARGETS grey-cardinal-tray RUNTIME DESTINATION .)
 elseif(APPLE)

@@ -29,6 +29,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -37,9 +38,21 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "user32.lib")
 
+#include "grey_cardinal_agent/audio_capture.hpp"
+#include "grey_cardinal_agent/audio_recorder.hpp"
+#include "grey_cardinal_agent/config.hpp"
+#include "grey_cardinal_agent/http_client.hpp"
+#include "grey_cardinal_agent/logger.hpp"
+#include "wasapi_loopback_capture.hpp"
+#include <memory>
+#include <vector>
+
+namespace gca = grey_cardinal_agent;
+
 namespace {
 
 constexpr UINT WM_TRAY = WM_APP + 1;
+constexpr UINT WM_REC_DONE = WM_APP + 2;  // posted from the upload worker thread
 constexpr UINT ID_START = 1001;
 constexpr UINT ID_STOP = 1002;
 constexpr UINT ID_COCKPIT = 1003;
@@ -120,7 +133,7 @@ std::string http_post(const std::wstring& url, const std::string& body,
     if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) return {};
     bool https = (uc.nScheme == INTERNET_SCHEME_HTTPS);
 
-    HINTERNET ses = WinHttpOpen(L"GreyCardinalDaemon/0.4.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    HINTERNET ses = WinHttpOpen(L"GreyCardinalDaemon/0.4.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!ses) return {};
     HINTERNET con = WinHttpConnect(ses, host, uc.nPort, 0);
@@ -130,11 +143,45 @@ std::string http_post(const std::wstring& url, const std::string& body,
                                              WINHTTP_DEFAULT_ACCEPT_TYPES,
                                              https ? WINHTTP_FLAG_SECURE : 0)
                         : nullptr;
+    // Generous receive timeout: the server transcribes the WAV (asr-service)
+    // before responding. (resolve, connect, send, receive) in ms.
+    if (req) WinHttpSetTimeouts(req, 0, 60000, 60000, 200000);
+
+    // Send headers + total length, then stream the (possibly large) body via
+    // WinHttpWriteData — robust for multi-hundred-KB uploads.
+    const char* stage = "ok";
+    DWORD err = 0;
+    auto send_body = [&]() -> bool {
+        if (!WinHttpSendRequest(req, headers.c_str(), (DWORD)-1L, WINHTTP_NO_REQUEST_DATA, 0,
+                                (DWORD)body.size(), 0)) {
+            stage = "sendrequest";
+            err = GetLastError();
+            return false;
+        }
+        const char* p = body.data();
+        DWORD remaining = (DWORD)body.size();
+        while (remaining > 0) {
+            DWORD chunk = remaining > 65536 ? 65536 : remaining;
+            DWORD written = 0;
+            if (!WinHttpWriteData(req, p, chunk, &written)) {
+                stage = "writedata";
+                err = GetLastError();
+                return false;
+            }
+            p += written;
+            remaining -= written;
+        }
+        return true;
+    };
+
     std::string out;
-    if (req && WinHttpSendRequest(req, headers.c_str(), (DWORD)-1L,
-                                  (LPVOID)body.data(), (DWORD)body.size(),
-                                  (DWORD)body.size(), 0) &&
-        WinHttpReceiveResponse(req, nullptr)) {
+    bool sent = req && send_body();
+    if (sent && !WinHttpReceiveResponse(req, nullptr)) {
+        stage = "receive";
+        err = GetLastError();
+        sent = false;
+    }
+    if (sent) {
         DWORD code = 0, sz = sizeof(code);
         WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                             WINHTTP_HEADER_NAME_BY_INDEX, &code, &sz, WINHTTP_NO_HEADER_INDEX);
@@ -146,6 +193,9 @@ std::string http_post(const std::wstring& url, const std::string& body,
             out.append(buf.data(), read);
         }
         ok = (code >= 200 && code < 300);
+        if (!ok) out = "[http " + std::to_string(code) + "] " + out;
+    } else {
+        out = std::string("[winhttp fail stage=") + stage + " err=" + std::to_string(err) + "]";
     }
     if (req) WinHttpCloseHandle(req);
     if (con) WinHttpCloseHandle(con);
@@ -182,6 +232,61 @@ NOTIFYICONDATAW g_nid{};
 std::atomic<bool> g_running{true};
 std::chrono::steady_clock::time_point g_rec_start;
 
+// Recording session (real WASAPI capture → WAV → upload).
+gca::AgentConfig g_agent_cfg;
+std::unique_ptr<gca::Logger> g_logger;
+std::unique_ptr<gca::AudioRecorder> g_recorder;
+std::unique_ptr<gca::WindowsWasapiCapture> g_capture;
+std::string g_rec_id;
+std::string g_rec_started_iso;
+
+// Upload the recorded WAV to /api/daemon/uploads. The WAV is already on disk, so
+// we shell out to the system curl.exe (present on Windows 10 1803+/11) for a
+// robust multipart upload with the X-Agent-Token header. Runs hidden; the JSON
+// response is written to a file and parsed for "ok":true.
+bool upload_recording(const std::filesystem::path& wav) {
+    std::error_code ec;
+    if (!std::filesystem::exists(wav, ec) || std::filesystem::file_size(wav, ec) == 0) {
+        return false;
+    }
+    wchar_t sysdir[MAX_PATH]{};
+    GetSystemDirectoryW(sysdir, MAX_PATH);
+    std::wstring curl = std::wstring(sysdir) + L"\\curl.exe";
+    std::filesystem::path resp = config_dir() / L"last_upload.json";
+    std::wstring rec_id(g_rec_id.begin(), g_rec_id.end());
+
+    std::wstring cmd = L"\"" + curl + L"\" -s --max-time 200 -X POST \"" + g_cfg.backend_url +
+                       L"/api/daemon/uploads\"" + L" -H \"X-Agent-Token: " + g_cfg.agent_token +
+                       L"\"" + L" -F \"audio=@" + wav.wstring() + L";type=audio/wav\"" +
+                       L" -F \"recording_id=" + rec_id + L"\"" + L" -F \"source=microphone\"" +
+                       L" -o \"" + resp.wstring() + L"\"";
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> cl(cmd.begin(), cmd.end());
+    cl.push_back(L'\0');
+    if (!CreateProcessW(nullptr, cl.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                        nullptr, &si, &pi)) {
+        if (g_logger) g_logger->error("curl spawn failed err=" + std::to_string(GetLastError()));
+        return false;
+    }
+    WaitForSingleObject(pi.hProcess, 210000);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    std::ifstream rf(resp, std::ios::binary);
+    std::string body((std::istreambuf_iterator<char>(rf)), std::istreambuf_iterator<char>());
+    bool ok = (code == 0) && body.find("\"ok\":true") != std::string::npos;
+    if (g_logger) {
+        g_logger->info("curl upload exit=" + std::to_string(code) + " ok=" + (ok ? "1" : "0") +
+                       " resp=" + body.substr(0, 160));
+    }
+    return ok;
+}
+
 const wchar_t* status_text(Status s) {
     switch (s) {
         case Status::Recording: return L"Recording";
@@ -214,13 +319,51 @@ void notify(const wchar_t* title, const wchar_t* msg) {
     g_nid.uFlags &= ~NIF_INFO;
 }
 
+// POST a JSON body via the system curl.exe. The body is written to a temp file
+// (no command-line quoting issues) and the response is read back. Robust on
+// networks where raw WinHTTP from this app is unreliable.
+std::string curl_post_json(const std::wstring& url, const std::string& json, bool with_token,
+                           bool& ok) {
+    ok = false;
+    wchar_t sysdir[MAX_PATH]{};
+    GetSystemDirectoryW(sysdir, MAX_PATH);
+    std::filesystem::create_directories(config_dir());
+    std::filesystem::path bodyf = config_dir() / L"req.json";
+    std::filesystem::path respf = config_dir() / L"resp.json";
+    {
+        std::ofstream bf(bodyf, std::ios::binary);
+        bf.write(json.data(), (std::streamsize)json.size());
+    }
+    std::wstring cmd = L"\"" + std::wstring(sysdir) + L"\\curl.exe\" -s --max-time 60 -X POST \"" +
+                       url + L"\" -H \"Content-Type: application/json\"";
+    if (with_token) cmd += L" -H \"X-Agent-Token: " + g_cfg.agent_token + L"\"";
+    cmd += L" --data-binary @\"" + bodyf.wstring() + L"\" -o \"" + respf.wstring() + L"\"";
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> cl(cmd.begin(), cmd.end());
+    cl.push_back(L'\0');
+    if (!CreateProcessW(nullptr, cl.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                        nullptr, &si, &pi)) {
+        return {};
+    }
+    WaitForSingleObject(pi.hProcess, 65000);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    std::ifstream rf(respf, std::ios::binary);
+    std::string body((std::istreambuf_iterator<char>(rf)), std::istreambuf_iterator<char>());
+    ok = (code == 0) && body.find("\"ok\":true") != std::string::npos;
+    return body;
+}
+
 void send_heartbeat(const wchar_t* status) {
     if (g_cfg.agent_token.empty()) return;
-    std::string body = std::string("{\"status\":\"") + narrow(status) +
-                       "\",\"version\":\"0.4.0\"}";
+    std::string body = std::string("{\"status\":\"") + narrow(status) + "\",\"version\":\"0.4.0\"}";
     bool ok = false;
-    http_post(g_cfg.backend_url + L"/api/agents/heartbeat", body, L"application/json",
-              g_cfg.agent_token, ok);
+    curl_post_json(g_cfg.backend_url + L"/api/agents/heartbeat", body, true, ok);
 }
 
 // --- Pairing dialog (minimal): prompt for a code, POST /api/agents/register ---
@@ -235,8 +378,8 @@ INT_PTR CALLBACK pair_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM) {
                            "\",\"device_name\":\"" + narrow(name) +
                            "\",\"os\":\"windows\",\"daemon_version\":\"0.4.0\"}";
         bool ok = false;
-        std::string resp = http_post(g_cfg.backend_url + L"/api/agents/register", body,
-                                     L"application/json", L"", ok);
+        std::string resp =
+            curl_post_json(g_cfg.backend_url + L"/api/agents/register", body, false, ok);
         if (ok) {
             g_cfg.agent_token = json_field(resp, "agent_token");
             g_cfg.agent_id = json_field(resp, "agent_id");
@@ -270,24 +413,61 @@ void start_recording() {
         notify(L"Grey Cardinal", L"Pair the device first (tray → Pair device).");
         return;
     }
+    try {
+        g_agent_cfg = gca::AgentConfig{};
+        g_agent_cfg.output_dir = config_dir();
+        g_agent_cfg.capture_mode = gca::CaptureMode::Microphone;
+        g_rec_id = gca::generate_uuid();
+        g_rec_started_iso = gca::format_iso8601(std::chrono::system_clock::now());
+
+        std::filesystem::create_directories(log_dir());
+        g_logger = std::make_unique<gca::Logger>(log_dir() / L"daemon.log");
+        g_recorder = std::make_unique<gca::AudioRecorder>(g_agent_cfg, *g_logger);
+        g_recorder->start();
+        g_capture = std::make_unique<gca::WindowsWasapiCapture>(
+            gca::WindowsWasapiEndpointKind::InputMicrophone);
+        g_capture->start([](const gca::AudioFrame& frame) {
+            if (g_recorder) g_recorder->handle_frame(frame);
+        });
+    } catch (const std::exception&) {
+        g_capture.reset();
+        g_recorder.reset();
+        g_logger.reset();
+        g_status = Status::Error;
+        update_tray();
+        notify(L"Grey Cardinal", L"Could not start microphone capture — open logs");
+        return;
+    }
     g_status = Status::Recording;
     g_rec_start = std::chrono::steady_clock::now();
     update_tray();
     send_heartbeat(L"recording");
-    // Team build: start the WASAPI capture session here (audio_recorder).
 }
 
-void stop_recording(HWND) {
+void stop_recording(HWND hwnd) {
+    if (!g_capture && !g_recorder) return;
     g_status = Status::Uploading;
     update_tray();
-    // Team build: finalize the WAV from audio_recorder, then upload it as
-    // multipart to /api/daemon/uploads with X-Agent-Token. On success:
-    bool ok = true;  // placeholder for the upload result
-    g_status = ok ? Status::Idle : Status::Error;
-    update_tray();
-    send_heartbeat(L"idle");
-    notify(L"Grey Cardinal", ok ? L"Recording uploaded to Grey Cardinal"
-                                : L"Upload failed — open logs");
+    // Finalize + upload off the UI thread so the menu stays responsive.
+    std::thread([hwnd]() {
+        bool ok = false;
+        try {
+            if (g_capture) g_capture->stop();
+            if (g_recorder) g_recorder->stop();
+            std::filesystem::path wav =
+                g_recorder ? g_recorder->outputFilePath() : std::filesystem::path{};
+            if (!wav.empty() && g_recorder && g_recorder->hasData()) {
+                ok = upload_recording(wav);
+            }
+        } catch (const std::exception&) {
+            ok = false;
+        }
+        g_capture.reset();
+        g_recorder.reset();
+        g_logger.reset();
+        send_heartbeat(ok ? L"idle" : L"error");
+        PostMessageW(hwnd, WM_REC_DONE, ok ? 1 : 0, 0);
+    }).detach();
 }
 
 void show_menu(HWND hwnd) {
@@ -314,6 +494,14 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TRAY:
             if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_LBUTTONUP) show_menu(hwnd);
             return 0;
+        case WM_REC_DONE: {
+            bool ok = (wp != 0);
+            g_status = ok ? Status::Idle : Status::Error;
+            update_tray();
+            notify(L"Grey Cardinal", ok ? L"Recording uploaded to Grey Cardinal"
+                                        : L"Upload failed — open logs");
+            return 0;
+        }
         case WM_TIMER:
             if (wp == TIMER_HEARTBEAT) {
                 send_heartbeat(g_status == Status::Recording ? L"recording" : L"idle");
@@ -353,7 +541,46 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
+// Headless self-test: record from the mic for `seconds`, upload to the backend,
+// log the result, and exit. Used for diagnostics / CI (no tray interaction).
+int run_record_test(int seconds) {
+    g_cfg = load_config();
+    std::filesystem::create_directories(log_dir());
+    g_logger = std::make_unique<gca::Logger>(log_dir() / L"daemon.log");
+    if (g_cfg.agent_token.empty()) {
+        g_logger->error("record-test: not paired (no agent_token)");
+        return 2;
+    }
+    try {
+        g_agent_cfg = gca::AgentConfig{};
+        g_agent_cfg.output_dir = config_dir();
+        g_agent_cfg.capture_mode = gca::CaptureMode::Microphone;
+        g_rec_id = gca::generate_uuid();
+        g_rec_started_iso = gca::format_iso8601(std::chrono::system_clock::now());
+        g_recorder = std::make_unique<gca::AudioRecorder>(g_agent_cfg, *g_logger);
+        g_recorder->start();
+        g_capture = std::make_unique<gca::WindowsWasapiCapture>(
+            gca::WindowsWasapiEndpointKind::InputMicrophone);
+        g_capture->start([](const gca::AudioFrame& frame) {
+            if (g_recorder) g_recorder->handle_frame(frame);
+        });
+        Sleep((DWORD)seconds * 1000);
+        g_capture->stop();
+        g_recorder->stop();
+        std::filesystem::path wav = g_recorder->outputFilePath();
+        bool ok = !wav.empty() && g_recorder->hasData() && upload_recording(wav);
+        g_logger->info(std::string("record-test upload ok=") + (ok ? "1" : "0"));
+        return ok ? 0 : 1;
+    } catch (const std::exception& e) {
+        g_logger->error(std::string("record-test failed: ") + e.what());
+        return 3;
+    }
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
+    if (std::wstring(GetCommandLineW()).find(L"--record-test") != std::wstring::npos) {
+        return run_record_test(6);
+    }
     g_cfg = load_config();
 
     WNDCLASSW wc{};

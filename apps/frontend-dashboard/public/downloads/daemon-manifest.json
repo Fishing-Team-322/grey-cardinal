@@ -10,9 +10,9 @@
       "format": "MSI installer",
       "status": "available",
       "status_label": "ready",
-      "size": "120 KB",
-      "size_bytes": 122880,
-      "sha256": "279E2BD04FD0322551293925EBFF65399B3B811BC0A711A3E87E8CB95BDDE37E",
+      "size": "136 KB",
+      "size_bytes": 139264,
+      "sha256": "14204F208A389AD51E1DECFC994F8D1CC2919E0D494AA2300FBCDFECB0A70F3B",
       "capture": "WASAPI microphone / loopback",
       "support": "Windows x64"
     },

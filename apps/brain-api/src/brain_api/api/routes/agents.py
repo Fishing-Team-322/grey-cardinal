@@ -16,10 +16,12 @@ The legacy POST /api/audio/upload remains for the existing smoke flow.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import (
     APIRouter,
     Depends,
@@ -157,6 +159,23 @@ async def unpair_agent(
 # --------------------------------------------------------------------------- #
 # Daemon uploads (owned by token → workspace)
 # --------------------------------------------------------------------------- #
+_log = logging.getLogger(__name__)
+
+
+async def _transcribe_wav(content: bytes) -> str:
+    """Transcribe a recorded WAV via asr-service (faster-whisper). Best-effort:
+    on any error returns "" so the upload still succeeds."""
+    url = os.getenv("ASR_SERVICE_URL", "http://asr-service:8030/transcribe")
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(url, content=content, headers={"Content-Type": "audio/wav"})
+            resp.raise_for_status()
+            return (resp.json().get("text") or "").strip()
+    except Exception as exc:  # noqa: BLE001 — transcription must never break upload
+        _log.warning("asr transcription failed: %s", exc)
+        return ""
+
+
 def _maybe_create_proposal(brain: BrainStore, transcript_text: str) -> dict[str, Any] | None:
     """If the recording carried a transcript with an action item, propose a task."""
     text = (transcript_text or "").strip()
@@ -201,6 +220,7 @@ async def daemon_upload(
 
     size_bytes = 0
     filename = ""
+    content = b""
     if audio is not None:
         uploads_dir = Path(os.getenv("UPLOADS_DIR", "/tmp/gc-uploads")) / "daemon"
         uploads_dir = uploads_dir / agent["workspace_id"] / agent["agent_id"]
@@ -209,6 +229,11 @@ async def daemon_upload(
         size_bytes = len(content)
         filename = audio.filename or f"{recording_id or 'recording'}.wav"
         (uploads_dir / filename).write_bytes(content)
+
+    # Real processing: if the daemon didn't send a transcript, transcribe the
+    # recorded audio with asr-service (faster-whisper), then extract a task.
+    if not transcript_text.strip() and size_bytes > 64:
+        transcript_text = await _transcribe_wav(content)
 
     proposal = _maybe_create_proposal(brain, transcript_text)
 
