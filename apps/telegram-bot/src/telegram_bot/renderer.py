@@ -32,8 +32,6 @@ async def _execute_one(client: TelegramClient, action: BotAction) -> None:
             action.chat_id, action.message_id, action.text, action.reply_markup
         )
     elif action.type == "answer_callback":
-        await client.answer_callback_query(
-            action.callback_query_id, action.text, action.show_alert
-        )
+        await client.answer_callback_query(action.callback_query_id, action.text, action.show_alert)
     else:  # pragma: no cover
         logger.warning("Unknown action type: %s", action.type)

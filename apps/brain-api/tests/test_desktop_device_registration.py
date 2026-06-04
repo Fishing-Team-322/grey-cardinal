@@ -19,9 +19,7 @@ async def test_register_device_creates_user_device_session(
     async with session_factory() as session:
         user = await session.get(m.UserModel, UUID(identity.user_id))
         device = await session.get(m.DeviceModel, UUID(identity.device_id))
-        client_session = await session.get(
-            m.ClientSessionModel, UUID(identity.client_session_id)
-        )
+        client_session = await session.get(m.ClientSessionModel, UUID(identity.client_session_id))
 
     assert user is not None
     assert user.display_name == "Петя"

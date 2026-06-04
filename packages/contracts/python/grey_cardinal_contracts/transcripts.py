@@ -104,9 +104,7 @@ class TranscriptEvent(BaseModel):
             if self.speaker is None:
                 raise ValueError("desktop_app transcripts require speaker identity")
             if self.speaker.identity_source != SpeakerIdentitySource.authenticated_client:
-                raise ValueError(
-                    "desktop_app transcripts require authenticated_client speaker"
-                )
+                raise ValueError("desktop_app transcripts require authenticated_client speaker")
             missing = [
                 name
                 for name in ("user_id", "device_id", "client_session_id")
@@ -147,4 +145,3 @@ class TranscriptListResponse(BaseModel):
     ok: bool = True
     count: int
     items: list[TranscriptDTO] = Field(default_factory=list)
-

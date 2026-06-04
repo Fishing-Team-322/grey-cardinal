@@ -50,9 +50,7 @@ class Container:
         )
 
         self.engine: AsyncEngine = create_engine(settings.database_url, echo=settings.db_echo)
-        self.session_factory: async_sessionmaker[AsyncSession] = create_session_factory(
-            self.engine
-        )
+        self.session_factory: async_sessionmaker[AsyncSession] = create_session_factory(self.engine)
 
         self.websocket_manager = WebSocketManager()
         self.event_publisher: EventPublisher = WebSocketEventPublisher(self.websocket_manager)

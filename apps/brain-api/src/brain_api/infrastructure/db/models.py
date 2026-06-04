@@ -98,16 +98,12 @@ class TelegramChatModel(TimestampMixin, Base):
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     type: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    project_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("projects.id"), nullable=True
-    )
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
 
 
 class ChatMessageModel(TimestampMixin, Base):
     __tablename__ = "chat_messages"
-    __table_args__ = (
-        UniqueConstraint("chat_id", "telegram_message_id", name="uq_chat_message"),
-    )
+    __table_args__ = (UniqueConstraint("chat_id", "telegram_message_id", name="uq_chat_message"),)
 
     id: Mapped[UUID] = _uuid_pk()
     telegram_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -193,9 +189,7 @@ class TranscriptEventModel(TimestampMixin, Base):
     __tablename__ = "transcript_events"
 
     id: Mapped[UUID] = _uuid_pk()
-    meeting_db_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("meetings.id"), nullable=True
-    )
+    meeting_db_id: Mapped[UUID | None] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     meeting_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     speaker_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     speaker_name: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -222,9 +216,7 @@ class MeetingModel(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_by_user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True
-    )
+    created_by_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
 
 
@@ -308,9 +300,7 @@ class UserXpEventModel(Base):
 
 class UserXpTotalModel(Base):
     __tablename__ = "user_xp_totals"
-    __table_args__ = (
-        UniqueConstraint("user_id", "workspace_id", name="uq_user_xp_total_scope"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "workspace_id", name="uq_user_xp_total_scope"),)
 
     id: Mapped[UUID] = _uuid_pk()
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)

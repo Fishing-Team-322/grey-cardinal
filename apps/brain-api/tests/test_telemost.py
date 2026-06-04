@@ -13,13 +13,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from brain_api.api.routes.public_api import SimpleStore, get_store, router as public_router, set_store
-from brain_api.api.routes.telemost import router as telemost_router, session_manager
-
+from brain_api.api.routes.public_api import SimpleStore, get_store, set_store
+from brain_api.api.routes.public_api import router as public_router
+from brain_api.api.routes.telemost import router as telemost_router
+from brain_api.api.routes.telemost import session_manager
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def reset_sessions():
@@ -52,6 +54,7 @@ def client(app):
 
 def _wav_bytes() -> bytes:
     import struct
+
     header = b"RIFF" + struct.pack("<I", 36) + b"WAVEfmt "
     header += struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
     header += b"data" + struct.pack("<I", 0)
@@ -61,6 +64,7 @@ def _wav_bytes() -> bytes:
 # ---------------------------------------------------------------------------
 # 1. POST /api/telemost/join creates bot session
 # ---------------------------------------------------------------------------
+
 
 def test_join_creates_bot_session(client: TestClient) -> None:
     r = client.post(
@@ -79,6 +83,7 @@ def test_join_creates_bot_session(client: TestClient) -> None:
 # 2. meeting_id not provided → new meeting created
 # ---------------------------------------------------------------------------
 
+
 def test_join_auto_creates_meeting_id(client: TestClient) -> None:
     r = client.post(
         "/api/telemost/join",
@@ -93,6 +98,7 @@ def test_join_auto_creates_meeting_id(client: TestClient) -> None:
 # 3. meeting_id provided → used as-is
 # ---------------------------------------------------------------------------
 
+
 def test_join_uses_provided_meeting_id(client: TestClient) -> None:
     r = client.post(
         "/api/telemost/join",
@@ -105,6 +111,7 @@ def test_join_uses_provided_meeting_id(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # 4. GET /api/telemost/{bot_session_id}/status returns status
 # ---------------------------------------------------------------------------
+
 
 def test_get_status_returns_session(client: TestClient) -> None:
     join = client.post(
@@ -125,6 +132,7 @@ def test_get_status_returns_session(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # 5. POST /api/telemost/{bot_session_id}/leave → status "left"
 # ---------------------------------------------------------------------------
+
 
 def test_leave_sets_status_left(client: TestClient) -> None:
     join = client.post(
@@ -148,6 +156,7 @@ def test_leave_sets_status_left(client: TestClient) -> None:
 # 6. Unknown bot_session_id → 404
 # ---------------------------------------------------------------------------
 
+
 def test_status_unknown_session_returns_404(client: TestClient) -> None:
     r = client.get("/api/telemost/nonexistent_bot/status")
     assert r.status_code == 404
@@ -161,6 +170,7 @@ def test_leave_unknown_session_returns_404(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # 7. Invalid meeting_url → 400
 # ---------------------------------------------------------------------------
+
 
 def test_join_invalid_url_returns_400(client: TestClient) -> None:
     r = client.post(
@@ -182,6 +192,7 @@ def test_join_empty_url_returns_400(client: TestClient) -> None:
 # 8. Upload audio with source=telemost_bot is accepted
 # ---------------------------------------------------------------------------
 
+
 def test_upload_telemost_bot_source_accepted(client: TestClient) -> None:
     r = client.post(
         "/api/audio/upload",
@@ -198,6 +209,7 @@ def test_upload_telemost_bot_source_accepted(client: TestClient) -> None:
 # 9. Upload with unknown source → 400
 # ---------------------------------------------------------------------------
 
+
 def test_upload_unknown_source_returns_400(client: TestClient) -> None:
     r = client.post(
         "/api/audio/upload",
@@ -210,6 +222,7 @@ def test_upload_unknown_source_returns_400(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # 10. GET /api/meetings shows meetings with source telemost_bot
 # ---------------------------------------------------------------------------
+
 
 def test_meetings_list_shows_telemost_bot_source(client: TestClient) -> None:
     client.post(

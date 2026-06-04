@@ -25,9 +25,7 @@ logger = logging.getLogger(__name__)
 class YouGileBoardGateway:
     def __init__(self, config: YouGileConfig, timeout: float = 20.0) -> None:
         if not config.is_configured:
-            raise ValueError(
-                "YouGile is not configured: " + ", ".join(config.missing_required)
-            )
+            raise ValueError("YouGile is not configured: " + ", ".join(config.missing_required))
         self._config = config
         self._timeout = timeout
         self._base = config.api_base_url.rstrip("/") + "/api-v2"
@@ -80,9 +78,7 @@ class YouGileBoardGateway:
         url = self._base + path
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.request(
-                    method, url, json=json, headers=self._headers()
-                )
+                response = await client.request(method, url, json=json, headers=self._headers())
                 response.raise_for_status()
                 if response.content:
                     return response.json()

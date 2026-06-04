@@ -1,14 +1,14 @@
 /**
  * API client for Grey Cardinal backend.
  *
- * Base URL is read from VITE_API_BASE_URL env var (defaults to http://localhost:8000).
- *
- * All functions return typed responses or throw on HTTP error.
+ * Base URL is read from VITE_API_BASE_URL env var. When unset (production
+ * behind the reverse proxy) it defaults to the empty string, so all requests
+ * are same-origin (e.g. `/api/health`) and routed to brain-api by Caddy. This
+ * avoids CORS and mixed-content issues. For local `vite dev` against a backend
+ * on another host, set VITE_API_BASE_URL=http://localhost:8000.
  */
 
-const BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  "http://localhost:8000";
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
 // ---------------------------------------------------------------------------
 // Response types

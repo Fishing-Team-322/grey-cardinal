@@ -20,16 +20,16 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 # ---------------------------------------------------------------------------
 # Simple file-backed store
 # ---------------------------------------------------------------------------
+
 
 class SimpleStore:
     """Хранит метаданные встреч и аудиофайлов в JSON + на диске."""
@@ -57,13 +57,15 @@ class SimpleStore:
     def _save(self) -> None:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         self._meta_path.write_text(
-            json.dumps({"meetings": self._meetings, "audios": self._audios}, indent=2, ensure_ascii=False),
+            json.dumps(
+                {"meetings": self._meetings, "audios": self._audios}, indent=2, ensure_ascii=False
+            ),
             encoding="utf-8",
         )
 
     @staticmethod
     def _now_iso() -> str:
-        return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -116,14 +118,16 @@ class SimpleStore:
     def list_meetings(self) -> list[dict[str, Any]]:
         rows = []
         for m in self._meetings.values():
-            rows.append({
-                "meeting_id": m["meeting_id"],
-                "status": m.get("status", "uploaded"),
-                "source": m.get("source", "desktop_agent"),
-                "created_at": m.get("created_at", ""),
-                "audio_count": len(m.get("audio_ids", [])),
-                "tasks_count": 0,
-            })
+            rows.append(
+                {
+                    "meeting_id": m["meeting_id"],
+                    "status": m.get("status", "uploaded"),
+                    "source": m.get("source", "desktop_agent"),
+                    "created_at": m.get("created_at", ""),
+                    "audio_count": len(m.get("audio_ids", [])),
+                    "tasks_count": 0,
+                }
+            )
         rows.sort(key=lambda x: x["created_at"], reverse=True)
         return rows
 
@@ -131,11 +135,7 @@ class SimpleStore:
         m = self._meetings.get(meeting_id)
         if m is None:
             return None
-        audios = [
-            self._audios[aid]
-            for aid in m.get("audio_ids", [])
-            if aid in self._audios
-        ]
+        audios = [self._audios[aid] for aid in m.get("audio_ids", []) if aid in self._audios]
         return {
             "meeting_id": m["meeting_id"],
             "status": m.get("status", "uploaded"),
@@ -201,7 +201,10 @@ async def upload_audio(
     # Validate source field.
     _ALLOWED_SOURCES = {"desktop_agent", "telemost_bot"}
     if source not in _ALLOWED_SOURCES:
-        raise HTTPException(status_code=400, detail=f"Unknown source '{source}'. Allowed: {sorted(_ALLOWED_SOURCES)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown source '{source}'. Allowed: {sorted(_ALLOWED_SOURCES)}",
+        )
 
     # Generate IDs if not provided.
     if not meeting_id:

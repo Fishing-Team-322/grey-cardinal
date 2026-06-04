@@ -33,4 +33,3 @@ def get_settings() -> Settings:
         chunks_dir=Path(os.getenv("AUDIO_WORKER_CHUNKS_DIR", "/tmp/grey-cardinal-audio-chunks")),
         faster_whisper_model=os.getenv("AUDIO_FASTER_WHISPER_MODEL", "base"),
     )
-

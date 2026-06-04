@@ -46,9 +46,7 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = _DB_URL
-    connectable = async_engine_from_config(
-        configuration, prefix="sqlalchemy.", poolclass=NullPool
-    )
+    connectable = async_engine_from_config(configuration, prefix="sqlalchemy.", poolclass=NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

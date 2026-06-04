@@ -75,9 +75,7 @@ async def test_xp_for_speech_confirm_and_done_is_idempotent(
     assert [event.kind for event in state.recent_events].count("task_completed") == 1
 
 
-async def test_desktop_gamification_me_returns_points(
-    register_desktop_identity, make_uow, config
-):
+async def test_desktop_gamification_me_returns_points(register_desktop_identity, make_uow, config):
     registered = await register_desktop_identity()
     async with make_uow() as uow:
         identity = await resolve_desktop_identity(

@@ -32,9 +32,7 @@ def build_user_prompt(
     timezone: str,
     known_users: list[KnownUser],
 ) -> str:
-    users = [
-        {"name": u.display_name, "username": u.telegram_username} for u in known_users
-    ]
+    users = [{"name": u.display_name, "username": u.telegram_username} for u in known_users]
     context = {
         "now": now.isoformat(),
         "timezone": timezone,

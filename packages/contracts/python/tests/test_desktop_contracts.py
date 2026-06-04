@@ -166,9 +166,7 @@ def test_gamification_response_contract() -> None:
         user_id="user-id",
         points_total=120,
         level=2,
-        recent_events=[
-            {"kind": "task_completed", "points": 20, "reason": "Закрыл задачу GC-1"}
-        ],
+        recent_events=[{"kind": "task_completed", "points": 20, "reason": "Закрыл задачу GC-1"}],
     )
 
     assert response.level == 2

@@ -1,2 +1,1 @@
 """Grey Cardinal audio worker."""
-

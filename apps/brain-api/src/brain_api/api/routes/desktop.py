@@ -53,9 +53,7 @@ async def _identity(
     container: Container = Depends(get_container),
     x_gc_user_id: str | None = Header(default=None, alias="X-GC-User-Id"),
     x_gc_device_id: str | None = Header(default=None, alias="X-GC-Device-Id"),
-    x_gc_client_session_id: str | None = Header(
-        default=None, alias="X-GC-Client-Session-Id"
-    ),
+    x_gc_client_session_id: str | None = Header(default=None, alias="X-GC-Client-Session-Id"),
 ) -> DesktopIdentity:
     if not x_gc_user_id or not x_gc_device_id or not x_gc_client_session_id:
         raise HTTPException(status_code=401, detail="missing desktop identity headers")
@@ -172,9 +170,7 @@ async def participants(
                     user_id=str(row.user_id),
                     display_name=_display_name(users.get(row.user_id)),
                     device_id=str(row.device_id) if row.device_id else None,
-                    client_session_id=str(row.client_session_id)
-                    if row.client_session_id
-                    else None,
+                    client_session_id=str(row.client_session_id) if row.client_session_id else None,
                     status=row.status.value,
                     joined_at=row.joined_at,
                     left_at=row.left_at,
@@ -248,9 +244,7 @@ async def confirm_proposal(
     """Confirm a pending proposal, creating a task."""
     async with container.make_uow() as uow:
         try:
-            return await confirm_desktop_proposal(
-                uow, container.config, identity, proposal_id
-            )
+            return await confirm_desktop_proposal(uow, container.config, identity, proposal_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

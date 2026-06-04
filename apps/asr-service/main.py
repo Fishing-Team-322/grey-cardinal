@@ -17,6 +17,7 @@ Agent config (native/desktop-agent/config.toml or CLI):
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import os
@@ -40,13 +41,17 @@ LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "ru")  # default Russian; None = a
 
 _model = None
 
+
 def get_model():
     global _model
     if _model is None:
-        logger.info(f"Loading faster-whisper model={MODEL_SIZE} device={DEVICE} compute_type={COMPUTE_TYPE}")
+        logger.info(
+            f"Loading faster-whisper model={MODEL_SIZE} device={DEVICE} compute_type={COMPUTE_TYPE}"
+        )
         t0 = time.time()
         try:
             from faster_whisper import WhisperModel
+
             _model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
             logger.info(f"Model loaded in {time.time() - t0:.1f}s")
         except ImportError:
@@ -56,6 +61,7 @@ def get_model():
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
 
 @app.get("/health")
 def health():
@@ -106,6 +112,7 @@ async def transcribe(request: Request):
 
     # Write to temp file (faster-whisper requires a file path)
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(body)
         tmp_path = tmp.name
@@ -132,14 +139,16 @@ async def transcribe(request: Request):
             f"| duration_ms={duration_ms} lang={info.language} text={text[:80]!r}"
         )
 
-        return JSONResponse({
-            "text": text,
-            "provider": "faster_whisper",
-            "model": MODEL_SIZE,
-            "language": info.language,
-            "confidence": confidence,
-            "duration_ms": duration_ms,
-        })
+        return JSONResponse(
+            {
+                "text": text,
+                "provider": "faster_whisper",
+                "model": MODEL_SIZE,
+                "language": info.language,
+                "confidence": confidence,
+                "duration_ms": duration_ms,
+            }
+        )
 
     except ImportError as e:
         raise HTTPException(status_code=503, detail=f"faster-whisper not available: {e}") from e
@@ -147,10 +156,8 @@ async def transcribe(request: Request):
         logger.error(f"transcription error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
 
 
 @app.get("/")

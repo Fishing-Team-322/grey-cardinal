@@ -1,0 +1,144 @@
+name: grey-cardinal
+
+# Production / demo stack for Grey Cardinal.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Only Caddy publishes ports (80/443). PostgreSQL, brain-api, telegram-bot and
+# audio-worker stay on the internal docker network and are reachable only via
+# the reverse proxy. Secrets come from .env (see .env.example / DEPLOY.md).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: [.env]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-grey_cardinal}
+      POSTGRES_USER: ${POSTGRES_USER:-grey}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    # No host port published — database is internal only.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grey} -d ${POSTGRES_DB:-grey_cardinal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  brain-api:
+    build:
+      context: .
+      dockerfile: apps/brain-api/Dockerfile
+    env_file: [.env]
+    environment:
+      # Persist uploaded audio + the public meetings store across restarts.
+      UPLOADS_DIR: /data/uploads
+    expose:
+      - "8000"
+    volumes:
+      - brain_uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: apps/telegram-bot/Dockerfile
+    env_file: [.env]
+    expose:
+      - "8010"
+    depends_on:
+      brain-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  audio-worker:
+    build:
+      context: .
+      dockerfile: apps/audio-worker/Dockerfile
+    env_file: [.env]
+    environment:
+      AUDIO_ASR_PROVIDER: ${AUDIO_ASR_PROVIDER:-mock}
+    expose:
+      - "8020"
+    depends_on:
+      brain-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  # Real speech-to-text (faster-whisper). Used by the native desktop agent via
+  # asr_provider=faster_whisper_http, asr_url=http://asr-service:8030/transcribe.
+  # CPU int8, model defaults to "base". First start loads the model (~60s).
+  asr-service:
+    build:
+      context: apps/asr-service
+      dockerfile: Dockerfile
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-base}
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+    expose:
+      - "8030"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: apps/frontend-dashboard
+      dockerfile: Dockerfile.prod
+    expose:
+      - "80"
+    depends_on:
+      - brain-api
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - brain-api
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  brain_uploads:

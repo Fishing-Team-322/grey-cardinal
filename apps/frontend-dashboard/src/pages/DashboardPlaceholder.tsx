@@ -12,9 +12,13 @@ import {
   type BotSessionStatus,
 } from "../api";
 
+// When VITE_BRAIN_WS_URL is unset (production behind the proxy), derive the
+// WebSocket URL from the current page origin so it matches http→ws / https→wss
+// and the same host. This keeps the dashboard domain-agnostic and avoids
+// mixed-content errors under HTTPS.
 const WS_URL =
   (import.meta.env.VITE_BRAIN_WS_URL as string | undefined) ??
-  "ws://localhost:8000/ws/events";
+  `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/events`;
 
 // ---------------------------------------------------------------------------
 // Status badge helper

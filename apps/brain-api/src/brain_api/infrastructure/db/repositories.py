@@ -346,9 +346,7 @@ class UserRepositoryImpl:
 
     async def get_by_display_name(self, display_name: str) -> User | None:
         row = await self._s.scalar(
-            select(m.UserModel).where(
-                func.lower(m.UserModel.display_name) == display_name.lower()
-            )
+            select(m.UserModel).where(func.lower(m.UserModel.display_name) == display_name.lower())
         )
         return _user(row) if row else None
 
@@ -593,9 +591,7 @@ class MeetingRepositoryImpl:
             .order_by(m.MeetingModel.started_at.desc())
         )
         if telegram_chat_id is not None:
-            statement = statement.where(
-                m.TelegramChatModel.telegram_chat_id == telegram_chat_id
-            )
+            statement = statement.where(m.TelegramChatModel.telegram_chat_id == telegram_chat_id)
         row = await self._s.scalar(statement)
         return _meeting(row) if row else None
 
@@ -791,9 +787,7 @@ class ProposalRepositoryImpl:
 
     async def get_by_source_message(self, message_id: UUID) -> TaskProposal | None:
         row = await self._s.scalar(
-            select(m.TaskProposalModel).where(
-                m.TaskProposalModel.source_message_id == message_id
-            )
+            select(m.TaskProposalModel).where(m.TaskProposalModel.source_message_id == message_id)
         )
         return _proposal(row) if row else None
 
@@ -812,7 +806,7 @@ class ProposalRepositoryImpl:
             )
             .where(
                 m.ConfirmationModel.status == "pending",
-                m.TranscriptEventModel.speaker_id == user_id,
+                m.TranscriptEventModel.speaker_id == str(user_id),
             )
             .order_by(m.TaskProposalModel.created_at.desc())
             .limit(limit)
@@ -897,9 +891,7 @@ class TaskRepositoryImpl:
         return _task(row) if row else None
 
     async def get_by_public_id(self, public_id: str) -> Task | None:
-        row = await self._s.scalar(
-            select(m.TaskModel).where(m.TaskModel.public_id == public_id)
-        )
+        row = await self._s.scalar(select(m.TaskModel).where(m.TaskModel.public_id == public_id))
         return _task(row) if row else None
 
     async def next_sequence(self) -> int:
@@ -971,9 +963,7 @@ class TaskRepositoryImpl:
         )
         return [_task(r) for r in rows]
 
-    async def list_for_deadline_reminder(
-        self, now: datetime, hours_before: int
-    ) -> list[Task]:
+    async def list_for_deadline_reminder(self, now: datetime, hours_before: int) -> list[Task]:
         from datetime import timedelta
 
         threshold = now + timedelta(hours=hours_before)
@@ -1096,7 +1086,7 @@ class TranscriptRepositoryImpl:
     async def list_recent_for_user(self, user_id: UUID, limit: int = 20) -> list[TranscriptEvent]:
         rows = await self._s.scalars(
             select(m.TranscriptEventModel)
-            .where(m.TranscriptEventModel.speaker_id == user_id)
+            .where(m.TranscriptEventModel.speaker_id == str(user_id))
             .order_by(m.TranscriptEventModel.created_at.desc())
             .limit(max(1, min(limit, 100)))
         )
@@ -1118,9 +1108,7 @@ class DebugRepositoryImpl:
             "board_cards": m.BoardCardModel,
         }
         return {
-            name: int(
-                await self._s.scalar(select(func.count()).select_from(model)) or 0
-            )
+            name: int(await self._s.scalar(select(func.count()).select_from(model)) or 0)
             for name, model in models.items()
         }
 
@@ -1142,9 +1130,7 @@ class DebugRepositoryImpl:
                 m.TranscriptEventModel.meeting_db_id.in_(meeting_ids)
             )
         )
-        await self._s.execute(
-            delete(m.MeetingModel).where(m.MeetingModel.id.in_(meeting_ids))
-        )
+        await self._s.execute(delete(m.MeetingModel).where(m.MeetingModel.id.in_(meeting_ids)))
         return {
             "meetings": len(meeting_ids),
             "transcripts": transcript_count,

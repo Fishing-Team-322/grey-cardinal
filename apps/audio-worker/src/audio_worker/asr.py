@@ -9,8 +9,7 @@ from .config import Settings
 
 
 class AsrEngine(Protocol):
-    async def transcribe_wav(self, wav_bytes: bytes) -> str:
-        ...
+    async def transcribe_wav(self, wav_bytes: bytes) -> str: ...
 
 
 class MockAsrEngine:
@@ -57,4 +56,3 @@ def create_asr_engine(settings: Settings) -> AsrEngine:
     if settings.asr_provider == "faster_whisper":
         return FasterWhisperAsrEngine(settings.faster_whisper_model)
     raise ValueError(f"unsupported AUDIO_ASR_PROVIDER: {settings.asr_provider}")
-

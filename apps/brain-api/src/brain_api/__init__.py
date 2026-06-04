@@ -1,2 +1,1 @@
 """Grey Cardinal brain API."""
-

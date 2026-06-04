@@ -17,8 +17,7 @@ def _env(name: str, *, required: bool = True) -> str:
 def main() -> None:
     if os.getenv("YOUGILE_SMOKE_CONFIRM") != "1":
         raise SystemExit(
-            "Smoke создаёт реальную тестовую карточку. "
-            "Повторите с YOUGILE_SMOKE_CONFIRM=1."
+            "Smoke создаёт реальную тестовую карточку. Повторите с YOUGILE_SMOKE_CONFIRM=1."
         )
     base = _env("YOUGILE_API_BASE_URL", required=False) or "https://ru.yougile.com"
     api_key = _env("YOUGILE_API_KEY")

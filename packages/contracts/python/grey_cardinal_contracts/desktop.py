@@ -114,7 +114,12 @@ class DesktopTranscriptRequest(BaseModel):
     def accept_transcript_event_v2_shape(cls, value: object) -> object:
         if not isinstance(value, dict):
             return value
-        if "source" not in value and "speaker" not in value and "asr" not in value and "audio" not in value:
+        if (
+            "source" not in value
+            and "speaker" not in value
+            and "asr" not in value
+            and "audio" not in value
+        ):
             return value
 
         source = value.get("source") if isinstance(value.get("source"), dict) else {}
@@ -128,8 +133,13 @@ class DesktopTranscriptRequest(BaseModel):
             "text": value.get("text"),
             "ts": value.get("ts"),
             "is_final": value.get("is_final", True),
-            "microphone_id": source.get("microphone_id") or value.get("microphone_id") or "default_input",
-            "capture_mode": source.get("capture_mode") or audio.get("source") or value.get("capture_mode") or CaptureMode.microphone,
+            "microphone_id": source.get("microphone_id")
+            or value.get("microphone_id")
+            or "default_input",
+            "capture_mode": source.get("capture_mode")
+            or audio.get("source")
+            or value.get("capture_mode")
+            or CaptureMode.microphone,
             "asr_provider": asr.get("provider") or value.get("asr_provider") or "mock",
             "asr_confidence": asr.get("confidence", value.get("asr_confidence")),
             "vad_confidence": audio.get("vad_confidence", value.get("vad_confidence")),
@@ -190,8 +200,10 @@ class DesktopGamificationStateResponse(BaseModel):
 # Proposals (P4 — demo-ready v0)
 # ---------------------------------------------------------------------------
 
+
 class DesktopProposalDTO(BaseModel):
     """A pending task proposal waiting for confirmation."""
+
     proposal_id: str
     confirmation_id: str | None = None
     title: str
@@ -205,11 +217,13 @@ class DesktopProposalDTO(BaseModel):
 
 class DesktopProposalListResponse(BaseModel):
     """Response for GET /desktop/proposals"""
+
     items: list[DesktopProposalDTO] = Field(default_factory=list)
 
 
 class DesktopConfirmProposalResponse(BaseModel):
     """Response for POST /desktop/proposals/{id}/confirm"""
+
     ok: bool = True
     task_public_id: str | None = None
     task_title: str | None = None
@@ -218,12 +232,14 @@ class DesktopConfirmProposalResponse(BaseModel):
 
 class DesktopRejectProposalResponse(BaseModel):
     """Response for POST /desktop/proposals/{id}/reject"""
+
     ok: bool = True
     message: str = "proposal rejected"
 
 
 class DesktopTranscriptDTO(BaseModel):
     """A recent desktop transcript event."""
+
     id: str
     meeting_id: str
     text: str
@@ -233,4 +249,5 @@ class DesktopTranscriptDTO(BaseModel):
 
 class DesktopRecentTranscriptsResponse(BaseModel):
     """Response for GET /desktop/transcripts/recent"""
+
     items: list[DesktopTranscriptDTO] = Field(default_factory=list)

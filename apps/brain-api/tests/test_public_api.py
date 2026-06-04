@@ -11,7 +11,6 @@ so they do NOT require PostgreSQL or any external services.
 from __future__ import annotations
 
 import io
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -20,10 +19,10 @@ from fastapi.testclient import TestClient
 
 from brain_api.api.routes.public_api import SimpleStore, get_store, router, set_store
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def tmp_store(tmp_path: Path) -> SimpleStore:
@@ -49,6 +48,7 @@ def client(app: FastAPI) -> TestClient:
 def _wav_bytes() -> bytes:
     """Minimal valid 44-byte WAV header with no audio data."""
     import struct
+
     header = b"RIFF" + struct.pack("<I", 36) + b"WAVEfmt "
     header += struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
     header += b"data" + struct.pack("<I", 0)
@@ -58,6 +58,7 @@ def _wav_bytes() -> bytes:
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
 
 def test_health_returns_ok(client: TestClient) -> None:
     r = client.get("/api/health")
@@ -71,6 +72,7 @@ def test_health_returns_ok(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Audio upload
 # ---------------------------------------------------------------------------
+
 
 def test_upload_creates_meeting_auto_id(client: TestClient) -> None:
     r = client.post(
@@ -140,6 +142,7 @@ def test_upload_increments_audio_count(client: TestClient) -> None:
 # Meetings list
 # ---------------------------------------------------------------------------
 
+
 def test_meetings_empty_initially(client: TestClient) -> None:
     r = client.get("/api/meetings")
     assert r.status_code == 200
@@ -167,6 +170,7 @@ def test_meetings_list_contains_required_fields(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Get single meeting
 # ---------------------------------------------------------------------------
+
 
 def test_get_meeting_returns_detail(client: TestClient) -> None:
     client.post(
@@ -199,6 +203,7 @@ def test_get_meeting_unknown_returns_404(client: TestClient) -> None:
 # Meeting status
 # ---------------------------------------------------------------------------
 
+
 def test_meeting_status_after_upload(client: TestClient) -> None:
     client.post(
         "/api/audio/upload",
@@ -222,6 +227,7 @@ def test_meeting_status_unknown_returns_404(client: TestClient) -> None:
 # Tasks (stub)
 # ---------------------------------------------------------------------------
 
+
 def test_meeting_tasks_returns_empty_list(client: TestClient) -> None:
     client.post(
         "/api/audio/upload",
@@ -244,6 +250,7 @@ def test_meeting_tasks_unknown_returns_404(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # SimpleStore unit tests (no HTTP)
 # ---------------------------------------------------------------------------
+
 
 def test_store_creates_meeting_on_first_upload(tmp_path: Path) -> None:
     store = SimpleStore(tmp_path / "uploads")

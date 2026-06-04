@@ -39,9 +39,7 @@ async def test_transcript_attaches_to_active_meeting(
             telegram_chat_id=-100123456789,
         )
         await uow.commit()
-        response = await IngestTranscriptEvent(
-            uow, extractor, telegram, events, config
-        ).execute(
+        response = await IngestTranscriptEvent(uow, extractor, telegram, events, config).execute(
             TranscriptEvent(
                 text="Это промежуточная реплика",
                 ts=NOW,

@@ -49,15 +49,8 @@ async def recent_transcripts(
     """Dev endpoint для проверки audio pipeline без доступа audio-worker к БД."""
     async with container.make_uow() as uow:
         events = await uow.transcripts.list_recent(limit)
-        meeting_ids = {
-            event.meeting_db_id
-            for event in events
-            if event.meeting_db_id is not None
-        }
-        meetings = {
-            meeting_id: await uow.meetings.get(meeting_id)
-            for meeting_id in meeting_ids
-        }
+        meeting_ids = {event.meeting_db_id for event in events if event.meeting_db_id is not None}
+        meetings = {meeting_id: await uow.meetings.get(meeting_id) for meeting_id in meeting_ids}
     items = [
         TranscriptDTO(
             id=str(event.id),

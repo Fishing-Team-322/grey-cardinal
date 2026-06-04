@@ -198,13 +198,16 @@ async def ingest_desktop_transcript(
         raise ValueError("desktop transcripts must use microphone capture mode")
     if request.payload_source_user_id and request.payload_source_user_id != str(identity.user.id):
         raise ValueError("desktop transcript user_id does not match authenticated identity")
-    if request.payload_source_device_id and request.payload_source_device_id != str(identity.device_id):
-        raise ValueError("desktop transcript device_id does not match authenticated identity")
-    if (
-        request.payload_source_client_session_id
-        and request.payload_source_client_session_id != str(identity.client_session_id)
+    if request.payload_source_device_id and request.payload_source_device_id != str(
+        identity.device_id
     ):
-        raise ValueError("desktop transcript client_session_id does not match authenticated identity")
+        raise ValueError("desktop transcript device_id does not match authenticated identity")
+    if request.payload_source_client_session_id and request.payload_source_client_session_id != str(
+        identity.client_session_id
+    ):
+        raise ValueError(
+            "desktop transcript client_session_id does not match authenticated identity"
+        )
 
     meeting = await _ensure_meeting(uow, config, request.meeting_id, identity.user.id)
     ts = request.ts or config.now()
@@ -326,7 +329,6 @@ async def ingest_desktop_transcript(
 
     # Auto-confirm mode: for demo/dev, immediately create a task from the proposal.
     # Activated by DESKTOP_AUTO_CONFIRM_PROPOSALS=true in settings.
-    auto_confirmed_task_id: str | None = None
     if config.desktop_auto_confirm_proposals:
         confirmation_id = _confirmation_id_from_action(action)
         if confirmation_id:
@@ -336,6 +338,7 @@ async def ingest_desktop_transcript(
                     proposal_obj = await uow.proposals.get(conf.proposal_id)
                     if proposal_obj is not None:
                         from brain_api.domain.services import format_public_id
+
                         project = await uow.projects.ensure_default(config.default_workspace_name)
                         seq = await uow.tasks.next_sequence()
                         now = config.now()
@@ -358,7 +361,6 @@ async def ingest_desktop_transcript(
                         conf.status = ConfirmationStatus.accepted
                         conf.created_task_id = auto_task.id
                         await uow.confirmations.update(conf)
-                        auto_confirmed_task_id = auto_task.public_id
             except Exception:
                 pass  # auto-confirm failure must not break the transcript ingest
 
@@ -505,6 +507,7 @@ def _confirmation_id_from_action(action) -> str | None:
 # Desktop proposals (P4 — demo-ready v0)
 # ---------------------------------------------------------------------------
 
+
 async def list_desktop_proposals(
     uow: UnitOfWork,
     identity: DesktopIdentity,
@@ -627,7 +630,9 @@ async def list_desktop_recent_transcripts(
                 id=str(event.id),
                 meeting_id=event.meeting_id or "",
                 text=event.text,
-                asr_provider=event.raw_json.get("asr", {}).get("provider") if event.raw_json else None,
+                asr_provider=event.raw_json.get("asr", {}).get("provider")
+                if event.raw_json
+                else None,
                 created_at=event.created_at,
             )
             for event in events
