@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from brain_api.api.routes import (
     debug,
@@ -21,6 +22,7 @@ from brain_api.api.routes import (
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
+from brain_api.demo import routes as demo_routes
 from brain_api.infrastructure.logging.setup import setup_logging
 from brain_api.infrastructure.scheduler.jobs import register_jobs
 from brain_api.infrastructure.scheduler.runner import AsyncScheduler
@@ -52,9 +54,24 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Grey Cardinal - brain-api", version="0.1.0", lifespan=lifespan)
+    settings = get_settings()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=[
+            "Content-Type",
+            "X-Internal-Token",
+            "X-GC-User-Id",
+            "X-GC-Device-Id",
+            "X-GC-Client-Session-Id",
+        ],
+    )
     app.include_router(health.router)
     app.include_router(public_api.router)
     app.include_router(telemost.router)
+    app.include_router(demo_routes.router)
     app.include_router(debug.router)
     app.include_router(desktop.router)
     app.include_router(internal_telegram.router)

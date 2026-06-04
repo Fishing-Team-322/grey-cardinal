@@ -118,13 +118,32 @@ def render_task_rejected() -> str:
     return "❌ Предложение отклонено. Задача не создана."
 
 
+def render_duplicate_warning(task: Task, timezone: str) -> str:
+    """Сообщение «такая задача уже есть» вместо создания дубля."""
+    assignee = task.assignee_text or "не определён"
+    lines = [
+        "Похоже, такая задача уже есть:",
+        "",
+        f"{task.public_id} {task.title}",
+        f"Статус: {status_label(task.status)}",
+        f"Ответственный: {assignee}",
+        f"Дедлайн: {format_deadline(task.deadline, timezone)}",
+        "",
+        "Не создаю дубль.",
+    ]
+    return "\n".join(lines)
+
+
+BOARD_SYNC_FAILED_TEXT = "Статус обновлён локально, но доску синхронизировать не удалось."
+
+
 def render_status_changed(task: Task) -> str:
     mapping = {
-        TaskStatus.in_progress: f"🚧 Задача #{task.public_id} взята в работу",
-        TaskStatus.blocked: f"⛔ Задача #{task.public_id} помечена как заблокированная",
-        TaskStatus.done: f"✅ Задача #{task.public_id} закрыта",
+        TaskStatus.in_progress: f"🚧 {task.public_id} взята в работу",
+        TaskStatus.blocked: f"⛔ {task.public_id} заблокирована",
+        TaskStatus.done: f"✅ {task.public_id} закрыта",
     }
-    return mapping.get(task.status, f"Статус задачи #{task.public_id}: {status_label(task.status)}")
+    return mapping.get(task.status, f"Статус {task.public_id}: {status_label(task.status)}")
 
 
 def render_task_list(tasks: list[Task], timezone: str) -> str:
@@ -144,13 +163,14 @@ def render_task_list(tasks: list[Task], timezone: str) -> str:
 # Reminders / digest
 # --------------------------------------------------------------------------- #
 def render_deadline_reminder(task: Task, timezone: str) -> str:
+    assignee = task.assignee_text or "не определён"
     return "\n".join(
         [
             "⏰ Скоро дедлайн",
             "",
-            f"#{task.public_id} {task.title}",
+            f"{task.public_id} {task.title}",
             f"Дедлайн: {format_deadline(task.deadline, timezone)}",
-            f"Статус: {status_label(task.status)}",
+            f"Ответственный: {assignee}",
         ]
     )
 
@@ -158,10 +178,11 @@ def render_deadline_reminder(task: Task, timezone: str) -> str:
 def render_stale_reminder(task: Task) -> str:
     return "\n".join(
         [
-            "👀 Нужен статус по задаче",
+            "👀 Нужен статус",
             "",
-            f"#{task.public_id} {task.title} давно не обновлялась.",
-            f"Напиши статус или закрой её командой /done {task.public_id}.",
+            f"{task.public_id} {task.title} давно без обновлений.",
+            f"Обнови статус: /start_task {task.public_id}, "
+            f"/block {task.public_id} или /done {task.public_id}",
         ]
     )
 
@@ -184,4 +205,45 @@ def render_digest(
     lines.append("")
     lines.append(f"Закрыто сегодня: {closed_today}")
     lines.append(f"Просрочено: {overdue}")
+    return "\n".join(lines)
+
+
+def render_personal_digest(
+    name: str,
+    active: list[Task],
+    overdue: list[Task],
+    completed_today: list[Task],
+    stale: list[Task],
+    timezone: str,
+) -> str:
+    """Персональный вечерний дайджест одного пользователя."""
+    lines = ["🌙 Вечерний дайджест Grey Cardinal", ""]
+    lines.append(f"{name}, твои задачи:")
+    lines.append("")
+
+    lines.append("Активные:")
+    if active:
+        for i, task in enumerate(active, start=1):
+            if task.deadline is not None:
+                tail = f"дедлайн {format_deadline(task.deadline, timezone)}"
+            else:
+                tail = "без дедлайна"
+            lines.append(f"{i}. {task.public_id} {task.title} — {tail}")
+    else:
+        lines.append("— нет активных задач")
+
+    if overdue:
+        lines.append("")
+        lines.append("Просрочено:")
+        for task in overdue:
+            lines.append(f"• {task.public_id} {task.title}")
+
+    if stale:
+        lines.append("")
+        lines.append("Давно без обновлений:")
+        for task in stale:
+            lines.append(f"• {task.public_id} {task.title}")
+
+    lines.append("")
+    lines.append(f"Закрыто сегодня: {len(completed_today)}")
     return "\n".join(lines)

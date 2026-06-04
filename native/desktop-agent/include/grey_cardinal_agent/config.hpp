@@ -12,8 +12,8 @@ enum class CaptureMode {
 };
 
 struct AgentConfig {
-    // Backend endpoint, e.g. http://localhost:8010
-    std::string backend_url = "http://localhost:8010";
+    // Backend endpoint (brain-api), e.g. http://localhost:8000
+    std::string backend_url = "http://localhost:8000";
 
     // Identifies this agent instance to the backend.
     std::string agent_id = "desktop-agent";

@@ -115,7 +115,7 @@ std::string getenv_or_empty(const char* name) {
 
 void apply_environment_defaults(AgentConfig& config) {
     const std::string url = getenv_or_empty("GREY_CARDINAL_BACKEND_URL");
-    if (!url.empty() && config.backend_url == "http://localhost:8010") {
+    if (!url.empty() && config.backend_url == "http://localhost:8000") {
         config.backend_url = url;
     }
     const std::string agent_id = getenv_or_empty("GREY_CARDINAL_AGENT_ID");
@@ -264,10 +264,10 @@ std::string help_text() {
 Usage:
   grey-cardinal-agent.exe [options]
   grey-cardinal-agent.exe --config config.toml
-  grey-cardinal-agent.exe --backend http://localhost:8010 --agent-id agent-001
+  grey-cardinal-agent.exe --backend http://localhost:8000 --agent-id agent-001
 
 Options:
-  --backend <url>          Backend base URL (default: http://localhost:8010)
+  --backend <url>          Backend base URL (default: http://localhost:8000)
   --backend-url <url>      Alias for --backend
   --agent-id <id>          Agent identifier sent with uploads (default: desktop-agent)
   --meeting-id <id>        Meeting ID; auto-generated UUID if omitted

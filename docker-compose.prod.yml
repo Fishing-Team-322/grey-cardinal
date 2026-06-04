@@ -4,9 +4,9 @@ name: grey-cardinal
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Only Caddy publishes ports (80/443). PostgreSQL, brain-api, telegram-bot and
-# audio-worker stay on the internal docker network and are reachable only via
-# the reverse proxy. Secrets come from .env (see .env.example / DEPLOY.md).
+# Only Caddy publishes ports (80/443). PostgreSQL, brain-api, telegram-bot,
+# audio-worker, asr-service, frontend-dashboard and tg-proxy stay on the
+# internal docker network. Secrets come from .env (see .env.example / DEPLOY.md).
 
 services:
   postgres:
@@ -32,7 +32,7 @@ services:
       dockerfile: apps/brain-api/Dockerfile
     env_file: [.env]
     environment:
-      # Persist uploaded audio + the public meetings store across restarts.
+      # Persist the file-backed demo/meetings store across restarts.
       UPLOADS_DIR: /data/uploads
     expose:
       - "8000"
@@ -49,22 +49,36 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Dedicated outbound HTTP proxy for the Telegram bot. This host's network
+  # blocks api.telegram.org's default IPs (and has no IPv6 egress); 149.154.167.220
+  # is reachable, so it is pinned here. The bot routes only its HTTPS Telegram
+  # traffic through this proxy (HTTPS_PROXY); its http brain-api calls go direct.
+  tg-proxy:
+    build:
+      context: apps/tg-proxy
+      dockerfile: Dockerfile
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
+    expose:
+      - "8888"
+    restart: unless-stopped
+
   telegram-bot:
     build:
       context: .
       dockerfile: apps/telegram-bot/Dockerfile
     env_file: [.env]
-    # This host has no working IPv6 egress and api.telegram.org's default IPv4
-    # subnet is blocked here; 149.154.167.220 is a reachable Telegram Bot API
-    # endpoint. Pin it so the bot can reach Telegram. Remove on networks where
-    # api.telegram.org resolves/routes normally.
-    extra_hosts:
-      - "api.telegram.org:149.154.167.220"
+    environment:
+      # Telegram API is HTTPS → through the proxy. brain-api is http → direct.
+      HTTPS_PROXY: http://tg-proxy:8888
+      NO_PROXY: brain-api,localhost,127.0.0.1
     expose:
       - "8010"
     depends_on:
       brain-api:
         condition: service_healthy
+      tg-proxy:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
       interval: 10s
@@ -85,17 +99,9 @@ services:
     depends_on:
       brain-api:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
     restart: unless-stopped
 
-  # Real speech-to-text (faster-whisper). Used by the native desktop agent via
-  # asr_provider=faster_whisper_http, asr_url=http://asr-service:8030/transcribe.
-  # CPU int8, model defaults to "base". First start loads the model (~60s).
+  # Real speech-to-text (faster-whisper, CPU int8, model "base").
   asr-service:
     build:
       context: apps/asr-service
@@ -117,13 +123,16 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # The real Grey Cardinal site (static landing + auth + cockpit/kanban/tasks).
-  frontend:
+  # The real Grey Cardinal app (landing + auth + cockpit/kanban/tasks), wired to
+  # the backend via /api and /ws. Built to static and served by Caddy on :5173.
+  frontend-dashboard:
     build:
-      context: "./Grey Cardinal"
+      context: apps/frontend-dashboard
       dockerfile: Dockerfile
     expose:
-      - "80"
+      - "5173"
+    depends_on:
+      - brain-api
     restart: unless-stopped
 
   caddy:
@@ -139,7 +148,7 @@ services:
       - caddy_config:/config
     depends_on:
       - brain-api
-      - frontend
+      - frontend-dashboard
     restart: unless-stopped
 
 volumes:

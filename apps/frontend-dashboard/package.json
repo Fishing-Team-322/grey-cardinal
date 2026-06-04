@@ -1,0 +1,21 @@
+{
+  "name": "grey-cardinal-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-static.mjs",
+    "dev": "npm run build && http-server dist -a 0.0.0.0 -p 5173 -c-1",
+    "preview": "http-server dist -a 0.0.0.0 -p 5173 -c-1"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.28.3",
+    "@babel/core": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
+    "http-server": "^14.1.1"
+  }
+}

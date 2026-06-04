@@ -1,0 +1,10 @@
+# Normalize line endings: store as LF, check out as LF on all platforms.
+* text=auto eol=lf
+
+# Binary assets (no normalization).
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdb binary
+*.wav binary
+*.zip binary

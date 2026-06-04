@@ -66,13 +66,10 @@ class YouGileBoardGateway:
         await self._request("PUT", f"/tasks/{external_card_id}", json=body)
 
     async def add_comment(self, external_card_id: str, text: str) -> None:
-        # Комментарии в YouGile — сообщения в чате задачи. Best-effort.
-        try:
-            await self._request(
-                "POST", f"/tasks/{external_card_id}/chat-messages", json={"text": text}
-            )
-        except BoardError as exc:
-            logger.info("YouGile add_comment best-effort failed: %s", exc)
+        logger.info(
+            "YouGile add_comment skipped for %s: task chat id is not exposed by adapter",
+            external_card_id,
+        )
 
     async def _request(self, method: str, path: str, json: dict | None = None) -> dict:
         url = self._base + path

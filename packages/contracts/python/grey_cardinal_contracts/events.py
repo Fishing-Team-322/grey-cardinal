@@ -18,6 +18,8 @@ class EventName(StrEnum):
     task_rejected = "task_rejected"
     task_status_changed = "task_status_changed"
     reminder_sent = "reminder_sent"
+    reminder_suppressed = "reminder_suppressed"
+    duplicate_task_detected = "duplicate_task_detected"
     transcript_line = "transcript_line"
 
 

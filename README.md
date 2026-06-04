@@ -84,9 +84,78 @@ Response:
 curl http://localhost:8000/api/meetings
 ```
 
+## Brain pipeline (chat → proposal → board)
+
+Autonomous demo pipeline (no PostgreSQL, no LLM required). A message is turned
+into a **pending proposal** by a real rule-based Russian extractor; a task is
+created only after explicit confirmation. Nothing is fabricated — no fake tasks,
+no fake transcription. See **[DEMO.md](DEMO.md)** for the full curl walkthrough.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/chat/messages` | Ingest message → task proposal (or `has_task=false`) |
+| GET | `/api/task-proposals` | List proposals (optional `?status=pending`) |
+| POST | `/api/task-proposals/{id}/confirm` | Confirm → create task in board `todo` |
+| POST | `/api/task-proposals/{id}/reject` | Reject → no task |
+| GET | `/api/tasks` | List created tasks |
+| GET | `/api/board` | Board columns: `todo` / `in_progress` / `done` |
+| POST | `/api/tasks/{id}/move` | Move task between statuses |
+| GET | `/api/digest/evening` | Evening digest from real proposals/tasks |
+| GET | `/api/meetings/{id}/transcript` | Transcript, or honest `unavailable` if no STT |
+| POST | `/api/meetings/{id}/transcript` | Manual/demo transcript → same extractor → proposal |
+
+```bash
+curl -X POST http://localhost:8000/api/chat/messages \
+  -H "Content-Type: application/json" \
+  -d '{"author":"Денис","text":"Нужно оплатить сервер до четверга, ответственный Иван"}'
+```
+
+> **Speech-to-text:** no STT provider is configured, so audio is not auto-transcribed.
+> `GET /api/meetings/{id}/transcript` returns `transcription_status: "unavailable"`
+> rather than inventing a transcript. Use the manual transcript endpoint for the demo.
+
+## YouGile board integration
+
+When a proposal is confirmed, the task lands on the **local board** and is also
+synced to **YouGile** (REST API v2) when enabled. The two modes:
+
+- **Local board mode** (default, `YOUGILE_ENABLED=false`): tasks live on the local
+  board only; the integration honestly reports `status=disabled`. Nothing is faked.
+- **Real YouGile mode** (`YOUGILE_ENABLED=true` + credentials): confirmed tasks are
+  created in the YouGile `TODO` column; moves are mirrored to the matching column.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/integrations/yougile/status` | `disabled` / `connected` / `error` + config |
+| GET | `/api/integrations/yougile/columns` | Configured column IDs (+ verified against API) |
+| POST | `/api/tasks/{id}/sync-yougile` | Retry create/move sync after an error |
+
+```env
+YOUGILE_ENABLED=true
+YOUGILE_API_BASE_URL=https://ru.yougile.com    # auth: Authorization: Bearer <key>
+YOUGILE_API_KEY=<key>
+YOUGILE_BOARD_ID=<board id>
+YOUGILE_COLUMN_TODO_ID=<todo column id>
+YOUGILE_COLUMN_IN_PROGRESS_ID=<in-progress column id>
+YOUGILE_COLUMN_DONE_ID=<done column id>
+YOUGILE_USER_MAP={"Иван":"user_id_1"}          # optional assignee → user id
+```
+
+```bash
+curl http://localhost:8000/api/integrations/yougile/status
+# disabled: {"ok":true,"enabled":false,"configured":false,"status":"disabled","reason":"..."}
+# enabled:  {"ok":true,"enabled":true,"configured":true,"status":"connected","board_id":"..."}
+```
+
+Confirmed tasks expose `yougile_status` (`disabled|pending|synced|error`),
+`yougile_task_id` and `yougile_error`. **Honesty:** an invalid key yields
+`status=error` with the real YouGile HTTP error — never a fake `synced`. The local
+board stays the source of truth; a failed YouGile move is recorded as `error` and
+is retryable via `sync-yougile` rather than rolled back.
+
 ## Telemost bot mode
 
-Two audio source modes are supported. The backend treats both identically — the only difference is the `source` field.
+Two audio source modes are supported. Backend treats both identically — only the `source` field differs.
 
 ```
 1. Desktop agent mode:
@@ -95,60 +164,97 @@ Two audio source modes are supported. The backend treats both identically — th
 
 2. Telemost bot mode:
    backend creates a bot session for a Telemost meeting URL.
-   Current implementation is demo/mock: manages session state only.
-   Real bot joiner (browser automation / Telemost SDK) can be plugged
-   into TelemostSessionManager.create() in telemost.py later.
+   Bot joins meeting → captures audio → POST /api/audio/upload with source=telemost_bot.
+   Current implementation: mock/session-based (no real browser).
+   Real Playwright joiner is hook-ready in telemost_worker/mock_worker.py.
    source = "telemost_bot"
 ```
+
+> **Note:** Telemost bot worker is demo/session-based.
+> Real browser joiner hook is prepared but not enabled by default (`TELEMOST_WORKER_MODE=mock`).
 
 ### Telemost bot endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/telemost/join` | Start bot session |
+| POST | `/api/telemost/join` | Start bot session, creates meeting immediately |
 | GET | `/api/telemost/{bot_session_id}/status` | Get session status |
 | POST | `/api/telemost/{bot_session_id}/leave` | Stop bot session |
-
-### Start bot
-
-```bash
-curl -X POST http://localhost:8000/api/telemost/join \
-  -H "Content-Type: application/json" \
-  -d '{"meeting_url":"https://telemost.yandex.ru/j/demo","meeting_id":"demo"}'
-```
-
-Response:
-```json
-{"ok":true,"meeting_id":"demo","bot_session_id":"bot_abc123","status":"joining","message":"Telemost bot join requested"}
-```
-
-### Check bot status
-
-```bash
-curl http://localhost:8000/api/telemost/bot_abc123/status
-```
-
-### Stop bot
-
-```bash
-curl -X POST http://localhost:8000/api/telemost/bot_abc123/leave
-```
-
-### Audio upload with telemost_bot source
-
-```bash
-curl -X POST http://localhost:8000/api/audio/upload \
-  -F "audio=@recording.wav;type=audio/wav" \
-  -F "agent_id=bot-001" \
-  -F "meeting_id=demo" \
-  -F "source=telemost_bot"
-```
-
-Allowed `source` values: `desktop_agent`, `telemost_bot`. Unknown values return 400.
 
 ### Bot session statuses
 
 `created` → `joining` → `joined` → `recording` → `uploading` → `uploaded` → `left` | `error`
+
+### Curl smoke tests
+
+```bash
+# Health
+curl http://localhost:8000/api/health
+
+# Join Telemost meeting
+curl -X POST http://localhost:8000/api/telemost/join \
+  -H "Content-Type: application/json" \
+  -d '{"meeting_url":"https://telemost.yandex.ru/j/demo","meeting_id":"demo-telemost"}'
+
+# Check bot status  (replace bot_session_id with value from join response)
+curl http://localhost:8000/api/telemost/bot_abc123def456/status
+
+# Upload audio as Telemost bot
+curl -X POST http://localhost:8000/api/audio/upload \
+  -F "audio=@rec.wav" \
+  -F "agent_id=telemost_bot" \
+  -F "meeting_id=demo-telemost" \
+  -F "source=telemost_bot" \
+  -F "started_at=2026-06-04T12:00:00Z" \
+  -F "ended_at=2026-06-04T12:01:00Z"
+
+# List meetings (both sources appear here)
+curl http://localhost:8000/api/meetings
+
+# Leave meeting
+curl -X POST http://localhost:8000/api/telemost/bot_abc123def456/leave
+```
+
+Allowed `source` values: `desktop_agent`, `telemost_bot`. Unknown values return 400.
+
+### Environment variables for Telemost bot
+
+```env
+TELEMOST_WORKER_MODE=mock         # mock (default) | playwright
+TELEMOST_BOT_NAME="Grey Cardinal Bot"
+TELEMOST_JOIN_TIMEOUT_SEC=60
+TELEMOST_MAX_MEETING_MINUTES=120
+```
+
+### Real Telemost bot — implementation plan
+
+When ready to plug in a real browser joiner, implement `PlaywrightTelemostBotWorker` in
+`apps/brain-api/src/brain_api/telemost_worker/playwright_worker.py` and set `TELEMOST_WORKER_MODE=playwright`.
+
+Steps the real worker must perform:
+
+```
+1. pip install 'brain-api[telemost]'  # includes playwright
+2. playwright install chromium
+3. Launch Chromium via async_playwright()
+4. Navigate to meeting_url
+5. Handle "Continue in browser" prompt if shown
+6. Set participant name to TELEMOST_BOT_NAME
+7. Mute camera, grant microphone permissions
+8. Join the meeting
+9. Start recording tab audio (via MediaRecorder or audio sink)
+10. On stop_session(): finalize WAV file
+11. POST /api/audio/upload:
+      audio      = <wav file>
+      agent_id   = telemost_bot
+      meeting_id = <from session>
+      source     = telemost_bot
+      started_at / ended_at
+12. Update bot session status to "uploaded"
+```
+
+The hook point is `MockTelemostBotWorker.start_session()` in `telemost_worker/mock_worker.py`
+(see comments in the file). The rest of the pipeline (storage, status, frontend) is already wired.
 
 ## Desktop Agent (Windows)
 

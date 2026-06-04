@@ -35,10 +35,6 @@ def main() -> None:
         created.raise_for_status()
         task_id = created.json()["id"]
         client.put(f"{root}/tasks/{task_id}", json={"columnId": in_progress}).raise_for_status()
-        comment = client.post(
-            f"{root}/tasks/{task_id}/chat-messages",
-            json={"text": "Grey Cardinal integration smoke"},
-        )
         client.put(
             f"{root}/tasks/{task_id}",
             json={"columnId": done, "completed": True},
@@ -48,7 +44,7 @@ def main() -> None:
         {
             "ok": True,
             "task_id": task_id,
-            "comment_status": comment.status_code,
+            "comment_status": "skipped",
             "final_state": "done",
         },
         sys.stdout,

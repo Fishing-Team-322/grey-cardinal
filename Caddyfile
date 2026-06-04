@@ -1,23 +1,23 @@
-# Caddy reverse proxy for Grey Cardinal.
-# {$DOMAIN} is provided via the environment (see docker-compose.prod.yml / .env).
-# Caddy automatically obtains and renews a Let's Encrypt certificate for it.
+# Caddy reverse proxy for Grey Cardinal (auto-HTTPS via Let's Encrypt).
+# {$DOMAIN} comes from the environment (see docker-compose.prod.yml / .env).
 
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Telegram delivers updates here; route to the bot service.
+	# Telegram delivers webhook updates here.
 	handle /webhooks/telegram {
 		reverse_proxy telegram-bot:8010
 	}
 
-	# Backend paths go to brain-api. Everything else is the static dashboard.
+	# Backend API + live events + desktop ingestion → brain-api.
 	# WebSocket upgrades on /ws/* are handled transparently by reverse_proxy.
 	@backend path /api/* /ws/* /desktop/* /health /ready /docs /docs/* /openapi.json /redoc /redoc/*
 	handle @backend {
 		reverse_proxy brain-api:8000
 	}
 
+	# Everything else is the static Grey Cardinal app.
 	handle {
-		reverse_proxy frontend:80
+		reverse_proxy frontend-dashboard:5173
 	}
 }

@@ -118,7 +118,7 @@ void test_wav_writer_empty_payload() {
 
 void test_config_defaults() {
     const AgentConfig cfg = parse_args({"agent.exe"});
-    expect_eq(cfg.backend_url, std::string("http://localhost:8010"), "default backend");
+    expect_eq(cfg.backend_url, std::string("http://localhost:8000"), "default backend");
     expect_eq(cfg.agent_id, std::string("desktop-agent"), "default agent_id");
     expect_true(cfg.meeting_id.empty(), "default meeting_id empty");
     expect_eq(
@@ -249,15 +249,22 @@ void test_audio_recorder_writes_wav_file() {
     expect_true(!path.empty(), "output path not empty after stop");
     expect_true(std::filesystem::exists(path), "wav file exists on disk");
 
-    // Verify WAV header.
+    // Verify WAV header. Read by size: constructing vector<std::byte> directly
+    // from istreambuf_iterator<char> fails under C++20 MSVC (std::construct_at).
     std::ifstream in(path, std::ios::binary);
-    std::vector<std::byte> wav(
-        (std::istreambuf_iterator<char>(in)),
-        std::istreambuf_iterator<char>()
-    );
+    in.seekg(0, std::ios::end);
+    const std::streamoff wav_size = in.tellg();
+    in.seekg(0, std::ios::beg);
+    std::vector<std::byte> wav(wav_size > 0 ? static_cast<std::size_t>(wav_size) : 0);
+    if (wav_size > 0) {
+        in.read(reinterpret_cast<char*>(wav.data()), wav_size);
+    }
     expect_true(wav.size() >= 44, "wav file has at least 44 bytes");
     expect_eq(read_ascii(wav, 0, 4), std::string("RIFF"), "RIFF marker");
     expect_eq(read_ascii(wav, 8, 4), std::string("WAVE"), "WAVE marker");
+
+    // Close the file before removing it — Windows blocks deletion of open files.
+    in.close();
 
     // Clean up.
     std::filesystem::remove(path);

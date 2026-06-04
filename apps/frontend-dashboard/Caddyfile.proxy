@@ -1,0 +1,13 @@
+:80 {
+	handle /api/* {
+		reverse_proxy brain-api:8000
+	}
+
+	handle /ws/* {
+		reverse_proxy brain-api:8000
+	}
+
+	handle {
+		reverse_proxy frontend-dashboard:5173
+	}
+}

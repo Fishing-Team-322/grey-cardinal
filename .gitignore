@@ -13,15 +13,12 @@ native/desktop-agent/chunks/
 # Node / frontend
 node_modules/
 apps/*/node_modules/
-apps/desktop-app/node_modules/
-apps/desktop-app/dist/
-apps/desktop-app/.vite/
 apps/frontend-dashboard/dist/
-apps/frontend-dashboard/.vite/
 
 # Logs
 *.log
 logs/
+apps/*/.logs/
 *.tmp
 
 # Python
@@ -53,3 +50,6 @@ C:/Temp/
 .env.*
 !.env.example
 config.local.*
+
+# Archives
+*.zip

@@ -19,6 +19,9 @@ from brain_api.application.use_cases.manage_meetings import (
 )
 from brain_api.application.use_cases.reject_task import RejectTask
 from brain_api.application.use_cases.send_evening_digest import SendEveningDigest
+from brain_api.application.use_cases.send_personal_evening_digests import (
+    SendPersonalEveningDigests,
+)
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.container import Container
 from grey_cardinal_contracts import (
@@ -165,9 +168,21 @@ async def ingest_command(
                 ]
             )
         if command == "digest":
-            return await SendEveningDigest(
+            if event.chat.type == "private":
+                return await SendPersonalEveningDigests(
+                    uow, container.telegram_gateway, container.config
+                ).as_actions_for_user(event.sender.id, chat_id)
+            # В группе — общий summary + подсказка про персональные дайджесты.
+            actions = await SendEveningDigest(
                 uow, container.telegram_gateway, container.config
             ).as_actions(chat_id)
+            actions.actions.append(
+                SendMessageAction(
+                    chat_id=chat_id,
+                    text="Вечером я пришлю каждому персональный дайджест в личку.",
+                )
+            )
+            return actions
         if command == "bind_chat":
             project = await uow.projects.ensure_default(container.config.default_workspace_name)
             existing = await uow.chats.get_by_telegram_id(chat_id)

@@ -286,10 +286,16 @@ UploadResult Uploader::uploadAudio(
         logger_.error("uploader: " + result.error);
         return result;
     }
-    const std::vector<std::byte> audio(
-        (std::istreambuf_iterator<char>(in)),
-        std::istreambuf_iterator<char>()
-    );
+    // Read the whole file by size. NOTE: do not construct vector<std::byte>
+    // directly from istreambuf_iterator<char> — under C++20 MSVC that routes
+    // through std::construct_at and fails to build std::byte from char (C2672).
+    in.seekg(0, std::ios::end);
+    const std::streamoff audio_size = in.tellg();
+    in.seekg(0, std::ios::beg);
+    std::vector<std::byte> audio(audio_size > 0 ? static_cast<std::size_t>(audio_size) : 0);
+    if (audio_size > 0) {
+        in.read(reinterpret_cast<char*>(audio.data()), audio_size);
+    }
     in.close();
 
     logger_.info(
