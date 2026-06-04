@@ -238,6 +238,539 @@
 /* layout grids for dashboard */
 .gca-grid-2 { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; align-items: start; }
 
+/* --- Participant profile ----------------------------------------------- */
+.gca-profile-avatar {
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 1px solid rgba(200,37,58,.38);
+  background:
+    linear-gradient(135deg, rgba(200,37,58,.18), rgba(61,163,122,.08)),
+    var(--rf-bg-1);
+  color: var(--rf-fg-0);
+  font-family: var(--rf-font-mono);
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  flex: 0 0 auto;
+}
+.gca-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.gca-profile-avatar--xxs { width: 24px; height: 24px; font-size: 9px; }
+.gca-profile-avatar--xs { width: 32px; height: 32px; font-size: 11px; border-radius: 8px; }
+.gca-profile-avatar--md { width: 48px; height: 48px; font-size: 15px; }
+.gca-profile-avatar--xl { width: 112px; height: 112px; font-size: 32px; border-width: 1.5px; }
+.gca-side-profile {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.gca-side-profile:hover,
+.gca-side-profile.active {
+  background: var(--rf-bg-2);
+  border-color: var(--rf-line-2);
+}
+.gca-side-profile-copy { min-width: 0; line-height: 1.25; }
+.gca-side-profile-copy div {
+  max-width: 122px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--rf-fg-1);
+}
+.gca-side-profile-copy span {
+  display: block;
+  max-width: 122px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--rf-fg-4);
+  font-family: var(--rf-font-mono);
+}
+.gca-side-exit {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rf-fg-4);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.gca-side-exit:hover {
+  color: var(--rf-fg-0);
+  background: var(--rf-bg-2);
+  border-color: var(--rf-line-2);
+}
+.gca-top-profile {
+  height: 36px;
+  max-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px 0 7px;
+  border: 1px solid var(--rf-line-2);
+  border-radius: 7px;
+  background: rgba(255,255,255,.02);
+  color: var(--rf-fg-0);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+.gca-top-profile:hover {
+  border-color: rgba(200,37,58,.34);
+  background: rgba(200,37,58,.07);
+}
+.gca-top-profile > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gca-profile-page,
+.gca-achievements-page {
+  display: grid;
+  gap: 16px;
+}
+.gca-profile-hero-card,
+.gca-achievements-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--rf-line-2);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.032) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255,255,255,.024) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(17,19,23,.96), rgba(10,11,13,.98));
+  background-size: 44px 44px, 44px 44px, auto;
+  box-shadow: var(--rf-shadow-3), inset 0 1px 0 rgba(255,255,255,.035);
+}
+.gca-profile-hero-card::before,
+.gca-achievements-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-left: 3px solid var(--rf-crimson);
+}
+.gca-profile-hero-main {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.gca-profile-identity { min-width: 0; }
+.gca-profile-identity h2,
+.gca-achievements-hero h2 {
+  margin: 7px 0 0;
+  color: var(--rf-fg-0);
+  font-size: clamp(28px, 3.2vw, 44px);
+  line-height: 1;
+  font-weight: 600;
+}
+.gca-profile-identity p,
+.gca-achievements-hero p {
+  max-width: 660px;
+  margin: 12px 0 0;
+  color: var(--rf-fg-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.gca-profile-meta {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gca-profile-meta span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  background: rgba(10,11,13,.64);
+  color: var(--rf-fg-2);
+  font-size: 12px;
+}
+.gca-profile-photo-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.gca-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.gca-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+  gap: 16px;
+  align-items: start;
+}
+.gca-profile-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.gca-profile-form label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.gca-profile-form label span {
+  font-size: 12px;
+  color: var(--rf-fg-2);
+}
+.gca-profile-form-wide {
+  grid-column: 1 / -1;
+}
+.gca-profile-textarea {
+  min-height: 116px;
+  padding-top: 12px;
+  resize: vertical;
+}
+.gca-profile-save-note {
+  color: var(--rf-fg-3);
+  font-size: 12px;
+}
+.gca-profile-settings-panel {
+  animation: gca-fade-in .22s ease;
+}
+.gca-profile-photo-settings {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--rf-line-1);
+  border-radius: 8px;
+  background: var(--rf-bg-0);
+}
+.gca-profile-photo-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.gca-profile-photo-copy b {
+  color: var(--rf-fg-0);
+  font-size: 13px;
+}
+.gca-profile-photo-copy span {
+  color: var(--rf-fg-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.gca-hearing-panel {
+  min-width: 0;
+}
+.gca-hearing-list {
+  display: grid;
+  gap: 9px;
+}
+.gca-hearing-row {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) minmax(160px, 220px);
+  gap: 13px;
+  align-items: start;
+  padding: 13px;
+  border: 1px solid var(--rf-line-1);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px),
+    var(--rf-bg-0);
+  background-size: 28px 28px, auto;
+}
+.gca-hearing-row:hover {
+  border-color: rgba(200,37,58,.28);
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.026) 1px, transparent 1px),
+    rgba(200,37,58,.035);
+  background-size: 28px 28px, auto;
+}
+.gca-hearing-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gca-hearing-time {
+  color: var(--rf-fg-3);
+  font-family: var(--rf-font-mono);
+  font-size: 11px;
+}
+.gca-hearing-copy {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+.gca-hearing-speaker {
+  color: var(--rf-fg-0);
+  font-size: 12px;
+  font-weight: 600;
+}
+.gca-hearing-text {
+  color: var(--rf-fg-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.gca-hearing-task {
+  display: grid;
+  gap: 4px;
+  padding-top: 2px;
+}
+.gca-hearing-task span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--rf-crimson-hi);
+  font-family: var(--rf-font-mono);
+  font-size: 10.5px;
+}
+.gca-hearing-task b {
+  color: var(--rf-fg-0);
+  font-size: 13px;
+  font-weight: 600;
+}
+.gca-hearing-side {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 9px;
+}
+.gca-hearing-side dl {
+  width: 100%;
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 9px;
+  font-size: 11px;
+}
+.gca-hearing-side dt {
+  color: var(--rf-fg-4);
+}
+.gca-hearing-side dd {
+  margin: 0;
+  text-align: right;
+  color: var(--rf-fg-2);
+  font-family: var(--rf-font-mono);
+}
+
+/* --- Achievements ------------------------------------------------------- */
+.gca-achievements-preview {
+  cursor: pointer;
+}
+.gca-achievements-preview:hover {
+  border-color: rgba(200,37,58,.36);
+  box-shadow: var(--rf-shadow-2), 0 0 0 1px rgba(200,37,58,.08);
+}
+.gca-achievements-label {
+  color: var(--rf-fg-0);
+  font-size: 19px;
+  line-height: 1;
+  font-weight: 600;
+}
+.gca-achievements-summary {
+  margin-top: 5px;
+  color: var(--rf-fg-3);
+  font-family: var(--rf-font-mono);
+  font-size: 10.5px;
+}
+.gca-achievements-score {
+  color: var(--rf-crimson-hi);
+  font-family: var(--rf-font-mono);
+  font-size: 18px;
+}
+.gca-achievement-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.gca-achievement {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--rf-line-1);
+  border-radius: 8px;
+  background: var(--rf-bg-0);
+  transition: border-color .18s, background .18s, transform .18s, opacity .18s;
+}
+.gca-achievement--mini {
+  min-height: 112px;
+  padding: 12px 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  text-align: center;
+}
+.gca-achievement--tile {
+  min-height: 142px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.gca-achievement:hover {
+  transform: translateY(-1px);
+  border-color: var(--rf-line-3);
+  background: var(--rf-bg-1);
+}
+.gca-achievement-medal {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--rf-crimson-hi);
+  border: 1px solid rgba(200,37,58,.38);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.22), transparent 24px),
+    linear-gradient(145deg, rgba(200,37,58,.24), rgba(200,37,58,.05));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 12px 24px rgba(0,0,0,.22);
+}
+.gca-achievement--mini .gca-achievement-medal {
+  width: 46px;
+  height: 46px;
+}
+.gca-achievement--ok .gca-achievement-medal {
+  color: var(--rf-ok);
+  border-color: var(--rf-ok-line);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.2), transparent 24px),
+    linear-gradient(145deg, rgba(61,163,122,.26), rgba(61,163,122,.06));
+}
+.gca-achievement--warn .gca-achievement-medal {
+  color: var(--rf-warn);
+  border-color: var(--rf-warn-line);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.2), transparent 24px),
+    linear-gradient(145deg, rgba(214,139,28,.26), rgba(214,139,28,.06));
+}
+.gca-achievement--info .gca-achievement-medal {
+  color: var(--rf-info);
+  border-color: var(--rf-info-line);
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.18), transparent 24px),
+    linear-gradient(145deg, rgba(59,130,196,.24), rgba(59,130,196,.06));
+}
+.gca-achievement.locked {
+  opacity: .62;
+}
+.gca-achievement.locked .gca-achievement-medal {
+  color: var(--rf-fg-4);
+  border-color: var(--rf-line-2);
+  background: linear-gradient(145deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+}
+.gca-achievement-copy {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+.gca-achievement-title {
+  color: var(--rf-fg-0);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.gca-achievement-desc {
+  color: var(--rf-fg-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.gca-achievement-tier {
+  width: fit-content;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  color: var(--rf-fg-2);
+  background: rgba(255,255,255,.02);
+  font-family: var(--rf-font-mono);
+  font-size: 10px;
+}
+.gca-achievements-open {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rf-line-1);
+  color: var(--rf-fg-1);
+  font-size: 12px;
+}
+.gca-achievements-hero-copy {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.gca-achievements-hero-side {
+  position: relative;
+  z-index: 1;
+  min-width: 280px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(10,11,13,.64);
+}
+.gca-achievements-hero-side b {
+  display: block;
+  color: var(--rf-fg-0);
+  font-size: 13px;
+}
+.gca-achievements-hero-side span {
+  display: block;
+  margin-top: 2px;
+  color: var(--rf-fg-3);
+  font-size: 11px;
+}
+.gca-achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
 /* --- Cockpit polish ----------------------------------------------------- */
 .gca-api-url {
   min-width: 0;
@@ -440,6 +973,8 @@
   .gca-metrics { grid-template-columns: repeat(2, 1fr); }
   .gca-grid-2 { grid-template-columns: 1fr; }
   .gca-hero-panel { grid-template-columns: 1fr; }
+  .gca-profile-grid { grid-template-columns: 1fr; }
+  .gca-achievements-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .gca-shell { grid-template-columns: 1fr; }
@@ -453,6 +988,43 @@
   .gca-hero-panel { padding: 16px; }
   .gca-source-strip { grid-template-columns: 1fr 1fr; }
   .gca-hero-metrics { grid-template-columns: 1fr 1fr; }
+  .gca-top-profile { max-width: 54px; padding-right: 7px; }
+  .gca-top-profile > span:last-child { display: none; }
+  .gca-profile-hero-card,
+  .gca-achievements-hero {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px;
+  }
+  .gca-profile-hero-main {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .gca-profile-photo-actions {
+    justify-content: flex-start;
+  }
+  .gca-profile-form { grid-template-columns: 1fr; }
+  .gca-profile-photo-settings {
+    grid-template-columns: auto 1fr;
+  }
+  .gca-profile-photo-settings .gc-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .gca-achievements-hero-side {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: auto 1fr auto;
+  }
+  .gca-hearing-row {
+    grid-template-columns: 1fr;
+  }
+  .gca-hearing-side {
+    justify-items: start;
+  }
+  .gca-hearing-side dl {
+    max-width: 320px;
+  }
 }
 @media (max-width: 500px) {
   .gca-content { padding: 14px; }
@@ -460,6 +1032,16 @@
   .gca-source-strip,
   .gca-hero-metrics { grid-template-columns: 1fr; }
   .gca-api-url { display: none; }
+  .gca-profile-avatar--xl { width: 88px; height: 88px; font-size: 25px; }
+  .gca-achievement-strip,
+  .gca-achievements-grid { grid-template-columns: 1fr; }
+  .gca-achievements-hero-side {
+    grid-template-columns: auto 1fr;
+  }
+  .gca-achievements-hero-side .gc-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .gca-hero-status-dot.checking {
@@ -536,5 +1118,3 @@
   .gc-plat-grid { grid-template-columns: 1fr; }
   .gc-status-table { display: block; overflow-x: auto; }
 }
-
-
