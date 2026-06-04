@@ -16,6 +16,186 @@ const ygClass = (status) => ({
   disabled: '',
 }[status] || '');
 
+const PROFILE_STORAGE_KEY = 'gc.cockpit.profile';
+
+const DEFAULT_PROFILE = {
+  displayName: 'Grey Cardinal',
+  handle: 'grey-cardinal',
+  role: 'Product operator',
+  team: 'Cockpit crew',
+  location: 'Remote',
+  timezone: 'Europe/Moscow',
+  status: 'Active',
+  bio: 'Runs meeting signals, board decisions, and follow-through from one cockpit.',
+  photoDataUrl: '',
+};
+
+const PROFILE_ACHIEVEMENTS = [
+  {
+    id: 'profile-claimed',
+    icon: 'user',
+    title: 'Profile claimed',
+    desc: 'Participant profile is ready inside the cockpit.',
+    tier: 'Base',
+    tone: 'brand',
+  },
+  {
+    id: 'photo-ready',
+    icon: 'image',
+    title: 'Face card',
+    desc: 'A profile photo has been uploaded.',
+    tier: 'Identity',
+    tone: 'info',
+  },
+  {
+    id: 'profile-complete',
+    icon: 'checkCircle',
+    title: 'Readable profile',
+    desc: 'Name, role, team, and bio are filled in.',
+    tier: 'Identity',
+    tone: 'ok',
+  },
+  {
+    id: 'brain-online',
+    icon: 'zap',
+    title: 'Live link',
+    desc: 'Brain API has answered from the cockpit.',
+    tier: 'Ops',
+    tone: 'ok',
+  },
+  {
+    id: 'proposal-watch',
+    icon: 'list',
+    title: 'Proposal watch',
+    desc: 'Task proposals are visible in the demo flow.',
+    tier: 'Ops',
+    tone: 'warn',
+  },
+  {
+    id: 'board-keeper',
+    icon: 'kanban',
+    title: 'Board keeper',
+    desc: 'At least one task is present on the board.',
+    tier: 'Board',
+    tone: 'brand',
+  },
+  {
+    id: 'closer',
+    icon: 'target',
+    title: 'Closer',
+    desc: 'A task reached the done column.',
+    tier: 'Board',
+    tone: 'ok',
+  },
+  {
+    id: 'daemon-signal',
+    icon: 'download',
+    title: 'Daemon signal',
+    desc: 'Desktop upload data reached the cockpit.',
+    tier: 'Infra',
+    tone: 'info',
+  },
+];
+
+const DAEMON_HEARING_HISTORY = [
+  {
+    id: 'dh-1',
+    time: '14:02',
+    speaker: 'Петя',
+    text: 'Давайте оплату подготовим к четвергу, крайний срок - до конца недели.',
+    preparedTask: 'Подготовить оплату',
+    assignee: 'Петя',
+    due: 'Четверг, 18:00',
+    confidence: 87,
+    status: 'prepared',
+  },
+  {
+    id: 'dh-2',
+    time: '14:03',
+    speaker: 'Аня',
+    text: 'Я проверю интеграцию с YouGile сегодня вечером, примерно к восьми.',
+    preparedTask: 'Проверить интеграцию с YouGile',
+    assignee: 'Аня',
+    due: 'Сегодня, 20:00',
+    confidence: 81,
+    status: 'prepared',
+  },
+  {
+    id: 'dh-3',
+    time: '14:05',
+    speaker: 'Дима',
+    text: 'Мне нужно до завтра поднять websocket для dashboard.',
+    preparedTask: 'Поднять websocket для dashboard',
+    assignee: 'Дима',
+    due: 'Завтра, 12:00',
+    confidence: 91,
+    status: 'ready',
+  },
+  {
+    id: 'dh-4',
+    time: '14:09',
+    speaker: 'Дима',
+    text: 'И еще нужно проверить daemon на Windows перед демо.',
+    preparedTask: 'Проверить daemon на Windows',
+    assignee: 'Дима',
+    due: 'Завтра, 16:00',
+    confidence: 84,
+    status: 'draft',
+  },
+];
+
+const normalizeProfile = (value) => ({ ...DEFAULT_PROFILE, ...(value || {}) });
+
+const loadProfile = () => {
+  try {
+    return normalizeProfile(JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null'));
+  } catch (_) {
+    return normalizeProfile();
+  }
+};
+
+const saveProfile = (profile) => {
+  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+};
+
+const initialsFor = (name) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'GC';
+  return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+};
+
+const isProfileComplete = (profile) => (
+  Boolean(profile.displayName?.trim())
+  && Boolean(profile.role?.trim())
+  && Boolean(profile.team?.trim())
+  && Boolean(profile.bio?.trim())
+);
+
+const buildAchievements = ({ profile, apiState, proposals, taskCount, doneCount, daemonUploads }) => {
+  const unlocked = {
+    'profile-claimed': true,
+    'photo-ready': Boolean(profile.photoDataUrl),
+    'profile-complete': isProfileComplete(profile),
+    'brain-online': apiState.status === 'online',
+    'proposal-watch': proposals.length > 0,
+    'board-keeper': taskCount > 0,
+    closer: doneCount > 0,
+    'daemon-signal': daemonUploads.length > 0,
+  };
+  return PROFILE_ACHIEVEMENTS.map((item) => ({
+    ...item,
+    unlocked: Boolean(unlocked[item.id]),
+  }));
+};
+
+const ProfileAvatar = ({ profile, size = 'md' }) => (
+  <span className={'gca-profile-avatar gca-profile-avatar--' + size}>
+    {profile.photoDataUrl
+      ? <img src={profile.photoDataUrl} alt=""/>
+      : <span>{initialsFor(profile.displayName)}</span>}
+  </span>
+);
+
 const EmptyState = ({ icon = 'grid', title, desc }) => (
   <div className="gca-empty">
     <span className="gca-empty-ic"><Icon name={icon} size={18}/></span>
@@ -26,13 +206,17 @@ const EmptyState = ({ icon = 'grid', title, desc }) => (
   </div>
 );
 
-const Sidebar = ({ go, counts, section, setSection }) => {
+const Sidebar = ({ go, counts, section, setSection, profile }) => {
   const nav = [
     { sec:'WORK', items:[
       { id:'overview', icon:'grid', label:'Overview' },
       { id:'proposals', icon:'list', label:'Proposals', count: counts.proposals },
       { id:'kanban', icon:'kanban', label:'Board', count: counts.tasks },
       { id:'digest', icon:'bell', label:'Digest' },
+    ]},
+    { sec:'TEAM', items:[
+      { id:'profile', icon:'user', label:'Profile' },
+      { id:'achievements', icon:'award', label:'Achievements', count: counts.achievements },
     ]},
     { sec:'INTEGRATIONS', items:[
       { id:'daemon', icon:'download', label:'Daemon uploads', count: counts.daemonUploads },
@@ -65,18 +249,26 @@ const Sidebar = ({ go, counts, section, setSection }) => {
         ))}
       </nav>
       <div className="gca-side-foot">
-        <div className="gca-avatar">GC</div>
-        <div style={{ lineHeight:1.3 }}>
-          <div style={{ fontSize:12, color:'var(--rf-fg-1)' }}>Grey Cardinal</div>
-          <div style={{ fontSize:10, color:'var(--rf-fg-4)', fontFamily:'var(--rf-font-mono)' }}>public demo flow</div>
+        <div
+          role="button"
+          tabIndex={0}
+          className={'gca-side-profile' + (section === 'profile' ? ' active' : '')}
+          onClick={() => setSection('profile')}
+          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSection('profile'); }}
+        >
+          <ProfileAvatar profile={profile} size="xs"/>
+          <div className="gca-side-profile-copy">
+            <div>{profile.displayName || 'Grey Cardinal'}</div>
+            <span>{profile.role || 'public demo flow'}</span>
+          </div>
         </div>
-        <span style={{ marginLeft:'auto', color:'var(--rf-fg-4)', cursor:'pointer' }} onClick={() => go('/')}><Icon name="x" size={15}/></span>
+        <button className="gca-side-exit" onClick={() => go('/')} aria-label="Exit cockpit"><Icon name="x" size={15}/></button>
       </div>
     </aside>
   );
 };
 
-const Topbar = ({ apiState, onRefresh, refreshing }) => (
+const Topbar = ({ apiState, onRefresh, refreshing, profile, setSection }) => (
   <header className="gca-topbar">
     <div className="gca-ws">
       <span className="label">Backend</span>
@@ -87,6 +279,10 @@ const Topbar = ({ apiState, onRefresh, refreshing }) => (
       {apiState.status === 'online' ? 'Brain online' : apiState.status === 'checking' ? 'Checking' : 'Offline'}
     </span>
     <div className="gca-topbar-spacer"></div>
+    <button className="gca-top-profile" onClick={() => setSection('profile')}>
+      <ProfileAvatar profile={profile} size="xxs"/>
+      <span>{profile.displayName || 'Profile'}</span>
+    </button>
     <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={onRefresh} disabled={refreshing}>
       <Icon name="refresh" size={14}/>{refreshing ? 'Refreshing...' : 'Refresh'}
     </button>
@@ -368,8 +564,256 @@ const ApiPanel = ({ config, setConfig, onSave, apiState }) => (
   </div>
 );
 
+const AchievementBadge = ({ achievement, mode = 'tile' }) => (
+  <div className={'gca-achievement gca-achievement--' + mode + ' gca-achievement--' + achievement.tone + (achievement.unlocked ? ' unlocked' : ' locked')}>
+    <span className="gca-achievement-medal">
+      <Icon name={achievement.icon} size={mode === 'mini' ? 17 : 22}/>
+    </span>
+    <div className="gca-achievement-copy">
+      <div className="gca-achievement-title">{achievement.title}</div>
+      {mode !== 'mini' && <div className="gca-achievement-desc">{achievement.desc}</div>}
+      {mode !== 'mini' && <div className="gca-achievement-tier">{achievement.unlocked ? achievement.tier : 'Locked'}</div>}
+    </div>
+  </div>
+);
+
+const DaemonHearingPanel = ({ items }) => (
+  <div className="gca-panel gca-hearing-panel">
+    <div className="gca-panel-head">
+      <div className="gca-panel-title"><Icon name="ear" size={15}/>Что услышал daemon</div>
+      <span className="gca-panel-eyebrow">{items.length} signals</span>
+    </div>
+    <div className="gca-panel-body">
+      <div className="gca-hearing-list">
+        {items.map((item) => (
+          <div className="gca-hearing-row" key={item.id}>
+            <div className="gca-hearing-meta">
+              <span className="gca-hearing-time">{item.time}</span>
+              <span className="gca-profile-avatar gca-profile-avatar--xxs">{item.speaker.slice(0, 1).toUpperCase()}</span>
+            </div>
+            <div className="gca-hearing-copy">
+              <div className="gca-hearing-speaker">{item.speaker}</div>
+              <div className="gca-hearing-text">{item.text}</div>
+              <div className="gca-hearing-task">
+                <span><Icon name="checkCircle" size={13}/>Подготовлена задача</span>
+                <b>{item.preparedTask}</b>
+              </div>
+            </div>
+            <div className="gca-hearing-side">
+              <span className="gca-badge gca-badge--brand">{item.status}</span>
+              <dl>
+                <dt>Owner</dt><dd>{item.assignee}</dd>
+                <dt>Due</dt><dd>{item.due}</dd>
+                <dt>Conf</dt><dd>{item.confidence}%</dd>
+              </dl>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+const ProfilePanel = ({
+  profile,
+  setProfile,
+  achievements,
+  onAchievementsOpen,
+  onPhotoUpload,
+  onPhotoRemove,
+  onSave,
+  profileNotice,
+  go,
+}) => {
+  const fileInputRef = React.useRef(null);
+  const [profileView, setProfileView] = React.useState('home');
+  const unlocked = achievements.filter((item) => item.unlocked);
+  const completion = Math.round((unlocked.length / achievements.length) * 100);
+  const updateProfile = (field, value) => setProfile(prev => ({ ...prev, [field]: value }));
+  const openAchievements = () => onAchievementsOpen();
+  const onAchievementKey = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') openAchievements();
+  };
+
+  return (
+    <div className="gca-profile-page">
+      <section className="gca-profile-hero-card">
+        <div className="gca-profile-hero-main">
+          <ProfileAvatar profile={profile} size="xl"/>
+          <div className="gca-profile-identity">
+            <span className="gca-panel-eyebrow">PARTICIPANT PROFILE</span>
+            <h2>{profile.displayName || 'Grey Cardinal'}</h2>
+            <p>{profile.bio || DEFAULT_PROFILE.bio}</p>
+            <div className="gca-profile-meta">
+              <span><Icon name="users" size={13}/>{profile.team || 'Team'}</span>
+              <span><Icon name="target" size={13}/>{profile.role || 'Role'}</span>
+              <span><Icon name="clock" size={13}/>{profile.timezone || 'Timezone'}</span>
+            </div>
+          </div>
+        </div>
+        <div className="gca-profile-photo-actions">
+          <button
+            className={'gc-btn gc-btn--sm ' + (profileView === 'home' ? 'gc-btn--primary' : 'gc-btn--secondary')}
+            onClick={() => setProfileView('home')}
+          >
+            <Icon name="grid" size={13}/>Home
+          </button>
+          <button
+            className={'gc-btn gc-btn--sm ' + (profileView === 'settings' ? 'gc-btn--primary' : 'gc-btn--secondary')}
+            onClick={() => setProfileView('settings')}
+          >
+            <Icon name="settings" size={13}/>Profile settings
+          </button>
+          <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={() => go('/download')}>
+            <Icon name="download" size={13}/>Daemon setup
+          </button>
+        </div>
+      </section>
+
+      {profileView === 'home' && (
+        <div className="gca-profile-grid">
+          <DaemonHearingPanel items={DAEMON_HEARING_HISTORY}/>
+
+          <div
+            className="gca-panel gca-achievements-preview"
+            role="button"
+            tabIndex={0}
+            onClick={openAchievements}
+            onKeyDown={onAchievementKey}
+          >
+            <div className="gca-panel-head">
+              <div>
+                <div className="gca-achievements-label">Achievements</div>
+                <div className="gca-achievements-summary">{unlocked.length} of {achievements.length} unlocked</div>
+              </div>
+              <span className="gca-achievements-score">{completion}%</span>
+            </div>
+            <div className="gca-panel-body">
+              <div className="gca-achievement-strip">
+                {achievements.slice(0, 6).map((achievement) => (
+                  <AchievementBadge key={achievement.id} achievement={achievement} mode="mini"/>
+                ))}
+              </div>
+              <div className="gca-achievements-open">
+                <span>Open all achievements</span>
+                <Icon name="arrowR" size={14}/>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileView === 'settings' && (
+        <div className="gca-panel gca-profile-settings-panel">
+          <div className="gca-panel-head">
+            <div className="gca-panel-title"><Icon name="settings" size={15}/>Profile settings</div>
+            <span className="gca-panel-eyebrow">{profileNotice || 'LOCAL PROFILE'}</span>
+          </div>
+          <div className="gca-panel-body">
+            <div className="gca-profile-photo-settings">
+              <ProfileAvatar profile={profile} size="md"/>
+              <div className="gca-profile-photo-copy">
+                <b>Profile photo</b>
+                <span>Photo is stored locally in this browser until backend profile storage is connected.</span>
+              </div>
+              <input
+                ref={fileInputRef}
+                className="gca-file-input"
+                type="file"
+                accept="image/*"
+                onChange={onPhotoUpload}
+              />
+              <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={() => fileInputRef.current?.click()}>
+                <Icon name="upload" size={14}/>Upload photo
+              </button>
+              <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={onPhotoRemove} disabled={!profile.photoDataUrl}>
+                <Icon name="x" size={13}/>Remove
+              </button>
+            </div>
+            <div className="gca-profile-form">
+              <label>
+                <span>Display name</span>
+                <input className="gc-input" value={profile.displayName} onChange={(event) => updateProfile('displayName', event.target.value)}/>
+              </label>
+              <label>
+                <span>Handle</span>
+                <input className="gc-input" value={profile.handle} onChange={(event) => updateProfile('handle', event.target.value)}/>
+              </label>
+              <label>
+                <span>Role</span>
+                <input className="gc-input" value={profile.role} onChange={(event) => updateProfile('role', event.target.value)}/>
+              </label>
+              <label>
+                <span>Team</span>
+                <input className="gc-input" value={profile.team} onChange={(event) => updateProfile('team', event.target.value)}/>
+              </label>
+              <label>
+                <span>Location</span>
+                <input className="gc-input" value={profile.location} onChange={(event) => updateProfile('location', event.target.value)}/>
+              </label>
+              <label>
+                <span>Timezone</span>
+                <input className="gc-input" value={profile.timezone} onChange={(event) => updateProfile('timezone', event.target.value)}/>
+              </label>
+              <label>
+                <span>Status</span>
+                <input className="gc-input" value={profile.status} onChange={(event) => updateProfile('status', event.target.value)}/>
+              </label>
+              <label className="gca-profile-form-wide">
+                <span>Bio</span>
+                <textarea
+                  className="gc-input gca-profile-textarea"
+                  rows={4}
+                  value={profile.bio}
+                  onChange={(event) => updateProfile('bio', event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="gca-controls">
+              <button className="gc-btn gc-btn--primary" onClick={onSave}><Icon name="check" size={14}/>Save profile</button>
+              <span className="gca-profile-save-note">{profileNotice || 'Ready'}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AchievementsPanel = ({ profile, achievements, setSection }) => {
+  const unlocked = achievements.filter((item) => item.unlocked);
+  return (
+    <div className="gca-achievements-page">
+      <section className="gca-achievements-hero">
+        <div className="gca-achievements-hero-copy">
+          <span className="gca-panel-eyebrow">PARTICIPANT PROFILE</span>
+          <h2>Achievements</h2>
+          <p>{profile.displayName || 'Grey Cardinal'} has {unlocked.length} unlocked achievements in this cockpit snapshot.</p>
+        </div>
+        <div className="gca-achievements-hero-side">
+          <ProfileAvatar profile={profile} size="md"/>
+          <div>
+            <b>{profile.handle ? '@' + profile.handle : '@grey-cardinal'}</b>
+            <span>{profile.role || 'Product operator'}</span>
+          </div>
+          <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={() => setSection('profile')}>
+            <Icon name="user" size={13}/>Profile
+          </button>
+        </div>
+      </section>
+      <div className="gca-achievements-grid">
+        {achievements.map((achievement) => (
+          <AchievementBadge key={achievement.id} achievement={achievement}/>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const AppDashboardPage = ({ go }) => {
   const [section, setSection] = React.useState('overview');
+  const [profile, setProfile] = React.useState(loadProfile);
+  const [profileNotice, setProfileNotice] = React.useState('Ready');
   const [config, setConfig] = React.useState(() => {
     const saved = GCApi.config();
     return { baseUrl: saved.baseUrl, internalToken: saved.internalToken };
@@ -391,17 +835,34 @@ const AppDashboardPage = ({ go }) => {
     () => columns.reduce((sum, col) => sum + (col.tasks || []).length, 0),
     [columns],
   );
+  const doneCount = React.useMemo(
+    () => (columns.find((col) => col.id === 'done')?.tasks || []).length,
+    [columns],
+  );
+  const achievements = React.useMemo(() => buildAchievements({
+    profile,
+    apiState,
+    proposals,
+    taskCount,
+    doneCount,
+    daemonUploads,
+  }), [profile, apiState.status, proposals.length, taskCount, doneCount, daemonUploads.length]);
+  const unlockedAchievementCount = React.useMemo(
+    () => achievements.filter((item) => item.unlocked).length,
+    [achievements],
+  );
   const counts = React.useMemo(() => ({
     proposals: proposals.length,
     tasks: taskCount,
     daemonUploads: daemonUploads.length,
-  }), [proposals.length, taskCount, daemonUploads.length]);
+    achievements: unlockedAchievementCount,
+  }), [proposals.length, taskCount, daemonUploads.length, unlockedAchievementCount]);
   const metrics = React.useMemo(() => [
     { label:'Pending', value:String(proposals.length) },
     { label:'Tasks', value:String(taskCount) },
     { label:'Uploads', value:String(daemonUploads.length) },
-    { label:'Done', value:String((columns.find((col) => col.id === 'done')?.tasks || []).length) },
-  ], [proposals.length, taskCount, daemonUploads.length, columns]);
+    { label:'Done', value:String(doneCount) },
+  ], [proposals.length, taskCount, daemonUploads.length, doneCount]);
 
   const loadDashboard = React.useCallback(async () => {
     setRefreshing(true);
@@ -533,15 +994,54 @@ const AppDashboardPage = ({ go }) => {
     }
   };
 
+  const saveCurrentProfile = () => {
+    saveProfile(normalizeProfile(profile));
+    setProfileNotice('Profile saved');
+  };
+
+  const uploadProfilePhoto = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setProfileNotice('Select an image file');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 2.5 * 1024 * 1024) {
+      setProfileNotice('Image must be under 2.5 MB');
+      event.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const next = normalizeProfile({ ...profile, photoDataUrl: String(reader.result || '') });
+      setProfile(next);
+      saveProfile(next);
+      setProfileNotice('Photo uploaded');
+    };
+    reader.onerror = () => setProfileNotice('Photo upload failed');
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  const removeProfilePhoto = () => {
+    const next = normalizeProfile({ ...profile, photoDataUrl: '' });
+    setProfile(next);
+    saveProfile(next);
+    setProfileNotice('Photo removed');
+  };
+
   return (
     <div className="gca-shell">
-      <Sidebar go={go} counts={counts} section={section} setSection={setSection}/>
+      <Sidebar go={go} counts={counts} section={section} setSection={setSection} profile={profile}/>
       <main className="gca-main">
-        <Topbar apiState={apiState} onRefresh={loadDashboard} refreshing={refreshing}/>
+        <Topbar apiState={apiState} onRefresh={loadDashboard} refreshing={refreshing} profile={profile} setSection={setSection}/>
         <div className="gca-content">
-          <div className="gca-page-head">
-            <CockpitHero apiState={apiState} metrics={metrics} ygStatus={ygStatus}/>
-          </div>
+          {!['profile', 'achievements'].includes(section) && (
+            <div className="gca-page-head">
+              <CockpitHero apiState={apiState} metrics={metrics} ygStatus={ygStatus}/>
+            </div>
+          )}
 
           {(section === 'overview' || section === 'proposals') && (
             <div className="gca-theater">
@@ -578,7 +1078,25 @@ const AppDashboardPage = ({ go }) => {
             <ApiPanel config={config} setConfig={setConfig} onSave={loadDashboard} apiState={apiState}/>
           )}
 
-          {signals.length > 0 && (
+          {section === 'profile' && (
+            <ProfilePanel
+              profile={profile}
+              setProfile={setProfile}
+              achievements={achievements}
+              onAchievementsOpen={() => setSection('achievements')}
+              onPhotoUpload={uploadProfilePhoto}
+              onPhotoRemove={removeProfilePhoto}
+              onSave={saveCurrentProfile}
+              profileNotice={profileNotice}
+              go={go}
+            />
+          )}
+
+          {section === 'achievements' && (
+            <AchievementsPanel profile={profile} achievements={achievements} setSection={setSection}/>
+          )}
+
+          {signals.length > 0 && !['profile', 'achievements'].includes(section) && (
             <div className="gca-panel">
               <div className="gca-panel-head">
                 <div className="gca-panel-title"><Icon name="zap" size={15}/>Live signals</div>

@@ -117,9 +117,6 @@ const BackendPulse = ({ go }) => {
         <span><span className={'gc-api-dot ' + api.status}></span>Brain API</span>
         <span><Icon name="lock" size={12}/>{tokenState}</span>
         <span><Icon name="server" size={12}/>CORS enabled</span>
-        <button type="button" onClick={() => go(api.status === 'online' ? '/app' : '/login')}>
-          {api.status === 'online' ? 'Открыть cockpit' : 'Настроить URL'}
-        </button>
       </div>
     </div>
   );
@@ -292,15 +289,6 @@ const HeroSection = ({ go }) => (
             Grey Cardinal слушает встречи, выделяет договоренности, создает задачи,
             назначает ответственных и заранее подсвечивает риски - без ручного переноса в доску.
           </p>
-          <div className="gc-hero-cta">
-            <button className="gc-btn gc-btn--primary gc-btn--lg" onClick={() => go('/login')}>Подключить backend</button>
-            <button className="gc-btn gc-btn--secondary gc-btn--lg" onClick={() => go('/download')}>
-              <Icon name="download" size={16}/>Daemon setup
-            </button>
-            <button className="gc-btn gc-btn--ghost gc-btn--lg" onClick={() => go('/app')}>
-              Открыть cockpit <Icon name="arrowR" size={15} style={{ marginLeft: '4px' }}/>
-            </button>
-          </div>
           <BackendPulse go={go}/>
           <HeroSignals/>
           <div className="gc-hero-meta">
@@ -324,4 +312,3 @@ const HeroSection = ({ go }) => (
 );
 
 Object.assign(window, { PublicHeader, MagnifierHero, BackendPulse, HeroPipeline, HeroSection });
-

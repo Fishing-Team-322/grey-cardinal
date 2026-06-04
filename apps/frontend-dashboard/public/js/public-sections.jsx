@@ -224,11 +224,6 @@ const ProductPreview = ({ go }) => (
           </div>
         </div>
       </div>
-      <div style={{ marginTop: 26, display:'flex', gap:12, flexWrap:'wrap' }}>
-        <button className="gc-btn gc-btn--secondary" onClick={() => go('/app')}>
-          Открыть cockpit<Icon name="arrowR" size={15}/>
-        </button>
-      </div>
     </div>
   </section>
 );
@@ -244,11 +239,6 @@ const DaemonCTA = ({ go }) => (
             Установите Grey Cardinal Daemon на Windows, Linux или macOS. Он захватывает системный звук встречи
             и отправляет в brain-api структурированные события transcript stream.
           </p>
-          <div style={{ marginTop: 30, display:'flex', gap:12, flexWrap:'wrap' }}>
-            <button className="gc-btn gc-btn--primary gc-btn--lg" onClick={() => go('/download')}>
-              <Icon name="download" size={16}/>Открыть setup
-            </button>
-          </div>
         </div>
         <div>
           <div className="gc-daemon-console">
@@ -322,11 +312,6 @@ const FinalCTA = ({ go }) => (
     <div className="gc-wrap gc-reveal">
       <span className="gc-eyebrow no-rule" style={{ justifyContent:'center', display:'flex' }}>Серый кардинал</span>
       <h2 className="gc-display-2">Дайте проекту второго менеджера - невидимого</h2>
-      <div className="gc-final-cta">
-        <button className="gc-btn gc-btn--primary gc-btn--lg" onClick={() => go('/login')}>Подключить backend</button>
-        <button className="gc-btn gc-btn--secondary gc-btn--lg" onClick={() => go('/download')}><Icon name="download" size={16}/>Daemon setup</button>
-        <button className="gc-btn gc-btn--ghost gc-btn--lg" onClick={() => go('/app')}>Открыть cockpit<Icon name="arrowR" size={15}/></button>
-      </div>
     </div>
   </section>
 );
@@ -395,4 +380,3 @@ const PublicHomePage = ({ go }) => {
 };
 
 Object.assign(window, { PublicHomePage, ProblemSection, HowItWorksSection, OpsSnapshotSection, CapabilitiesSection, ProductPreview, DaemonCTA, SecuritySection, FinalCTA, PublicFooter });
-
