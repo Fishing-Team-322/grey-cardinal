@@ -29,6 +29,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+.tools/
 
 # CMake / native builds
 native/desktop-agent/build/
@@ -44,6 +45,7 @@ C:/Temp/
 *.obj
 *.exe
 *.dll
+*.wixpdb
 
 # Local app data/config examples
 .env

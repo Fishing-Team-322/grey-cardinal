@@ -1,101 +1,128 @@
-# Daemon Setup
+# Cross-platform Daemon Installer Setup
 
-Grey Cardinal ships a downloadable Windows daemon package from the existing
-Daemon setup flow.
-
-## Download
-
-- Site flow: open `https://fishingteam.su`, click `Daemon setup`.
-- Direct URL: `https://fishingteam.su/downloads/grey-cardinal-daemon-windows.zip`
-- Version: `0.2.0`
-- Built: `2026-06-04`
-- Size: `77.7 KB`
-- SHA256: `31F1089611D7C59ED74FA9BC81264823CD301AF5E8927AC47E975798DEDD0FDF`
-
-## Package Contents
-
-- `grey-cardinal-agent.exe` - Windows native audio capture agent.
-- `install_or_start.ps1` - writes `%LOCALAPPDATA%\GreyCardinal\Agent\config.toml`
-  and starts a short capture/upload.
-- `smoke_upload_test.ps1` - generates a small WAV and uploads it to backend.
-- `open_logs.ps1` - opens `%LOCALAPPDATA%\GreyCardinal\Agent\logs`.
-- `config.example.toml` - production-safe config template.
-- `README_DAEMON_WINDOWS.md` - package-local instructions.
-
-No `.env`, `INTERNAL_API_TOKEN`, Telegram token, or other secret is included.
-
-## Windows Quick Start
-
-```powershell
-Expand-Archive .\grey-cardinal-daemon-windows.zip -DestinationPath .\grey-cardinal-daemon-windows
-cd .\grey-cardinal-daemon-windows
-Set-ExecutionPolicy -Scope Process Bypass
-.\smoke_upload_test.ps1 -BackendUrl "https://fishingteam.su" -MeetingId "daemon-smoke-windows"
-```
-
-Then open `https://fishingteam.su/app`, click `Refresh`, and check
-`Daemon uploads`.
-
-To record and upload a short microphone capture:
-
-```powershell
-.\install_or_start.ps1 -BackendUrl "https://fishingteam.su" -AgentId "agent-demo-001" -DurationSec 10 -CaptureMode microphone
-```
-
-To try system loopback:
-
-```powershell
-.\install_or_start.ps1 -BackendUrl "https://fishingteam.su" -DurationSec 10 -CaptureMode system_loopback
-```
-
-## Config
-
-Default config path:
+Grey Cardinal serves daemon release metadata from:
 
 ```text
-%LOCALAPPDATA%\GreyCardinal\Agent\config.toml
+apps/frontend-dashboard/public/downloads/daemon-manifest.json
 ```
 
-Example:
+The production page reads this manifest and renders the existing Daemon setup
+flow as a platform selector for Windows, macOS, and Linux.
 
-```toml
-backend_url = "https://fishingteam.su"
-agent_id = "agent-demo-001"
-meeting_id = ""
-capture_mode = "microphone"
-duration_sec = 10
-output_dir = ""
-dry_run = false
-```
+## Production URLs
 
-## Endpoints
+- Windows MSI: `https://fishingteam.su/downloads/grey-cardinal-daemon-windows-x64.msi`
+- Linux DEB target: `https://fishingteam.su/downloads/grey-cardinal-daemon-linux-amd64.deb`
+- macOS DMG target: `https://fishingteam.su/downloads/grey-cardinal-daemon-macos-universal.dmg`
 
-- Agent/smoke upload: `POST /api/audio/upload`
-- Upload visibility: `GET /api/meetings`
-- Frontend page: `/download`
-- Cockpit visibility: `/app`, `Daemon uploads`
+Only artifacts with `status: "available"` are active download buttons in the UI.
+Preview artifacts are shown with disabled buttons to avoid 404 flows.
 
-## Verification
+## Windows MSI
+
+Current status: available.
+
+- Artifact: `grey-cardinal-daemon-windows-x64.msi`
+- Version: `0.3.0`
+- Size: `104 KB`
+- SHA256: `B24AA357A349488405133B6CBF4B428FA2FD6D70B45895B98BCDA3296774F241`
+- Install directory: `C:\Program Files\Grey Cardinal Daemon\`
+- Config/logs: `%LOCALAPPDATA%\GreyCardinal\Daemon\`
+
+Build locally:
 
 ```powershell
-curl.exe -I https://fishingteam.su/
-curl.exe -I https://fishingteam.su/downloads/grey-cardinal-daemon-windows.zip
-curl.exe -I https://fishingteam.su/api/health
+.\scripts\package_windows_msi.ps1 -Configuration Release -Version 0.3.0
 ```
 
-Backend ingest smoke:
+Install:
 
 ```powershell
-.\smoke_upload_test.ps1 -BackendUrl "https://fishingteam.su" -MeetingId "daemon-smoke-windows"
-curl.exe https://fishingteam.su/api/meetings
+msiexec /i .\grey-cardinal-daemon-windows-x64.msi
 ```
 
-## Limitations
+Smoke upload:
 
-- The Windows package contains a real `.exe`, but not an MSI installer.
-- Microphone/system loopback capture is implemented in the Windows native agent.
-- The public audio upload path stores WAV and meeting metadata.
-- Real ASR and automatic task creation are not wired to `/api/audio/upload` yet.
-- The cockpit shows upload visibility via `Daemon uploads`; tasks are still
-  created through the existing chat/proposal flow until audio-worker/ASR is
-  connected to this public path.
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\Grey Cardinal Daemon\smoke_upload_test.ps1" -BackendUrl "https://fishingteam.su"
+```
+
+Open logs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\Grey Cardinal Daemon\open_logs.ps1"
+```
+
+Uninstall:
+
+```powershell
+msiexec /x .\grey-cardinal-daemon-windows-x64.msi
+```
+
+## Linux Debian/Ubuntu
+
+Current status: preview.
+
+Target flow:
+
+```bash
+sudo dpkg -i grey-cardinal-daemon-linux-amd64.deb
+sudo apt-get install -f
+sudo nano /etc/grey-cardinal-daemon/config.toml
+sudo systemctl enable --now grey-cardinal-daemon
+journalctl -u grey-cardinal-daemon -f
+```
+
+Preview files:
+
+- `native/desktop-agent/package/linux/config.example.toml`
+- `native/desktop-agent/package/linux/grey-cardinal-daemon.service`
+- `native/desktop-agent/package/linux/smoke_upload_test.sh`
+- `native/desktop-agent/package/linux/README_DAEMON_LINUX.md`
+- `scripts/package_linux_deb.sh`
+
+Linux PipeWire/PulseAudio capture is not implemented yet, so the DEB artifact is
+not published as an active download.
+
+## macOS
+
+Current status: preview.
+
+Target flow:
+
+```bash
+open grey-cardinal-daemon-macos-universal.dmg
+tail -f ~/Library/Logs/GreyCardinal/Daemon.log
+```
+
+Preview files:
+
+- `native/desktop-agent/package/macos/config.example.toml`
+- `native/desktop-agent/package/macos/com.greycardinal.daemon.plist`
+- `native/desktop-agent/package/macos/README_DAEMON_MACOS.md`
+- `scripts/package_macos.sh`
+
+macOS packaging needs a macOS runner plus signing/notarization before the DMG or
+PKG can be published.
+
+## Backend Ingest
+
+Installers and smoke scripts use:
+
+```text
+POST https://fishingteam.su/api/audio/upload
+GET  https://fishingteam.su/api/meetings
+```
+
+The cockpit shows accepted audio uploads in `Daemon uploads`.
+
+## CI
+
+The release workflow lives at:
+
+```text
+.github/workflows/build-daemon-installers.yml
+```
+
+It builds the Windows MSI on `windows-latest` and publishes preview docs for
+Linux/macOS until native capture/package artifacts are implemented.

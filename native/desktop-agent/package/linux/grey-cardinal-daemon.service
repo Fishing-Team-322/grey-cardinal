@@ -1,0 +1,13 @@
+[Unit]
+Description=Grey Cardinal Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/grey-cardinal-daemon --config /etc/grey-cardinal-daemon/config.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

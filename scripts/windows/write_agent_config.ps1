@@ -30,7 +30,7 @@ function ConvertTo-TomlString([string]$Value) {
     return '"' + $escaped + '"'
 }
 
-$configDir = Join-Path $env:LOCALAPPDATA "GreyCardinal\Agent"
+$configDir = Join-Path $env:LOCALAPPDATA "GreyCardinal\Daemon"
 $configPath = Join-Path $configDir "config.toml"
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 

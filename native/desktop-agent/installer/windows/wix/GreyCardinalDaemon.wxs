@@ -1,0 +1,62 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Grey Cardinal Daemon"
+    Manufacturer="Grey Cardinal"
+    Version="$(ProductVersion)"
+    UpgradeCode="{F3AA9ED3-233A-4B88-9B90-350098EE2C48}"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Grey Cardinal Daemon is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Grey Cardinal Daemon" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Grey Cardinal Daemon" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Grey Cardinal Daemon" Level="1">
+      <ComponentGroupRef Id="DaemonComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="DaemonComponents" Directory="INSTALLFOLDER">
+      <Component Id="DaemonExe" Guid="{44D94A5B-A89F-45B9-BE6A-6DE2B822C9F7}">
+        <File Id="DaemonExeFile" Source="$(StageDir)\grey-cardinal-daemon.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="ConfigExample" Guid="{B8900B8C-BE1C-4128-85D6-F9195F524C90}">
+        <File Id="ConfigExampleFile" Source="$(StageDir)\config.example.toml" KeyPath="yes" />
+      </Component>
+      <Component Id="InstallOrStartScript" Guid="{88E1722B-D729-4E7E-8A58-665211FC293A}">
+        <File Id="InstallOrStartScriptFile" Source="$(StageDir)\install_or_start.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="SmokeUploadScript" Guid="{D18AF38B-564D-40B4-8F45-BA56C9F08367}">
+        <File Id="SmokeUploadScriptFile" Source="$(StageDir)\smoke_upload_test.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="OpenLogsScript" Guid="{6C92E2D3-6BBE-4D77-A870-57D96F67620C}">
+        <File Id="OpenLogsScriptFile" Source="$(StageDir)\open_logs.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="WindowsReadme" Guid="{B0D2D249-B025-47F0-9D15-CA8DDE1BA4D6}">
+        <File Id="WindowsReadmeFile" Source="$(StageDir)\README_DAEMON_WINDOWS.md" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder" Guid="{C8402C69-F2E9-4C48-909D-9795FEDE8B43}">
+      <Shortcut
+        Id="GreyCardinalDaemonShortcut"
+        Name="Grey Cardinal Daemon"
+        Description="Start Grey Cardinal Daemon"
+        Target="[#DaemonExeFile]"
+        WorkingDirectory="INSTALLFOLDER"
+        Arguments="--config &quot;[INSTALLFOLDER]config.example.toml&quot;" />
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Grey Cardinal\Daemon" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

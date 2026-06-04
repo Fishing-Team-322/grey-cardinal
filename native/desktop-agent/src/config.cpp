@@ -215,7 +215,7 @@ AgentConfig load_config_from_args(int argc, char** argv) {
 
 std::filesystem::path default_config_path() {
     if (const char* value = std::getenv("LOCALAPPDATA")) {
-        return std::filesystem::path(value) / "GreyCardinal" / "Agent" / "config.toml";
+        return std::filesystem::path(value) / "GreyCardinal" / "Daemon" / "config.toml";
     }
     if (const char* value = std::getenv("HOME")) {
         return std::filesystem::path(value) / ".config" / "grey-cardinal-agent" / "config.toml";
@@ -284,7 +284,7 @@ Options:
   --help                   Show this help
 
 Default config path:
-  %LOCALAPPDATA%\GreyCardinal\Agent\config.toml
+  %LOCALAPPDATA%\GreyCardinal\Daemon\config.toml
 
 Upload endpoint:
   POST {backend_url}/api/audio/upload

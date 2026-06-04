@@ -63,7 +63,7 @@ List available input devices:
 
 ## Config file
 
-Default path: `%LOCALAPPDATA%\GreyCardinal\Agent\config.toml`
+Default path: `%LOCALAPPDATA%\GreyCardinal\Daemon\config.toml`
 
 ```toml
 backend_url  = "http://localhost:8010"
@@ -131,7 +131,7 @@ The agent prints one status line to stdout at each transition:
 ## Logs
 
 ```
-%LOCALAPPDATA%\GreyCardinal\Agent\logs\agent.log
+%LOCALAPPDATA%\GreyCardinal\Daemon\logs\daemon.log
 ```
 
 ## Module overview

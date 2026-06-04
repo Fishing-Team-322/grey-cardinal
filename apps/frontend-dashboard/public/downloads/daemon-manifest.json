@@ -1,0 +1,44 @@
+{
+  "version": "0.3.0",
+  "backend_url": "https://fishingteam.su",
+  "built_at": "2026-06-04",
+  "platforms": {
+    "windows": {
+      "label": "Windows",
+      "artifact": "grey-cardinal-daemon-windows-x64.msi",
+      "url": "/downloads/grey-cardinal-daemon-windows-x64.msi",
+      "format": "MSI installer",
+      "status": "available",
+      "status_label": "ready",
+      "size": "104 KB",
+      "size_bytes": 106496,
+      "sha256": "B24AA357A349488405133B6CBF4B428FA2FD6D70B45895B98BCDA3296774F241",
+      "capture": "WASAPI microphone / loopback",
+      "support": "Windows x64"
+    },
+    "macos": {
+      "label": "macOS",
+      "artifact": "grey-cardinal-daemon-macos-universal.dmg",
+      "url": "/downloads/grey-cardinal-daemon-macos-universal.dmg",
+      "format": "DMG / PKG",
+      "status": "preview",
+      "status_label": "CI artifact planned",
+      "size": "not published",
+      "sha256": "",
+      "capture": "ScreenCaptureKit / microphone",
+      "support": "Apple Silicon / Intel"
+    },
+    "linux": {
+      "label": "Linux",
+      "artifact": "grey-cardinal-daemon-linux-amd64.deb",
+      "url": "/downloads/grey-cardinal-daemon-linux-amd64.deb",
+      "format": "DEB package",
+      "status": "preview",
+      "status_label": "CI artifact planned",
+      "size": "not published",
+      "sha256": "",
+      "capture": "PipeWire / PulseAudio",
+      "support": "Debian / Ubuntu amd64"
+    }
+  }
+}
