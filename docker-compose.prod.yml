@@ -54,6 +54,12 @@ services:
       context: .
       dockerfile: apps/telegram-bot/Dockerfile
     env_file: [.env]
+    # This host has no working IPv6 egress and api.telegram.org's default IPv4
+    # subnet is blocked here; 149.154.167.220 is a reachable Telegram Bot API
+    # endpoint. Pin it so the bot can reach Telegram. Remove on networks where
+    # api.telegram.org resolves/routes normally.
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
     expose:
       - "8010"
     depends_on:
