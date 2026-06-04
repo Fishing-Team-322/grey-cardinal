@@ -117,14 +117,13 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # The real Grey Cardinal site (static landing + auth + cockpit/kanban/tasks).
   frontend:
     build:
-      context: apps/frontend-dashboard
-      dockerfile: Dockerfile.prod
+      context: "./Grey Cardinal"
+      dockerfile: Dockerfile
     expose:
       - "80"
-    depends_on:
-      - brain-api
     restart: unless-stopped
 
   caddy:

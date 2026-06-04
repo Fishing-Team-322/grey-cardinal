@@ -104,18 +104,6 @@ services:
       brain-api:
         condition: service_healthy
 
-  frontend-dashboard:
-    build:
-      context: apps/frontend-dashboard
-      dockerfile: Dockerfile
-    profiles: ["full"]
-    environment:
-      VITE_BRAIN_WS_URL: ${VITE_BRAIN_WS_URL:-ws://localhost:8000/ws/events}
-    ports:
-      - "5173:5173"
-    depends_on:
-      - brain-api
-
   # Real ASR service for desktop-agent faster_whisper_http provider.
   # Usage: docker compose --profile desktop up asr-service
   # Agent config: asr_provider = "faster_whisper_http"
