@@ -165,6 +165,25 @@ const GCApi = {
   config: gcApiConfig,
   saveConfig: gcSaveApiConfig,
   health: () => gcRequest('/api/health', { internal: false }),
+  // --- Account / workspace / daemon pairing ---
+  getProfile: (workspaceId) =>
+    gcRequest(`/api/profile${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false }),
+  createPairingCode: (workspaceId) => gcRequest('/api/agents/pairing-code', {
+    method: 'POST',
+    internal: false,
+    body: JSON.stringify({ workspace_id: workspaceId || null }),
+  }),
+  listAgents: (workspaceId) =>
+    gcRequest(`/api/agents${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false })
+      .then((data) => data.agents || []),
+  listDaemonUploads: (workspaceId) =>
+    gcRequest(`/api/daemon/uploads${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false })
+      .then((data) => data.uploads || []),
+  unpairAgent: (agentId, workspaceId) =>
+    gcRequest(`/api/agents/${agentId}/unpair${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, {
+      method: 'POST',
+      internal: false,
+    }),
   ready: () => gcRequest('/ready', { internal: false }),
   dependencies: () => gcRequest('/internal/debug/health/dependencies'),
   state: () => gcRequest('/internal/debug/state'),

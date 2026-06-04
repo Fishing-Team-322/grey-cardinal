@@ -484,6 +484,86 @@ const DigestPanel = ({ digest, onRefresh }) => (
   </div>
 );
 
+const gcAgentBadge = (a) => {
+  if (!a.online) return ['gca-badge', 'offline'];
+  if (a.recording_status === 'recording') return ['gca-badge gca-badge--warn', 'recording'];
+  if (a.status === 'uploading') return ['gca-badge gca-badge--warn', 'uploading'];
+  if (a.status === 'error') return ['gca-badge gca-badge--err', 'error'];
+  return ['gca-badge gca-badge--ok', a.status || 'idle'];
+};
+
+const DaemonPairingPanel = ({ profile, agents, onRefresh }) => {
+  const [pairing, setPairing] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const workspaceId = profile && profile.workspace_id;
+  const genCode = async () => {
+    setBusy(true); setError('');
+    try { setPairing(await GCApi.createPairingCode(workspaceId)); }
+    catch (e) { setError(String((e && e.message) || e)); }
+    finally { setBusy(false); }
+  };
+  const unpair = async (id) => {
+    setError('');
+    try { await GCApi.unpairAgent(id, workspaceId); onRefresh(); }
+    catch (e) { setError(String((e && e.message) || e)); }
+  };
+  const list = agents || [];
+  return (
+    <div className="gca-panel">
+      <div className="gca-panel-head">
+        <div className="gca-panel-title"><Icon name="server" size={15}/>Connected daemons</div>
+        <span className="gca-panel-eyebrow">{profile ? profile.account_number : 'GET /api/profile'}</span>
+      </div>
+      <div className="gca-panel-body">
+        <p className="gca-muted" style={{ marginTop: 0 }}>
+          Workspace number: <strong>{profile ? profile.account_number : '…'}</strong>
+          {' '}— этот код нужен только для привязки устройства, не отправляйте посторонним.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <button className="gc-btn gc-btn--primary gc-btn--sm" disabled={busy} onClick={genCode}>
+            <Icon name="link" size={13}/>{busy ? '…' : 'Сгенерировать код привязки'}
+          </button>
+          <a className="gc-btn gc-btn--secondary gc-btn--sm" href="/downloads/grey-cardinal-daemon-windows-x64.msi">
+            <Icon name="download" size={13}/>Скачать Windows MSI
+          </a>
+          <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={onRefresh}>
+            <Icon name="refresh" size={13}/>Обновить
+          </button>
+        </div>
+        {pairing && (
+          <div className="gca-callout" style={{ marginBottom: 10 }}>
+            Pairing code: <strong style={{ fontSize: 18 }}>{pairing.pairing_code}</strong>
+            {' '}— действует {pairing.expires_in_minutes} мин. Введите его в трее daemon → «Pair device».
+          </div>
+        )}
+        {error && <div className="gca-badge gca-badge--err" style={{ marginBottom: 8 }}>{error}</div>}
+        {list.length === 0 ? (
+          <EmptyState icon="server" title="Нет подключённых устройств" desc="Сгенерируйте код, установите MSI и привяжите daemon."/>
+        ) : (
+          <div className="gca-board">
+            {list.map((a, i) => {
+              const [cls, label] = gcAgentBadge(a);
+              return (
+                <div className="gca-board-row" key={a.agent_id || i}>
+                  <span className="gca-board-rank">{i + 1}</span>
+                  <span className="gca-avatar">{(a.device_name || 'DA').slice(0, 2).toUpperCase()}</span>
+                  <span className="gca-board-name">
+                    {a.device_name}<small> · {a.os} · v{a.version || '—'}</small>
+                  </span>
+                  <span className="gca-board-xp">{a.online ? 'online' : 'offline'}</span>
+                  <span className={cls}>{label}</span>
+                  <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => unpair(a.agent_id)}>Unpair</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const DaemonUploadsPanel = ({ uploads, onRefresh }) => (
   <div className="gca-panel">
     <div className="gca-panel-head">
@@ -829,6 +909,8 @@ const AppDashboardPage = ({ go }) => {
   const [digest, setDigest] = React.useState(null);
   const [ygStatus, setYgStatus] = React.useState(null);
   const [daemonUploads, setDaemonUploads] = React.useState([]);
+  const [accountProfile, setAccountProfile] = React.useState(null);
+  const [agents, setAgents] = React.useState([]);
   const [signals, setSignals] = React.useState([]);
 
   const taskCount = React.useMemo(
@@ -870,18 +952,23 @@ const AppDashboardPage = ({ go }) => {
     GCApi.saveConfig(config);
     try {
       await GCApi.health();
-      const [proposalRes, boardRes, digestRes, ygRes, daemonRes] = await Promise.allSettled([
-        GCApi.getProposals('pending'),
-        GCApi.getBoard(),
-        GCApi.getEveningDigest(),
-        GCApi.getYouGileStatus(),
-        GCApi.daemonUploads(),
-      ]);
+      const [proposalRes, boardRes, digestRes, ygRes, daemonRes, profileRes, agentsRes] =
+        await Promise.allSettled([
+          GCApi.getProposals('pending'),
+          GCApi.getBoard(),
+          GCApi.getEveningDigest(),
+          GCApi.getYouGileStatus(),
+          GCApi.daemonUploads(),
+          GCApi.getProfile(),
+          GCApi.listAgents(),
+        ]);
       if (proposalRes.status === 'fulfilled') setProposals(proposalRes.value);
       if (boardRes.status === 'fulfilled') setColumns(boardRes.value);
       if (digestRes.status === 'fulfilled') setDigest(digestRes.value);
       if (ygRes.status === 'fulfilled') setYgStatus(ygRes.value);
       if (daemonRes.status === 'fulfilled') setDaemonUploads(daemonRes.value);
+      if (profileRes.status === 'fulfilled') setAccountProfile(profileRes.value);
+      if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value);
       setSignals(prev => [{
         id:String(Date.now()),
         kind:'create',
@@ -1064,6 +1151,10 @@ const AppDashboardPage = ({ go }) => {
 
           {(section === 'overview' || section === 'digest') && (
             <DigestPanel digest={digest} onRefresh={loadDashboard}/>
+          )}
+
+          {(section === 'overview' || section === 'daemon') && (
+            <DaemonPairingPanel profile={accountProfile} agents={agents} onRefresh={loadDashboard}/>
           )}
 
           {(section === 'overview' || section === 'daemon') && (
