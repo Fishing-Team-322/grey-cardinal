@@ -22,6 +22,7 @@ await cp(join(root, "public", "css"), join(dist, "css"), { recursive: true });
 await cp(join(root, "public", "assets"), join(dist, "assets"), { recursive: true });
 await cp(join(root, "public", "screenshots"), join(dist, "screenshots"), { recursive: true });
 await cp(join(root, "public", "downloads"), join(dist, "downloads"), { recursive: true });
+await cp(join(root, "public", "download"), join(dist, "download"), { recursive: true });
 
 await copyFile(
   join(root, "node_modules", "react", "umd", "react.production.min.js"),

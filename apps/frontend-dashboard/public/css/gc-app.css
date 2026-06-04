@@ -265,6 +265,29 @@
 .gca-profile-avatar--xs { width: 32px; height: 32px; font-size: 11px; border-radius: 8px; }
 .gca-profile-avatar--md { width: 48px; height: 48px; font-size: 15px; }
 .gca-profile-avatar--xl { width: 112px; height: 112px; font-size: 32px; border-width: 1.5px; }
+.gca-org-avatar {
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  background:
+    linear-gradient(135deg, rgba(59,130,196,.22), rgba(200,37,58,.12)),
+    var(--rf-bg-1);
+  color: var(--rf-fg-0);
+  font-family: var(--rf-font-mono);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.gca-org-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.gca-org-avatar--md { width: 48px; height: 48px; font-size: 13px; }
+.gca-org-avatar--lg { width: 62px; height: 62px; font-size: 15px; }
+.gca-org-avatar--xl { width: 112px; height: 112px; font-size: 26px; }
 .gca-side-profile {
   min-width: 0;
   flex: 1;
@@ -345,11 +368,14 @@
   white-space: nowrap;
 }
 .gca-profile-page,
+.gca-organization-page,
 .gca-achievements-page {
   display: grid;
   gap: 16px;
 }
 .gca-profile-hero-card,
+.gca-org-hero,
+.gca-org-create,
 .gca-achievements-hero {
   position: relative;
   overflow: hidden;
@@ -368,6 +394,8 @@
   box-shadow: var(--rf-shadow-3), inset 0 1px 0 rgba(255,255,255,.035);
 }
 .gca-profile-hero-card::before,
+.gca-org-hero::before,
+.gca-org-create::before,
 .gca-achievements-hero::before {
   content: "";
   position: absolute;
@@ -383,8 +411,20 @@
   align-items: center;
   gap: 20px;
 }
+.gca-org-hero-main {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
 .gca-profile-identity { min-width: 0; }
+.gca-org-hero-copy,
+.gca-org-create-copy { min-width: 0; }
 .gca-profile-identity h2,
+.gca-org-hero h2,
+.gca-org-create h2,
 .gca-achievements-hero h2 {
   margin: 7px 0 0;
   color: var(--rf-fg-0);
@@ -393,6 +433,8 @@
   font-weight: 600;
 }
 .gca-profile-identity p,
+.gca-org-hero p,
+.gca-org-create p,
 .gca-achievements-hero p {
   max-width: 660px;
   margin: 12px 0 0;
@@ -438,6 +480,38 @@
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
   gap: 16px;
   align-items: start;
+}
+.gca-profile-side-stack {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.gca-org-summary-body,
+.gca-org-empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.gca-org-summary-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.gca-org-summary-copy b {
+  color: var(--rf-fg-0);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.gca-org-summary-copy span {
+  color: var(--rf-crimson-hi);
+  font-family: var(--rf-font-mono);
+  font-size: 11px;
+}
+.gca-org-summary-copy small {
+  color: var(--rf-fg-3);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .gca-profile-form {
   display: grid;
@@ -585,6 +659,40 @@
   text-align: right;
   color: var(--rf-fg-2);
   font-family: var(--rf-font-mono);
+}
+.gca-org-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+  gap: 16px;
+  align-items: start;
+}
+.gca-org-invite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+.gca-org-members {
+  display: grid;
+  gap: 8px;
+}
+.gca-org-member-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--rf-line-1);
+  border-radius: 8px;
+  background: var(--rf-bg-0);
+}
+.gca-org-member-row b {
+  display: block;
+  color: var(--rf-fg-0);
+  font-size: 12.5px;
+}
+.gca-org-member-row div span {
+  color: var(--rf-fg-3);
+  font-size: 11px;
 }
 
 /* --- Achievements ------------------------------------------------------- */
@@ -974,6 +1082,7 @@
   .gca-grid-2 { grid-template-columns: 1fr; }
   .gca-hero-panel { grid-template-columns: 1fr; }
   .gca-profile-grid { grid-template-columns: 1fr; }
+  .gca-org-grid { grid-template-columns: 1fr; }
   .gca-achievements-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
@@ -991,12 +1100,15 @@
   .gca-top-profile { max-width: 54px; padding-right: 7px; }
   .gca-top-profile > span:last-child { display: none; }
   .gca-profile-hero-card,
+  .gca-org-hero,
+  .gca-org-create,
   .gca-achievements-hero {
     align-items: flex-start;
     flex-direction: column;
     padding: 16px;
   }
-  .gca-profile-hero-main {
+  .gca-profile-hero-main,
+  .gca-org-hero-main {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1025,6 +1137,9 @@
   .gca-hearing-side dl {
     max-width: 320px;
   }
+  .gca-org-create .gc-btn {
+    width: 100%;
+  }
 }
 @media (max-width: 500px) {
   .gca-content { padding: 14px; }
@@ -1033,6 +1148,17 @@
   .gca-hero-metrics { grid-template-columns: 1fr; }
   .gca-api-url { display: none; }
   .gca-profile-avatar--xl { width: 88px; height: 88px; font-size: 25px; }
+  .gca-org-avatar--xl { width: 88px; height: 88px; font-size: 21px; }
+  .gca-org-summary-body,
+  .gca-org-empty,
+  .gca-org-invite {
+    grid-template-columns: 1fr;
+  }
+  .gca-org-summary-body .gc-btn,
+  .gca-org-empty .gc-btn,
+  .gca-org-invite .gc-btn {
+    width: 100%;
+  }
   .gca-achievement-strip,
   .gca-achievements-grid { grid-template-columns: 1fr; }
   .gca-achievements-hero-side {
@@ -1061,7 +1187,23 @@
 .gc-auth-aside-quote .gc-crimson { color: var(--rf-crimson-hi); }
 .gc-auth-main { display: grid; place-items: center; padding: clamp(32px, 5vw, 64px); }
 .gc-auth-card { width: 100%; max-width: 380px; }
+.gc-auth-card--wide { max-width: 520px; }
+.gc-auth-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 26px;
+}
 .gc-form { display: flex; flex-direction: column; gap: 16px; margin-top: 28px; }
+.gc-auth-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.gc-auth-form-wide {
+  grid-column: 1 / -1;
+}
 .gc-form-field { display: flex; flex-direction: column; gap: 7px; }
 .gc-form-field label { font-size: 12px; color: var(--rf-fg-2); font-weight: 500; }
 .gc-input { height: 44px; padding: 0 14px; background: var(--rf-bg-1); border: 1px solid var(--rf-line-2); border-radius: 7px; color: var(--rf-fg-0); font-family: inherit; font-size: 14px; transition: border-color .15s, box-shadow .15s; width: 100%; }
@@ -1070,7 +1212,7 @@
 .gc-form-row { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
 .gc-form-meta { margin-top: 22px; text-align: center; font-size: 13px; color: var(--rf-fg-3); }
 .gc-form-meta a { color: var(--rf-crimson-hi); cursor: pointer; }
-.gc-auth-back { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--rf-fg-3); cursor: pointer; margin-bottom: 26px; }
+.gc-auth-back { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--rf-fg-3); cursor: pointer; }
 .gc-auth-back:hover { color: var(--rf-fg-1); }
 .gc-form-status {
   padding: 11px 12px;
@@ -1085,6 +1227,10 @@
 @media (max-width: 820px) {
   .gc-auth { grid-template-columns: 1fr; }
   .gc-auth-aside { display: none; }
+}
+@media (max-width: 560px) {
+  .gc-auth-form-grid { grid-template-columns: 1fr; }
+  .gc-auth-form-wide { grid-column: auto; }
 }
 
 /* --- Download page ----------------------------------------------------- */

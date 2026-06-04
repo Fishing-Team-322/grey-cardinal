@@ -1,131 +1,226 @@
-// Grey Cardinal - backend connection and desktop identity setup
+// Grey Cardinal - frontend account auth screens.
 
-const AuthAside = ({ quote }) => (
+const GC_AUTH_ACCOUNT_KEY = 'gc.auth.account';
+const GC_AUTH_SESSION_KEY = 'gc.auth.session';
+
+const AuthAside = ({ quote, mode }) => (
   <div className="gc-auth-aside">
     <Logo size={32}/>
     <div className="gc-auth-aside-quote">{quote}</div>
     <div className="gc-mono-xs" style={{ display:'flex', gap:18, color:'var(--rf-fg-4)' }}>
-      <span>brain-api</span>
+      <span>account</span>
       <span>/</span>
-      <span>CONNECTED COCKPIT</span>
+      <span>{mode}</span>
     </div>
   </div>
 );
 
-const Field = ({ label, type='text', value, onChange, placeholder, autoComplete }) => (
-  <div className="gc-form-field">
+const Field = ({ label, type='text', value, onChange, placeholder, autoComplete, className = '' }) => (
+  <div className={'gc-form-field ' + className}>
     <label>{label}</label>
     <input className="gc-input" type={type} value={value} onChange={onChange} placeholder={placeholder} autoComplete={autoComplete}/>
   </div>
 );
 
-const LoginPage = ({ go }) => {
-  const initial = GCApi.config();
-  const [baseUrl, setBaseUrl] = React.useState(initial.baseUrl);
-  const [internalToken, setInternalToken] = React.useState(initial.internalToken);
+const normalizeAuthEmail = (value) => String(value || '').trim().toLowerCase();
+const validAuthEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeAuthEmail(value));
+
+const hashAuthPassword = (value) => {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return String(hash >>> 0);
+};
+
+const loadAuthAccount = () => {
+  try {
+    return JSON.parse(localStorage.getItem(GC_AUTH_ACCOUNT_KEY) || 'null');
+  } catch (_) {
+    return null;
+  }
+};
+
+const saveAuthSession = (account) => {
+  const session = {
+    email: account.email,
+    login: account.login,
+    firstName: account.firstName,
+    lastName: account.lastName,
+    signedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(GC_AUTH_SESSION_KEY, JSON.stringify(session));
+  return session;
+};
+
+const LoginPage = ({ go, language, setLanguage }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState(false);
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault();
     setBusy(true);
-    setStatus('Проверяю brain-api...');
-    try {
-      GCApi.saveConfig({ baseUrl, internalToken });
-      await GCApi.health();
-      await GCApi.dependencies();
-      setStatus('Backend доступен. Открываю cockpit.');
-      go('/app');
-    } catch (error) {
-      setStatus(`Не удалось подключиться: ${error.message}`);
-    } finally {
+
+    const normalizedEmail = normalizeAuthEmail(email);
+    const account = loadAuthAccount();
+
+    if (!validAuthEmail(normalizedEmail)) {
+      setStatus(tr('Введите корректную почту.', 'Enter a valid email.'));
       setBusy(false);
+      return;
     }
+    if (!password) {
+      setStatus(tr('Введите пароль.', 'Enter a password.'));
+      setBusy(false);
+      return;
+    }
+    if (!account) {
+      setStatus(tr('Аккаунт пока не создан. Зарегистрируйтесь сначала.', 'No account exists yet. Register first.'));
+      setBusy(false);
+      return;
+    }
+    if (account.email !== normalizedEmail || account.passwordHash !== hashAuthPassword(password)) {
+      setStatus(tr('Почта или пароль не совпадают.', 'Email or password does not match.'));
+      setBusy(false);
+      return;
+    }
+
+    saveAuthSession(account);
+    setStatus(tr('Вход выполнен. Открываю cockpit.', 'Signed in. Opening cockpit.'));
+    window.setTimeout(() => go('/app'), 220);
   };
 
   return (
     <div className="gc-auth">
-      <AuthAside quote={<>Подключите <span className="gc-crimson">brain-api</span> и откройте рабочий cockpit.</>}/>
+      <AuthAside
+        mode="SIGN IN"
+        quote={<>{tr('Войдите в', 'Sign in to')} <span className="gc-crimson">Grey Cardinal</span> {tr('и продолжайте работу в cockpit.', 'and continue in cockpit.')}</>}
+      />
       <div className="gc-auth-main">
         <div className="gc-auth-card">
-          <span className="gc-auth-back" onClick={() => go('/')}><Icon name="chevL" size={14}/>На главную</span>
-          <h1 className="gc-display-4">Подключение к backend</h1>
-          <p className="gc-mute" style={{ marginTop: 8, fontSize: 14 }}>Это dev-подключение к существующему brain-api. Публичной авторизации в backend пока нет.</p>
+          <div className="gc-auth-topline">
+            <span className="gc-auth-back" onClick={() => go('/')}><Icon name="chevL" size={14}/>{tr('На главную', 'Home')}</span>
+            <LanguageToggle language={language} setLanguage={setLanguage}/>
+          </div>
+          <h1 className="gc-display-4">{tr('Вход', 'Sign in')}</h1>
+          <p className="gc-mute" style={{ marginTop: 8, fontSize: 14 }}>
+            {tr('Для входа нужна только почта и пароль.', 'Only email and password are required to sign in.')}
+          </p>
           <form className="gc-form" onSubmit={submit}>
-            <Field label="Brain API URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:8000"/>
-            <Field label="Internal token" value={internalToken} onChange={(e) => setInternalToken(e.target.value)} placeholder="dev-internal-token"/>
+            <Field label={tr('Почта', 'Email')} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" autoComplete="email"/>
+            <Field label={tr('Пароль', 'Password')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password"/>
             {status && <div className="gc-form-status">{status}</div>}
             <button className="gc-btn gc-btn--primary gc-btn--lg gc-btn--block" type="submit" disabled={busy}>
-              {busy ? 'Проверяем...' : 'Сохранить и открыть cockpit'}
+              <Icon name="check" size={16}/>{busy ? tr('Входим...', 'Signing in...') : tr('Войти', 'Sign in')}
             </button>
           </form>
-          <p className="gc-form-meta">Нужна desktop identity? <a onClick={() => go('/register')}>Зарегистрировать устройство</a></p>
+          <p className="gc-form-meta">
+            {tr('Нет аккаунта?', 'No account?')} <a onClick={() => go('/register')}>{tr('Зарегистрироваться', 'Create account')}</a>
+          </p>
         </div>
       </div>
     </div>
   );
 };
 
-const RegisterPage = ({ go }) => {
-  const initial = GCApi.config();
-  const [baseUrl, setBaseUrl] = React.useState(initial.baseUrl);
-  const [internalToken, setInternalToken] = React.useState(initial.internalToken);
-  const [displayName, setDisplayName] = React.useState('Петр Смирнов');
-  const [deviceName, setDeviceName] = React.useState('Frontend workstation');
-  const [platform, setPlatform] = React.useState('windows');
+const RegisterPage = ({ go, language, setLanguage }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  const [email, setEmail] = React.useState('');
+  const [login, setLogin] = React.useState('');
+  const [lastName, setLastName] = React.useState('');
+  const [firstName, setFirstName] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState(false);
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault();
     setBusy(true);
-    setStatus('Регистрирую устройство...');
-    try {
-      GCApi.saveConfig({ baseUrl, internalToken });
-      const identity = await GCApi.registerDesktop({
-        display_name: displayName,
-        device_name: deviceName,
-        platform,
-        app_version: 'frontend-dashboard',
-        device_fingerprint: `frontend-${platform}-${displayName}`.toLowerCase().replace(/\s+/g, '-'),
-      });
-      GCApi.saveConfig({ desktopIdentity: { ...identity, platform, app_version: 'frontend-dashboard' } });
-      setStatus('Устройство зарегистрировано. Открываю cockpit.');
-      go('/app');
-    } catch (error) {
-      setStatus(`Регистрация не прошла: ${error.message}`);
-    } finally {
+
+    const normalizedEmail = normalizeAuthEmail(email);
+    const normalizedLogin = login.trim();
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+
+    if (!validAuthEmail(normalizedEmail)) {
+      setStatus(tr('Введите корректную почту.', 'Enter a valid email.'));
       setBusy(false);
+      return;
     }
+    if (normalizedLogin.length < 3) {
+      setStatus(tr('Логин должен быть минимум 3 символа.', 'Login must be at least 3 characters.'));
+      setBusy(false);
+      return;
+    }
+    if (!normalizedLastName || !normalizedFirstName) {
+      setStatus(tr('Заполните фамилию и имя.', 'Fill in last name and first name.'));
+      setBusy(false);
+      return;
+    }
+    if (password.length < 6) {
+      setStatus(tr('Пароль должен быть минимум 6 символов.', 'Password must be at least 6 characters.'));
+      setBusy(false);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setStatus(tr('Пароли не совпадают.', 'Passwords do not match.'));
+      setBusy(false);
+      return;
+    }
+
+    const account = {
+      email: normalizedEmail,
+      login: normalizedLogin,
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+      passwordHash: hashAuthPassword(password),
+      createdAt: new Date().toISOString(),
+    };
+    localStorage.setItem(GC_AUTH_ACCOUNT_KEY, JSON.stringify(account));
+    saveAuthSession(account);
+    setStatus(tr('Аккаунт создан. Открываю cockpit.', 'Account created. Opening cockpit.'));
+    window.setTimeout(() => go('/app'), 220);
   };
 
   return (
     <div className="gc-auth">
-      <AuthAside quote={<>Зарегистрируйте устройство, чтобы desktop endpoints знали <span className="gc-crimson">кто говорит</span>.</>}/>
+      <AuthAside
+        mode="CREATE ACCOUNT"
+        quote={<>{tr('Создайте аккаунт для', 'Create an account for')} <span className="gc-crimson">Grey Cardinal</span> {tr('и подключите рабочий cockpit.', 'and enter the working cockpit.')}</>}
+      />
       <div className="gc-auth-main">
-        <div className="gc-auth-card">
-          <span className="gc-auth-back" onClick={() => go('/')}><Icon name="chevL" size={14}/>На главную</span>
-          <h1 className="gc-display-4">Desktop identity</h1>
-          <p className="gc-mute" style={{ marginTop: 8, fontSize: 14 }}>Форма вызывает реальный endpoint `/desktop/devices/register`.</p>
+        <div className="gc-auth-card gc-auth-card--wide">
+          <div className="gc-auth-topline">
+            <span className="gc-auth-back" onClick={() => go('/')}><Icon name="chevL" size={14}/>{tr('На главную', 'Home')}</span>
+            <LanguageToggle language={language} setLanguage={setLanguage}/>
+          </div>
+          <h1 className="gc-display-4">{tr('Регистрация', 'Registration')}</h1>
+          <p className="gc-mute" style={{ marginTop: 8, fontSize: 14 }}>
+            {tr('Заполните данные участника. Пока это frontend-only аккаунт для мокового входа.', 'Fill in participant data. For now this is a frontend-only account for mock sign-in.')}
+          </p>
           <form className="gc-form" onSubmit={submit}>
-            <Field label="Brain API URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:8000"/>
-            <Field label="Internal token" value={internalToken} onChange={(e) => setInternalToken(e.target.value)} placeholder="dev-internal-token"/>
-            <Field label="Имя участника" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Петр Смирнов" autoComplete="name"/>
-            <Field label="Устройство" value={deviceName} onChange={(e) => setDeviceName(e.target.value)} placeholder="Frontend workstation"/>
-            <div className="gc-form-field">
-              <label>Платформа</label>
-              <select className="gc-input" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-                <option value="windows">Windows</option>
-                <option value="macos">macOS</option>
-                <option value="linux">Linux</option>
-              </select>
+            <div className="gc-auth-form-grid">
+              <Field className="gc-auth-form-wide" label={tr('Почта', 'Email')} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" autoComplete="email"/>
+              <Field className="gc-auth-form-wide" label={tr('Логин', 'Login')} value={login} onChange={(e) => setLogin(e.target.value)} placeholder="grey_cardinal" autoComplete="username"/>
+              <Field label={tr('Фамилия', 'Last name')} value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder={tr('Смирнов', 'Smirnov')} autoComplete="family-name"/>
+              <Field label={tr('Имя', 'First name')} value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder={tr('Петр', 'Peter')} autoComplete="given-name"/>
+              <Field label={tr('Пароль', 'Password')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="new-password"/>
+              <Field label={tr('Подтверждение пароля', 'Confirm password')} type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" autoComplete="new-password"/>
             </div>
             {status && <div className="gc-form-status">{status}</div>}
             <button className="gc-btn gc-btn--primary gc-btn--lg gc-btn--block" type="submit" disabled={busy}>
-              {busy ? 'Регистрируем...' : 'Зарегистрировать устройство'}
+              <Icon name="check" size={16}/>{busy ? tr('Создаем...', 'Creating...') : tr('Зарегистрироваться', 'Create account')}
             </button>
           </form>
-          <p className="gc-form-meta">Уже есть API config? <a onClick={() => go('/login')}>Проверить подключение</a></p>
+          <p className="gc-form-meta">
+            {tr('Уже есть аккаунт?', 'Already have an account?')} <a onClick={() => go('/login')}>{tr('Войти', 'Sign in')}</a>
+          </p>
         </div>
       </div>
     </div>
