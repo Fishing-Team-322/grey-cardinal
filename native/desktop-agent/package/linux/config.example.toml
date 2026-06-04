@@ -1,0 +1,9 @@
+# Grey Cardinal Daemon Linux preview config.
+# Target path: /etc/grey-cardinal-daemon/config.toml
+
+backend_url = "https://fishingteam.su"
+agent_id = "linux-daemon-preview-001"
+meeting_id = ""
+capture_mode = "test_upload"
+duration_sec = 10
+dry_run = false

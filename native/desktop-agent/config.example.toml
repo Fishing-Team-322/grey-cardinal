@@ -1,5 +1,5 @@
 # Grey Cardinal Desktop Agent — config.example.toml
-# Copy to %LOCALAPPDATA%\GreyCardinal\Agent\config.toml and edit.
+# Copy to %LOCALAPPDATA%\GreyCardinal\Daemon\config.toml and edit.
 
 # Backend URL
 backend_url = "http://localhost:8000"

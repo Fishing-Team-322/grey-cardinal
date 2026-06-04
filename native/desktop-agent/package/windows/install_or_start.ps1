@@ -17,7 +17,7 @@ if (-not (Test-Path $exe)) {
     throw "grey-cardinal-agent.exe was not found in $packageDir"
 }
 
-$configDir = Join-Path $env:LOCALAPPDATA "GreyCardinal\Agent"
+$configDir = Join-Path $env:LOCALAPPDATA "GreyCardinal\Daemon"
 $configPath = Join-Path $configDir "config.toml"
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 

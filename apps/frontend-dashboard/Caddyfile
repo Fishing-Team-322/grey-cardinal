@@ -1,5 +1,8 @@
 :5173 {
 	root * /srv
 	try_files {path} /index.html
+	header /downloads/*.msi Content-Type application/octet-stream
+	header /downloads/*.deb Content-Type application/vnd.debian.binary-package
+	header /downloads/*.dmg Content-Type application/x-apple-diskimage
 	file_server
 }

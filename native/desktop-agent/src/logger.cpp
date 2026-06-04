@@ -44,7 +44,7 @@ Logger::~Logger() = default;
 
 std::filesystem::path Logger::default_log_path() {
     if (const auto local_app_data = env_path("LOCALAPPDATA"); !local_app_data.empty()) {
-        return local_app_data / "GreyCardinal" / "Agent" / "logs" / "agent.log";
+        return local_app_data / "GreyCardinal" / "Daemon" / "logs" / "daemon.log";
     }
     if (const auto home = env_path("HOME"); !home.empty()) {
         return home / ".local" / "state" / "grey-cardinal-agent" / "logs" / "agent.log";
@@ -76,4 +76,3 @@ void Logger::write(const std::string& level, const std::string& message) {
 }
 
 } // namespace grey_cardinal_agent
-

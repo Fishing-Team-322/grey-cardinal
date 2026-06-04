@@ -1,5 +1,5 @@
 # Grey Cardinal Desktop Agent - production-safe example config.
-# Copy to %LOCALAPPDATA%\GreyCardinal\Agent\config.toml or pass with --config.
+# Copy to %LOCALAPPDATA%\GreyCardinal\Daemon\config.toml or pass with --config.
 
 backend_url = "https://fishingteam.su"
 agent_id = "agent-demo-001"
