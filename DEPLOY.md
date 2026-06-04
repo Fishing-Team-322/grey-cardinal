@@ -3,6 +3,9 @@
 Production / demo deployment behind one domain with automatic HTTPS. Only Caddy
 publishes ports (80/443); everything else is internal.
 
+Daemon package setup and verification are documented in
+[DAEMON_SETUP.md](DAEMON_SETUP.md).
+
 ```
 Browser ─HTTPS─> Caddy (80/443)
                    ├─ /                       → frontend-dashboard:5173 (static Grey Cardinal app)

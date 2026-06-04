@@ -35,6 +35,7 @@ const Sidebar = ({ go, counts, section, setSection }) => {
       { id:'digest', icon:'bell', label:'Digest' },
     ]},
     { sec:'INTEGRATIONS', items:[
+      { id:'daemon', icon:'download', label:'Daemon uploads', count: counts.daemonUploads },
       { id:'yougile', icon:'plug', label:'YouGile' },
       { id:'api', icon:'server', label:'Brain API' },
     ]},
@@ -287,6 +288,38 @@ const DigestPanel = ({ digest, onRefresh }) => (
   </div>
 );
 
+const DaemonUploadsPanel = ({ uploads, onRefresh }) => (
+  <div className="gca-panel">
+    <div className="gca-panel-head">
+      <div className="gca-panel-title"><Icon name="download" size={15}/>Daemon uploads</div>
+      <span className="gca-panel-eyebrow">GET /api/meetings</span>
+    </div>
+    <div className="gca-panel-body">
+      <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={onRefresh}>
+        <Icon name="refresh" size={13}/>Refresh uploads
+      </button>
+      {uploads.length === 0 ? (
+        <EmptyState icon="download" title="No daemon uploads yet" desc="Run smoke_upload_test.ps1 from the Windows package."/>
+      ) : (
+        <div className="gca-board">
+          {uploads.slice(0, 8).map((item, index) => (
+            <div className="gca-board-row" key={item.meeting_id || index}>
+              <span className="gca-board-rank">{index + 1}</span>
+              <span className="gca-avatar">DA</span>
+              <span className="gca-board-name">{item.meeting_id}</span>
+              <span className="gca-board-xp">{item.audio_count || 0} wav</span>
+              <span className="gca-badge gca-badge--ok">{item.status || 'uploaded'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="gca-inline-warning">
+        Audio uploads are stored by brain-api. Real ASR and automatic task creation are not wired to this public upload path yet.
+      </div>
+    </div>
+  </div>
+);
+
 const YouGilePanel = ({ status, onRefresh }) => (
   <div className="gca-panel">
     <div className="gca-panel-head">
@@ -351,6 +384,7 @@ const AppDashboardPage = ({ go }) => {
   const [columns, setColumns] = React.useState([]);
   const [digest, setDigest] = React.useState(null);
   const [ygStatus, setYgStatus] = React.useState(null);
+  const [daemonUploads, setDaemonUploads] = React.useState([]);
   const [signals, setSignals] = React.useState([]);
 
   const taskCount = React.useMemo(
@@ -360,13 +394,14 @@ const AppDashboardPage = ({ go }) => {
   const counts = React.useMemo(() => ({
     proposals: proposals.length,
     tasks: taskCount,
-  }), [proposals.length, taskCount]);
+    daemonUploads: daemonUploads.length,
+  }), [proposals.length, taskCount, daemonUploads.length]);
   const metrics = React.useMemo(() => [
     { label:'Pending', value:String(proposals.length) },
     { label:'Tasks', value:String(taskCount) },
+    { label:'Uploads', value:String(daemonUploads.length) },
     { label:'Done', value:String((columns.find((col) => col.id === 'done')?.tasks || []).length) },
-    { label:'YouGile', value:ygStatus?.status || 'unknown' },
-  ], [proposals.length, taskCount, columns, ygStatus]);
+  ], [proposals.length, taskCount, daemonUploads.length, columns]);
 
   const loadDashboard = React.useCallback(async () => {
     setRefreshing(true);
@@ -374,16 +409,18 @@ const AppDashboardPage = ({ go }) => {
     GCApi.saveConfig(config);
     try {
       await GCApi.health();
-      const [proposalRes, boardRes, digestRes, ygRes] = await Promise.allSettled([
+      const [proposalRes, boardRes, digestRes, ygRes, daemonRes] = await Promise.allSettled([
         GCApi.getProposals('pending'),
         GCApi.getBoard(),
         GCApi.getEveningDigest(),
         GCApi.getYouGileStatus(),
+        GCApi.daemonUploads(),
       ]);
       if (proposalRes.status === 'fulfilled') setProposals(proposalRes.value);
       if (boardRes.status === 'fulfilled') setColumns(boardRes.value);
       if (digestRes.status === 'fulfilled') setDigest(digestRes.value);
       if (ygRes.status === 'fulfilled') setYgStatus(ygRes.value);
+      if (daemonRes.status === 'fulfilled') setDaemonUploads(daemonRes.value);
       setSignals(prev => [{
         id:String(Date.now()),
         kind:'create',
@@ -527,6 +564,10 @@ const AppDashboardPage = ({ go }) => {
 
           {(section === 'overview' || section === 'digest') && (
             <DigestPanel digest={digest} onRefresh={loadDashboard}/>
+          )}
+
+          {(section === 'overview' || section === 'daemon') && (
+            <DaemonUploadsPanel uploads={daemonUploads} onRefresh={loadDashboard}/>
           )}
 
           {(section === 'overview' || section === 'yougile') && (

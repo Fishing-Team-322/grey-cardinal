@@ -1,8 +1,16 @@
 ﻿// Grey Cardinal - /download page
 
+const WINDOWS_DAEMON = {
+  url: '/downloads/grey-cardinal-daemon-windows.zip',
+  version: '0.2.0',
+  builtAt: '2026-06-04',
+  size: '77.7 KB',
+  sha256: '31F1089611D7C59ED74FA9BC81264823CD301AF5E8927AC47E975798DEDD0FDF',
+};
+
 const PLATFORMS = [
   { id:'win', icon:'windows', name:'Windows', sub:'Grey Cardinal Daemon for Windows',
-    specs:[['Формат','.exe / .msi'],['Захват','WASAPI loopback'],['Статус','нужен release artifact']], cta:'Инструкция Windows' },
+    specs:[['Формат','ZIP + .exe'],['Захват','WASAPI microphone / loopback'],['Статус','готов к скачиванию']], cta:'Инструкция Windows' },
   { id:'mac', icon:'apple', name:'macOS', sub:'Grey Cardinal Daemon for macOS',
     specs:[['Формат','.dmg'],['Захват','ScreenCaptureKit'],['Поддержка','Apple Silicon / Intel']], cta:'Инструкция macOS' },
   { id:'linux', icon:'linux', name:'Linux', sub:'Grey Cardinal Daemon for Linux',
@@ -10,7 +18,13 @@ const PLATFORMS = [
 ];
 
 const INSTALL = {
-  win: ['Скачайте installer.', 'Запустите Grey Cardinal Daemon.', 'Разрешите доступ к системному звуку.', 'Введите workspace token.', 'Откройте встречу - агент начнет слушать.'],
+  win: [
+    'Скачайте ZIP-пакет и распакуйте его в удобную папку.',
+    'Запустите PowerShell в этой папке и выполните Set-ExecutionPolicy -Scope Process Bypass.',
+    'Проверьте связь с backend: .\\smoke_upload_test.ps1 -BackendUrl "https://fishingteam.su".',
+    'Запустите короткий capture: .\\install_or_start.ps1 -BackendUrl "https://fishingteam.su" -DurationSec 10.',
+    'Откройте cockpit, нажмите Refresh и проверьте блок Daemon uploads.',
+  ],
   mac: ['Скачайте .dmg.', 'Перенесите приложение в Applications.', 'Разрешите захват системного звука.', 'При необходимости установите virtual audio device.', 'Подключите daemon к workspace.'],
   linux: ['Скачайте AppImage или deb.', 'Проверьте PipeWire/PulseAudio monitor source.', 'Запустите daemon.', 'Введите workspace token.', 'Проверьте тестовую запись.'],
 };
@@ -52,10 +66,25 @@ const DownloadPage = ({ go }) => {
             <Icon name="shield" size={14} style={{ color:'var(--rf-crimson-hi)' }}/>
             Сервер не подключается к звонку. Daemon слышит встречу с клиентского устройства.
           </div>
-          <div className="gc-form-status" style={{ marginTop: 14, maxWidth: 680 }}>
-            В backend пока нет публичного endpoint для релизов и скачивания бинарников. Ниже показаны реальные инструкции
-            по установке и список backend-доработок для полноценной download-страницы.
+          <div className="gc-form-status" style={{ marginTop: 14, maxWidth: 760 }}>
+            Windows package уже доступен: внутри native agent, production config template, PowerShell запуск,
+            smoke upload и README. Секреты в пакет не включены.
           </div>
+          <div className="gc-controls" style={{ marginTop: 20, gap: 12, flexWrap: 'wrap' }}>
+            <a className="gc-btn gc-btn--primary gc-btn--lg" href={WINDOWS_DAEMON.url} download>
+              <Icon name="download" size={16}/>Скачать daemon для Windows
+            </a>
+            <button className="gc-btn gc-btn--secondary gc-btn--lg" onClick={() => go('/app')}>
+              <Icon name="grid" size={16}/>Открыть cockpit
+            </button>
+          </div>
+          <dl className="gc-plat-specs" style={{ maxWidth: 760, marginTop: 18 }}>
+            <div className="gc-plat-spec"><dt>URL</dt><dd className="mono">{WINDOWS_DAEMON.url}</dd></div>
+            <div className="gc-plat-spec"><dt>Версия</dt><dd className="mono">{WINDOWS_DAEMON.version}</dd></div>
+            <div className="gc-plat-spec"><dt>Дата</dt><dd className="mono">{WINDOWS_DAEMON.builtAt}</dd></div>
+            <div className="gc-plat-spec"><dt>Размер</dt><dd className="mono">{WINDOWS_DAEMON.size}</dd></div>
+            <div className="gc-plat-spec"><dt>SHA256</dt><dd className="mono">{WINDOWS_DAEMON.sha256.slice(0, 18)}...</dd></div>
+          </dl>
 
           <div className="gc-plat-grid">
             {PLATFORMS.map(p => <PlatformDownloadCard p={p} key={p.id} active={tab===p.id} onSelect={setTab}/>)}
@@ -122,7 +151,7 @@ const DownloadPage = ({ go }) => {
               <tr><th>Платформа</th><th>Статус</th><th>Формат</th><th>Захват звука</th></tr>
             </thead>
             <tbody>
-              <tr><td>Windows</td><td><span className="gca-badge gca-badge--med">нужен release endpoint</span></td><td className="mono">.exe / .msi</td><td className="mono">WASAPI loopback</td></tr>
+              <tr><td>Windows</td><td><span className="gca-badge gca-badge--ok">download ready</span></td><td className="mono">ZIP + .exe</td><td className="mono">WASAPI microphone / loopback</td></tr>
               <tr><td>macOS</td><td><span className="gca-badge gca-badge--med">нужен release endpoint</span></td><td className="mono">.dmg</td><td className="mono">ScreenCaptureKit / virtual device</td></tr>
               <tr><td>Linux</td><td><span className="gca-badge gca-badge--med">нужен release endpoint</span></td><td className="mono">AppImage / deb</td><td className="mono">PipeWire / PulseAudio monitor</td></tr>
             </tbody>
@@ -136,4 +165,3 @@ const DownloadPage = ({ go }) => {
 };
 
 Object.assign(window, { DownloadPage });
-
