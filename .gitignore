@@ -53,3 +53,5 @@ config.local.*
 
 # Archives
 *.zip
+!apps/frontend-dashboard/public/downloads/
+!apps/frontend-dashboard/public/downloads/grey-cardinal-daemon-windows.zip

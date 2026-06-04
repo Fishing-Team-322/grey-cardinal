@@ -1,0 +1,10 @@
+# Grey Cardinal Desktop Agent - production-safe example config.
+# Copy to %LOCALAPPDATA%\GreyCardinal\Agent\config.toml or pass with --config.
+
+backend_url = "https://fishingteam.su"
+agent_id = "agent-demo-001"
+meeting_id = ""
+capture_mode = "microphone"
+duration_sec = 10
+output_dir = ""
+dry_run = false

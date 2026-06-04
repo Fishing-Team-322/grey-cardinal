@@ -206,6 +206,7 @@ const GCApi = {
   }).then((data) => data.task),
   getEveningDigest: () => gcRequest('/api/digest/evening', { internal: false }),
   getYouGileStatus: () => gcRequest('/api/integrations/yougile/status', { internal: false }),
+  daemonUploads: () => gcRequest('/api/meetings', { internal: false }).then((data) => data.meetings || []),
   syncTaskYouGile: (taskId) => gcRequest(`/api/tasks/${taskId}/sync-yougile`, {
     method: 'POST',
     internal: false,

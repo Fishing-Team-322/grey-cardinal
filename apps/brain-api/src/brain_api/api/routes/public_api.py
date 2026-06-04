@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 # ---------------------------------------------------------------------------
 # Simple file-backed store
@@ -186,6 +186,11 @@ router = APIRouter(prefix="/api", tags=["public-api"])
 @router.get("/health")
 async def health() -> dict[str, Any]:
     return {"ok": True, "service": "backend", "status": "running"}
+
+
+@router.head("/health", include_in_schema=False)
+async def health_head() -> Response:
+    return Response(status_code=200)
 
 
 @router.post("/audio/upload")
