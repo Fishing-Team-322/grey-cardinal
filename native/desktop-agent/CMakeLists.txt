@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(grey-cardinal-agent VERSION 0.2.0 LANGUAGES CXX)
+project(grey-cardinal-agent VERSION 0.4.0 LANGUAGES CXX)
 
 include(cmake/PlatformOptions.cmake)
 

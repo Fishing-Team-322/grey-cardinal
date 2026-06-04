@@ -105,16 +105,37 @@ Preview files:
 macOS packaging needs a macOS runner plus signing/notarization before the DMG or
 PKG can be published.
 
-## Backend Ingest
+## Account pairing (tray) — v0.4.0
 
-Installers and smoke scripts use:
+The account-aware flow (workspace number, pairing code, tray Start/Stop, per-
+device token, workspace-scoped uploads) is documented in
+[README_AGENT_WINDOWS.md](README_AGENT_WINDOWS.md). Endpoints:
+
+```text
+GET  /api/profile                  # account/workspace number
+POST /api/agents/pairing-code      # one-time, 15-min code
+POST /api/agents/register          # daemon → agent_id + agent_token (Pair device)
+GET  /api/agents                   # cockpit: connected daemons + status
+POST /api/agents/heartbeat         # daemon heartbeat (X-Agent-Token)
+POST /api/daemon/uploads           # daemon upload, owned by token→workspace
+GET  /api/daemon/uploads           # cockpit: daemon uploads
+POST /api/agents/{id}/unpair       # remove a device
+```
+
+The cockpit **Daemon** panel shows the workspace number, a "Generate pairing
+code" button, and connected daemons (online/idle/recording + version).
+
+## Backend Ingest (legacy smoke)
+
+The existing smoke scripts still use the legacy, unauthenticated upload:
 
 ```text
 POST https://fishingteam.su/api/audio/upload
 GET  https://fishingteam.su/api/meetings
 ```
 
-The cockpit shows accepted audio uploads in `Daemon uploads`.
+The account-aware daemon path is `POST /api/daemon/uploads` with `X-Agent-Token`.
+The legacy smoke flow is unchanged.
 
 ## CI
 

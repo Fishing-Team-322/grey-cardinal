@@ -18,6 +18,15 @@ struct AgentConfig {
     // Identifies this agent instance to the backend.
     std::string agent_id = "desktop-agent";
 
+    // --- Account pairing (set by the tray "Pair device" flow) ---
+    // Human-readable device name shown in the cockpit agents list.
+    std::string device_name;
+    // Workspace this daemon is bound to (returned by /api/agents/register).
+    std::string workspace_id;
+    // Per-device bearer token issued at pairing; sent as X-Agent-Token on
+    // heartbeat/upload. Stored locally only — never shipped in the installer.
+    std::string agent_token;
+
     // Meeting ID sent with the upload.
     // Auto-generated UUID if left empty.
     std::string meeting_id;

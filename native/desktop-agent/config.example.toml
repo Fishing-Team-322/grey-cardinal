@@ -1,11 +1,19 @@
 # Grey Cardinal Desktop Agent — config.example.toml
 # Copy to %LOCALAPPDATA%\GreyCardinal\Daemon\config.toml and edit.
 
-# Backend URL
+# Backend URL (set automatically after pairing, e.g. https://fishingteam.su)
 backend_url = "http://localhost:8000"
 
 # Agent identifier sent with every upload
 agent_id = "desktop-agent-001"
+
+# --- Account pairing (written by the tray "Pair device" flow, do not edit by hand) ---
+# device_name  — shown in the cockpit agents list
+# workspace_id — workspace this daemon is bound to
+# agent_token  — per-device bearer token (X-Agent-Token); keep secret, never share
+device_name = ""
+workspace_id = ""
+agent_token = ""
 
 # Meeting ID; leave empty to auto-generate UUID on each recording session
 meeting_id = ""
