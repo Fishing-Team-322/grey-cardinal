@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -22,6 +24,40 @@ from telegram_bot.webhook import process_update
 logger = logging.getLogger(__name__)
 
 
+async def _poll_loop(app: FastAPI) -> None:
+    """Long-polling worker: pull updates from Telegram and dispatch them.
+
+    Used when Telegram cannot deliver webhooks to this host. Outbound Telegram
+    traffic goes through the configured HTTPS proxy (tg-proxy).
+    """
+    settings: Settings = app.state.settings
+    client: TelegramClient = app.state.client
+    brain: BrainClient = app.state.brain
+    # getUpdates and a webhook are mutually exclusive — drop any webhook first.
+    try:
+        await client.delete_webhook(drop_pending_updates=False)
+    except Exception:
+        logger.exception("deleteWebhook before polling failed")
+    offset: int | None = None
+    logger.info("telegram-bot long-polling started")
+    while True:
+        try:
+            updates = await client.get_updates(
+                offset=offset, timeout=settings.telegram_poll_timeout
+            )
+            for update in updates:
+                offset = update["update_id"] + 1
+                try:
+                    await process_update(update, client, brain)
+                except Exception:
+                    logger.exception("process_update failed")
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("getUpdates loop error")
+            await asyncio.sleep(3)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -30,7 +66,17 @@ async def lifespan(app: FastAPI):
     app.state.client = TelegramClient(settings.telegram_api_base)
     app.state.brain = BrainClient(settings.brain_api_base_url, settings.internal_api_token)
     logger.info("telegram-bot started (env=%s)", settings.app_env)
+
+    poll_task: asyncio.Task | None = None
+    if settings.telegram_use_polling and settings.telegram_bot_token:
+        poll_task = asyncio.create_task(_poll_loop(app))
+
     yield
+
+    if poll_task is not None:
+        poll_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poll_task
     logger.info("telegram-bot stopped")
 
 

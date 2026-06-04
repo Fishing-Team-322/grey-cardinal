@@ -60,3 +60,25 @@ class TelegramClient:
         if secret_token:
             payload["secret_token"] = secret_token
         return await self._call("setWebhook", payload)
+
+    async def delete_webhook(self, drop_pending_updates: bool = False) -> dict[str, Any]:
+        return await self._call("deleteWebhook", {"drop_pending_updates": drop_pending_updates})
+
+    async def get_updates(
+        self, offset: int | None = None, timeout: int = 25
+    ) -> list[dict[str, Any]]:
+        """Long-poll for updates. Uses a request timeout longer than the poll."""
+        payload: dict[str, Any] = {
+            "timeout": timeout,
+            "allowed_updates": ["message", "callback_query"],
+        }
+        if offset is not None:
+            payload["offset"] = offset
+        url = f"{self._api_base}/getUpdates"
+        async with httpx.AsyncClient(timeout=timeout + 10) as client:
+            response = await client.post(url, json=payload)
+            data = response.json()
+        if not data.get("ok"):
+            logger.warning("Telegram getUpdates failed: %s", data)
+            return []
+        return data.get("result", [])

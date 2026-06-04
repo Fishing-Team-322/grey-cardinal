@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
     telegram_public_base_url: str = ""
 
+    # Long-polling mode: the bot pulls updates from Telegram (outbound) instead
+    # of receiving webhooks. Use when Telegram cannot reach the webhook (e.g. the
+    # host's network blocks inbound Telegram delivery).
+    telegram_use_polling: bool = False
+    telegram_poll_timeout: int = 25
+
     brain_api_base_url: str = "http://brain-api:8000"
 
     @property
