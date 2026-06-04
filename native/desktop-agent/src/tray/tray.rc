@@ -1,0 +1,13 @@
+#include <windows.h>
+
+// Pairing dialog (referenced by tray_app.cpp do_pair → DialogBoxParamW(200)).
+200 DIALOGEX 0, 0, 230, 96
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Grey Cardinal - Pair device"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "Pairing code (from the cockpit -> Daemon):", -1, 12, 10, 206, 10
+    EDITTEXT        100, 12, 26, 206, 14, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "Pair", IDOK, 108, 66, 52, 18
+    PUSHBUTTON      "Cancel", IDCANCEL, 166, 66, 52, 18
+END

@@ -66,6 +66,30 @@ if(WIN32)
             propsys
             uuid
     )
+
+    # System-tray application (pairing, status, Start/Stop, heartbeat).
+    add_executable(grey-cardinal-tray WIN32
+        src/tray/tray_app.cpp
+        src/tray/tray.rc
+    )
+    target_compile_features(grey-cardinal-tray PRIVATE cxx_std_20)
+    target_compile_definitions(grey-cardinal-tray
+        PRIVATE
+            _CRT_SECURE_NO_WARNINGS
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+            UNICODE
+            _UNICODE
+    )
+    target_link_libraries(grey-cardinal-tray
+        PRIVATE
+            winhttp
+            shell32
+            user32
+            comctl32
+            ole32
+    )
+    install(TARGETS grey-cardinal-tray RUNTIME DESTINATION .)
 elseif(APPLE)
     message(FATAL_ERROR "Grey Cardinal desktop agent macOS capture is not implemented yet. See platform/macos/README.md for the adapter plan.")
 elseif(UNIX)

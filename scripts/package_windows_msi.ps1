@@ -47,6 +47,17 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
 
 Copy-Item -LiteralPath $exe -Destination (Join-Path $stageDir "grey-cardinal-daemon.exe")
+
+$trayCandidates = @(
+    (Join-Path $agentRoot "build\$Configuration\grey-cardinal-tray.exe"),
+    (Join-Path $agentRoot "build\grey-cardinal-tray.exe")
+)
+$tray = $trayCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $tray) {
+    throw "grey-cardinal-tray.exe was not found after build"
+}
+Copy-Item -LiteralPath $tray -Destination (Join-Path $stageDir "grey-cardinal-tray.exe")
+
 Copy-Item -Path (Join-Path $templateDir "*") -Destination $stageDir -Recurse
 
 Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue

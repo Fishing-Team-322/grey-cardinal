@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "backend_url": "https://fishingteam.su",
   "built_at": "2026-06-04",
   "platforms": {
@@ -10,9 +10,9 @@
       "format": "MSI installer",
       "status": "available",
       "status_label": "ready",
-      "size": "104 KB",
-      "size_bytes": 106496,
-      "sha256": "B24AA357A349488405133B6CBF4B428FA2FD6D70B45895B98BCDA3296774F241",
+      "size": "120 KB",
+      "size_bytes": 122880,
+      "sha256": "279E2BD04FD0322551293925EBFF65399B3B811BC0A711A3E87E8CB95BDDE37E",
       "capture": "WASAPI microphone / loopback",
       "support": "Windows x64"
     },

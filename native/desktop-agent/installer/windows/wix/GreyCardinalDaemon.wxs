@@ -28,6 +28,16 @@
       <Component Id="DaemonExe" Guid="{44D94A5B-A89F-45B9-BE6A-6DE2B822C9F7}">
         <File Id="DaemonExeFile" Source="$(StageDir)\grey-cardinal-daemon.exe" KeyPath="yes" />
       </Component>
+      <Component Id="TrayExe" Guid="{A5CBD770-DD62-4ED7-94E3-FD184AE2C39A}">
+        <File Id="TrayExeFile" Source="$(StageDir)\grey-cardinal-tray.exe" KeyPath="yes" />
+        <!-- Start the tray app on login (per-machine). -->
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Run"
+          Name="GreyCardinalDaemon"
+          Type="string"
+          Value="&quot;[INSTALLFOLDER]grey-cardinal-tray.exe&quot;" />
+      </Component>
       <Component Id="ConfigExample" Guid="{B8900B8C-BE1C-4128-85D6-F9195F524C90}">
         <File Id="ConfigExampleFile" Source="$(StageDir)\config.example.toml" KeyPath="yes" />
       </Component>
@@ -51,10 +61,9 @@
       <Shortcut
         Id="GreyCardinalDaemonShortcut"
         Name="Grey Cardinal Daemon"
-        Description="Start Grey Cardinal Daemon"
-        Target="[#DaemonExeFile]"
-        WorkingDirectory="INSTALLFOLDER"
-        Arguments="--config &quot;[INSTALLFOLDER]config.example.toml&quot;" />
+        Description="Grey Cardinal Daemon (system tray)"
+        Target="[#TrayExeFile]"
+        WorkingDirectory="INSTALLFOLDER" />
       <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
       <RegistryValue Root="HKCU" Key="Software\Grey Cardinal\Daemon" Name="installed" Type="integer" Value="1" KeyPath="yes" />
     </Component>

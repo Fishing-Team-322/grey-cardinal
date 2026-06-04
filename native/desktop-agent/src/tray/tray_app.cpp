@@ -22,8 +22,11 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <winhttp.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -32,6 +35,7 @@
 
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "user32.lib")
 
 namespace {
 
@@ -257,16 +261,8 @@ INT_PTR CALLBACK pair_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM) {
 }
 
 void do_pair(HWND owner) {
-    // A real in-resource DialogBox is created from a .rc template; here we build
-    // it in memory for a self-contained reference.
-    // (Team build: move this to a .rc DIALOG resource.)
-    // For brevity the in-memory template is omitted — see README_AGENT_WINDOWS.md.
-    wchar_t code[64]{};
-    // Fallback: simple input via a message loop dialog resource id 200.
-    if (DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(200), owner, pair_proc, 0) !=
-        IDOK) {
-        (void)code;
-    }
+    // Pairing dialog (id 200) lives in tray.rc; pair_proc handles register.
+    DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(200), owner, pair_proc, 0);
 }
 
 void start_recording() {
