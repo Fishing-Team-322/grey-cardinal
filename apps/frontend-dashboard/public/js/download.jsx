@@ -47,59 +47,59 @@ const DAEMON_MANIFEST_FALLBACK = {
 
 const PLATFORM_ORDER = ['windows', 'macos', 'linux'];
 
-const PLATFORM_UI = {
+const platformUiForLanguage = (language) => ({
   windows: {
     icon: 'windows',
     sub: 'Grey Cardinal Daemon for Windows',
-    cta: 'Инструкция Windows',
-    downloadLabel: 'Скачать MSI для Windows',
+    cta: copyText(language, 'Инструкция Windows', 'Windows guide'),
+    downloadLabel: copyText(language, 'Скачать MSI для Windows', 'Download MSI for Windows'),
     statusClass: 'gca-badge--ok',
     steps: [
-      'Скачайте MSI installer.',
-      'Запустите installer и установите Grey Cardinal Daemon.',
-      'Откройте Grey Cardinal Daemon из Start Menu.',
-      'Проверьте backend URL: https://fishingteam.su.',
-      'Запустите smoke upload и откройте cockpit, чтобы проверить Daemon uploads.',
+      copyText(language, 'Скачайте MSI installer.', 'Download the MSI installer.'),
+      copyText(language, 'Запустите installer и установите Grey Cardinal Daemon.', 'Run the installer and install Grey Cardinal Daemon.'),
+      copyText(language, 'Откройте Grey Cardinal Daemon из Start Menu.', 'Open Grey Cardinal Daemon from the Start Menu.'),
+      copyText(language, 'Проверьте backend URL: https://fishingteam.su.', 'Check the backend URL: https://fishingteam.su.'),
+      copyText(language, 'Запустите smoke upload и откройте cockpit, чтобы проверить Daemon uploads.', 'Run smoke upload and open cockpit to verify Daemon uploads.'),
     ],
     commands: [
       'msiexec /i grey-cardinal-daemon-windows-x64.msi',
       'powershell -ExecutionPolicy Bypass -File "C:\\Program Files\\Grey Cardinal Daemon\\smoke_upload_test.ps1" -BackendUrl "https://fishingteam.su"',
       'powershell -ExecutionPolicy Bypass -File "C:\\Program Files\\Grey Cardinal Daemon\\open_logs.ps1"',
     ],
-    note: 'MSI устанавливает exe, config template, helper scripts и Start Menu shortcut. Секреты в installer не включены.',
+    note: copyText(language, 'MSI устанавливает exe, config template, helper scripts и Start Menu shortcut. Секреты в installer не включены.', 'The MSI installs the exe, config template, helper scripts, and Start Menu shortcut. Secrets are not included in the installer.'),
   },
   macos: {
     icon: 'apple',
     sub: 'Grey Cardinal Daemon for macOS',
-    cta: 'Инструкция macOS',
-    downloadLabel: 'Скачать installer для macOS',
+    cta: copyText(language, 'Инструкция macOS', 'macOS guide'),
+    downloadLabel: copyText(language, 'Скачать installer для macOS', 'Download installer for macOS'),
     statusClass: 'gca-badge--med',
     steps: [
-      'DMG/PKG artifact пока не опубликован.',
-      'После релиза скачайте installer и установите Grey Cardinal Daemon.',
-      'Разрешите Microphone и Screen Recording/System Audio permissions.',
-      'Проверьте backend URL: https://fishingteam.su.',
-      'Откройте logs и cockpit после smoke/capture проверки.',
+      copyText(language, 'DMG/PKG artifact пока не опубликован.', 'The DMG/PKG artifact is not published yet.'),
+      copyText(language, 'После релиза скачайте installer и установите Grey Cardinal Daemon.', 'After release, download the installer and install Grey Cardinal Daemon.'),
+      copyText(language, 'Разрешите Microphone и Screen Recording/System Audio permissions.', 'Allow Microphone and Screen Recording/System Audio permissions.'),
+      copyText(language, 'Проверьте backend URL: https://fishingteam.su.', 'Check the backend URL: https://fishingteam.su.'),
+      copyText(language, 'Откройте logs и cockpit после smoke/capture проверки.', 'Open logs and cockpit after the smoke/capture check.'),
     ],
     commands: [
       'open grey-cardinal-daemon-macos-universal.dmg',
       'tail -f ~/Library/Logs/GreyCardinal/Daemon.log',
       'launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.greycardinal.daemon.plist',
     ],
-    note: 'macOS package flow подготовлен для CI. Реальный DMG/PKG требует macOS runner, signing и notarization.',
+    note: copyText(language, 'macOS package flow подготовлен для CI. Реальный DMG/PKG требует macOS runner, signing и notarization.', 'The macOS package flow is prepared for CI. A real DMG/PKG requires a macOS runner, signing, and notarization.'),
   },
   linux: {
     icon: 'linux',
     sub: 'Grey Cardinal Daemon for Debian/Ubuntu',
-    cta: 'Инструкция Linux',
-    downloadLabel: 'Скачать .deb для Debian/Ubuntu',
+    cta: copyText(language, 'Инструкция Linux', 'Linux guide'),
+    downloadLabel: copyText(language, 'Скачать .deb для Debian/Ubuntu', 'Download .deb for Debian/Ubuntu'),
     statusClass: 'gca-badge--med',
     steps: [
-      'DEB artifact пока не опубликован.',
-      'После релиза скачайте .deb package.',
-      'Установите пакет через dpkg и исправьте зависимости через apt.',
-      'Настройте /etc/grey-cardinal-daemon/config.toml.',
-      'Запустите systemd service и проверьте journalctl + cockpit.',
+      copyText(language, 'DEB artifact пока не опубликован.', 'The DEB artifact is not published yet.'),
+      copyText(language, 'После релиза скачайте .deb package.', 'After release, download the .deb package.'),
+      copyText(language, 'Установите пакет через dpkg и исправьте зависимости через apt.', 'Install the package with dpkg and fix dependencies through apt.'),
+      copyText(language, 'Настройте /etc/grey-cardinal-daemon/config.toml.', 'Configure /etc/grey-cardinal-daemon/config.toml.'),
+      copyText(language, 'Запустите systemd service и проверьте journalctl + cockpit.', 'Start the systemd service and check journalctl plus cockpit.'),
     ],
     commands: [
       'sudo dpkg -i grey-cardinal-daemon-linux-amd64.deb',
@@ -107,9 +107,9 @@ const PLATFORM_UI = {
       'sudo systemctl enable --now grey-cardinal-daemon',
       'journalctl -u grey-cardinal-daemon -f',
     ],
-    note: 'Linux DEB layout подготовлен. Реальный capture требует PipeWire/PulseAudio daemon implementation.',
+    note: copyText(language, 'Linux DEB layout подготовлен. Реальный capture требует PipeWire/PulseAudio daemon implementation.', 'The Linux DEB layout is prepared. Real capture requires the PipeWire/PulseAudio daemon implementation.'),
   },
-};
+});
 
 const detectPlatform = () => {
   const text = `${navigator.platform || ''} ${navigator.userAgent || ''}`.toLowerCase();
@@ -119,16 +119,17 @@ const detectPlatform = () => {
   return 'windows';
 };
 
-const statusText = (status) => ({
-  available: 'available',
-  preview: 'preview',
-  planned: 'planned',
+const statusText = (status, language = 'en') => ({
+  available: copyText(language, 'доступно', 'available'),
+  preview: copyText(language, 'preview', 'preview'),
+  planned: copyText(language, 'запланировано', 'planned'),
 }[status] || status || 'preview');
 
 const artifactAvailable = (platform) => platform.status === 'available' && platform.url;
 
-const PlatformDownloadCard = ({ id, platform, active, onSelect }) => {
-  const ui = PLATFORM_UI[id];
+const PlatformDownloadCard = ({ id, platform, active, onSelect, language }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  const ui = platformUiForLanguage(language)[id];
   return (
     <div className="gc-plat">
       <div className="gc-plat-ic"><Icon name={ui.icon} size={26}/></div>
@@ -137,10 +138,10 @@ const PlatformDownloadCard = ({ id, platform, active, onSelect }) => {
         <div className="gc-plat-desc">{ui.sub}</div>
       </div>
       <dl className="gc-plat-specs">
-        <div className="gc-plat-spec"><dt>Формат</dt><dd>{platform.format}</dd></div>
-        <div className="gc-plat-spec"><dt>Захват</dt><dd>{platform.capture}</dd></div>
-        <div className="gc-plat-spec"><dt>Поддержка</dt><dd>{platform.support}</dd></div>
-        <div className="gc-plat-spec"><dt>Статус</dt><dd>{platform.status_label || statusText(platform.status)}</dd></div>
+        <div className="gc-plat-spec"><dt>{tr('Формат', 'Format')}</dt><dd>{platform.format}</dd></div>
+        <div className="gc-plat-spec"><dt>{tr('Захват', 'Capture')}</dt><dd>{platform.capture}</dd></div>
+        <div className="gc-plat-spec"><dt>{tr('Поддержка', 'Support')}</dt><dd>{platform.support}</dd></div>
+        <div className="gc-plat-spec"><dt>{tr('Статус', 'Status')}</dt><dd>{platform.status_label || statusText(platform.status, language)}</dd></div>
       </dl>
       <button className={'gc-btn gc-btn--block ' + (active ? 'gc-btn--primary' : 'gc-btn--secondary')} onClick={() => onSelect(id, true)}>
         <Icon name="list" size={16}/>{ui.cta}
@@ -149,8 +150,9 @@ const PlatformDownloadCard = ({ id, platform, active, onSelect }) => {
   );
 };
 
-const SelectedPlatformPanel = ({ id, platform, manifest, go }) => {
-  const ui = PLATFORM_UI[id];
+const SelectedPlatformPanel = ({ id, platform, manifest, go, language }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  const ui = platformUiForLanguage(language)[id];
   const available = artifactAvailable(platform);
   return (
     <div className="gc-form-status" style={{ marginTop: 20, maxWidth: 820 }}>
@@ -165,12 +167,12 @@ const SelectedPlatformPanel = ({ id, platform, manifest, go }) => {
           </button>
         )}
         <button className="gc-btn gc-btn--secondary gc-btn--lg" onClick={() => go('/app')}>
-          <Icon name="grid" size={16}/>Открыть cockpit
+          <Icon name="grid" size={16}/>{tr('Открыть cockpit', 'Open cockpit')}
         </button>
       </div>
       {!available && (
         <p className="gc-mute" style={{ marginTop: 12, fontSize: 14 }}>
-          Artifact not published yet. Кнопка скачивания выключена, чтобы не вести на 404.
+          {tr('Artifact пока не опубликован. Кнопка скачивания выключена, чтобы не вести на 404.', 'Artifact is not published yet. The download button is disabled to avoid a 404.')}
         </p>
       )}
       <dl className="gc-plat-specs" style={{ marginTop: 18 }}>
@@ -178,15 +180,16 @@ const SelectedPlatformPanel = ({ id, platform, manifest, go }) => {
         <div className="gc-plat-spec"><dt>Version</dt><dd className="mono">{manifest.version}</dd></div>
         <div className="gc-plat-spec"><dt>Date</dt><dd className="mono">{manifest.built_at}</dd></div>
         <div className="gc-plat-spec"><dt>Size</dt><dd className="mono">{platform.size}</dd></div>
-        <div className="gc-plat-spec"><dt>Status</dt><dd><span className={'gca-badge ' + ui.statusClass}>{statusText(platform.status)}</span></dd></div>
-        <div className="gc-plat-spec"><dt>SHA256</dt><dd className="mono">{platform.sha256 ? `${platform.sha256.slice(0, 18)}...` : 'not published'}</dd></div>
+        <div className="gc-plat-spec"><dt>Status</dt><dd><span className={'gca-badge ' + ui.statusClass}>{statusText(platform.status, language)}</span></dd></div>
+        <div className="gc-plat-spec"><dt>SHA256</dt><dd className="mono">{platform.sha256 ? `${platform.sha256.slice(0, 18)}...` : tr('не опубликован', 'not published')}</dd></div>
       </dl>
       <p className="gc-mute" style={{ marginTop: 14, fontSize: 14 }}>{ui.note}</p>
     </div>
   );
 };
 
-const DownloadPage = ({ go }) => {
+const DownloadPage = ({ go, language, setLanguage }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
   const [manifest, setManifest] = React.useState(DAEMON_MANIFEST_FALLBACK);
   const [tab, setTab] = React.useState(() => detectPlatform());
   const instructionRef = React.useRef(null);
@@ -209,26 +212,28 @@ const DownloadPage = ({ go }) => {
 
   const platforms = manifest.platforms || DAEMON_MANIFEST_FALLBACK.platforms;
   const selected = platforms[tab] || platforms.windows;
-  const selectedUi = PLATFORM_UI[tab] || PLATFORM_UI.windows;
+  const selectedUi = platformUiForLanguage(language)[tab] || platformUiForLanguage(language).windows;
 
   return (
     <div>
-      <PublicHeader go={go}/>
+      <PublicHeader go={go} language={language} setLanguage={setLanguage}/>
 
       <section className="gc-section gc-section--tight">
         <div className="gc-wrap gc-reveal">
           <span className="gc-eyebrow">Daemon</span>
-          <h1 className="gc-display-2" style={{ marginTop: 20, maxWidth: '16ch' }}>Установите Grey Cardinal Daemon</h1>
+          <h1 className="gc-display-2" style={{ marginTop: 20, maxWidth: '16ch' }}>{tr('Установите Grey Cardinal Daemon', 'Install Grey Cardinal Daemon')}</h1>
           <p className="gc-lead" style={{ marginTop: 22, maxWidth: 620 }}>
-            Daemon запускается на устройстве, где открыта встреча, захватывает системный звук
-            и отправляет в Grey Cardinal поток transcript events.
+            {tr(
+              'Daemon запускается на устройстве, где открыта встреча, захватывает системный звук и отправляет в Grey Cardinal поток transcript events.',
+              'Daemon runs on the device where the meeting is open, captures system audio, and sends a stream of transcript events to Grey Cardinal.'
+            )}
           </p>
           <div className="gc-pill" style={{ marginTop: 24, height:28, padding:'0 14px' }}>
             <Icon name="shield" size={14} style={{ color:'var(--rf-crimson-hi)' }}/>
-            Сервер не подключается к звонку. Daemon слышит встречу с клиентского устройства.
+            {tr('Сервер не подключается к звонку. Daemon слышит встречу с клиентского устройства.', 'The server does not join the call. Daemon hears the meeting from the client device.')}
           </div>
 
-          <SelectedPlatformPanel id={tab} platform={selected} manifest={manifest} go={go}/>
+          <SelectedPlatformPanel id={tab} platform={selected} manifest={manifest} go={go} language={language}/>
 
           <div className="gc-plat-grid">
             {PLATFORM_ORDER.map(id => (
@@ -238,6 +243,7 @@ const DownloadPage = ({ go }) => {
                 platform={platforms[id]}
                 active={tab === id}
                 onSelect={selectPlatform}
+                language={language}
               />
             ))}
           </div>
@@ -248,12 +254,12 @@ const DownloadPage = ({ go }) => {
 
       <section className="gc-section gc-section--tight" ref={instructionRef}>
         <div className="gc-wrap gc-reveal">
-          <span className="gc-eyebrow">Установка</span>
-          <h2 className="gc-display-3" style={{ marginTop: 18 }}>Инструкция: {selected.label}</h2>
+          <span className="gc-eyebrow">{tr('Установка', 'Installation')}</span>
+          <h2 className="gc-display-3" style={{ marginTop: 18 }}>{tr('Инструкция', 'Guide')}: {selected.label}</h2>
           <div className="gc-tabs">
             {PLATFORM_ORDER.map(id => (
               <span key={id} className={'gc-tab' + (tab===id?' active':'')} onClick={() => selectPlatform(id)}>
-                <Icon name={PLATFORM_UI[id].icon} size={15}/>{platforms[id].label}
+                <Icon name={platformUiForLanguage(language)[id].icon} size={15}/>{platforms[id].label}
               </span>
             ))}
           </div>
@@ -266,7 +272,7 @@ const DownloadPage = ({ go }) => {
             ))}
           </div>
           <div className="gc-form-status" style={{ marginTop: 22, maxWidth: 820 }}>
-            <span className="gc-eyebrow">Команды</span>
+            <span className="gc-eyebrow">{tr('Команды', 'Commands')}</span>
             <div className="gc-steps-list" style={{ marginTop: 14 }}>
               {selectedUi.commands.map((command, i) => (
                 <div className="gc-step-line" key={i}>
@@ -283,22 +289,24 @@ const DownloadPage = ({ go }) => {
 
       <section className="gc-section gc-section--tight">
         <div className="gc-wrap gc-reveal">
-          <span className="gc-eyebrow">Архитектура</span>
-          <h2 className="gc-display-3" style={{ marginTop: 18, maxWidth: '18ch' }}>Daemon превращает звук в поток событий</h2>
+          <span className="gc-eyebrow">{tr('Архитектура', 'Architecture')}</span>
+          <h2 className="gc-display-3" style={{ marginTop: 18, maxWidth: '18ch' }}>{tr('Daemon превращает звук в поток событий', 'Daemon turns audio into an event stream')}</h2>
           <div className="gc-flow" style={{ marginTop: 32 }}>
-            <div className="gc-flow-node"><span className="gc-flow-k">01</span><span className="gc-flow-v">Встреча</span></div>
+            <div className="gc-flow-node"><span className="gc-flow-k">01</span><span className="gc-flow-v">{tr('Встреча', 'Meeting')}</span></div>
             <div className="gc-flow-arrow"><Icon name="arrowR" size={16}/></div>
-            <div className="gc-flow-node"><span className="gc-flow-k">02</span><span className="gc-flow-v">Системный звук</span></div>
+            <div className="gc-flow-node"><span className="gc-flow-k">02</span><span className="gc-flow-v">{tr('Системный звук', 'System audio')}</span></div>
             <div className="gc-flow-arrow"><Icon name="arrowR" size={16}/></div>
             <div className="gc-flow-node is-accent"><span className="gc-flow-k">03</span><span className="gc-flow-v">Daemon</span></div>
             <div className="gc-flow-arrow"><Icon name="arrowR" size={16}/></div>
             <div className="gc-flow-node"><span className="gc-flow-k">04</span><span className="gc-flow-v">brain-api</span></div>
             <div className="gc-flow-arrow"><Icon name="arrowR" size={16}/></div>
-            <div className="gc-flow-node is-accent"><span className="gc-flow-k">05</span><span className="gc-flow-v">Задачи и риски</span></div>
+            <div className="gc-flow-node is-accent"><span className="gc-flow-k">05</span><span className="gc-flow-v">{tr('Задачи и риски', 'Tasks and risks')}</span></div>
           </div>
           <p className="gc-mute" style={{ marginTop: 24, fontSize: 14, maxWidth: 640 }}>
-            Daemon не ведет проект самостоятельно. Он превращает звук встречи в поток событий.
-            Логика задач, подтверждений, доски и напоминаний живет в brain-api.
+            {tr(
+              'Daemon не ведет проект самостоятельно. Он превращает звук встречи в поток событий. Логика задач, подтверждений, доски и напоминаний живет в brain-api.',
+              'Daemon does not manage the project by itself. It turns meeting audio into an event stream. Task, confirmation, board, and reminder logic lives in brain-api.'
+            )}
           </p>
         </div>
       </section>
@@ -307,17 +315,17 @@ const DownloadPage = ({ go }) => {
 
       <section className="gc-section gc-section--tight">
         <div className="gc-wrap gc-reveal">
-          <span className="gc-eyebrow">Релизы</span>
-          <h2 className="gc-display-3" style={{ marginTop: 18 }}>Статус сборок</h2>
+          <span className="gc-eyebrow">{tr('Релизы', 'Releases')}</span>
+          <h2 className="gc-display-3" style={{ marginTop: 18 }}>{tr('Статус сборок', 'Build status')}</h2>
           <table className="gc-status-table">
             <thead>
-              <tr><th>Платформа</th><th>Статус</th><th>Формат</th><th>Artifact</th></tr>
+              <tr><th>{tr('Платформа', 'Platform')}</th><th>{tr('Статус', 'Status')}</th><th>{tr('Формат', 'Format')}</th><th>Artifact</th></tr>
             </thead>
             <tbody>
               {PLATFORM_ORDER.map(id => (
                 <tr key={id}>
                   <td>{platforms[id].label}</td>
-                  <td><span className={'gca-badge ' + PLATFORM_UI[id].statusClass}>{statusText(platforms[id].status)}</span></td>
+                  <td><span className={'gca-badge ' + platformUiForLanguage(language)[id].statusClass}>{statusText(platforms[id].status, language)}</span></td>
                   <td className="mono">{platforms[id].format}</td>
                   <td className="mono">{platforms[id].artifact}</td>
                 </tr>
@@ -327,7 +335,7 @@ const DownloadPage = ({ go }) => {
         </div>
       </section>
 
-      <PublicFooter go={go}/>
+      <PublicFooter go={go} language={language}/>
     </div>
   );
 };

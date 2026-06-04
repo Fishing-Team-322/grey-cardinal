@@ -1,11 +1,11 @@
 ﻿// Grey Cardinal - router + mount
 
 const ROUTES = {
-  '/':         (go) => <PublicHomePage go={go}/>,
-  '/download': (go) => <DownloadPage go={go}/>,
-  '/login':    (go) => <LoginPage go={go}/>,
-  '/register': (go) => <RegisterPage go={go}/>,
-  '/app':      (go) => <AppDashboardPage go={go}/>,
+  '/':         (props) => <PublicHomePage {...props}/>,
+  '/download': (props) => <DownloadPage {...props}/>,
+  '/login':    (props) => <LoginPage {...props}/>,
+  '/register': (props) => <RegisterPage {...props}/>,
+  '/app':      (props) => <AppDashboardPage {...props}/>,
 };
 
 const normalize = (hash) => {
@@ -17,6 +17,11 @@ const normalize = (hash) => {
 
 const App = () => {
   const [route, setRoute] = React.useState(() => normalize(window.location.hash));
+  const [language, setLanguage] = React.useState(getInitialLanguage);
+
+  React.useEffect(() => {
+    saveLanguage(language);
+  }, [language]);
 
   React.useEffect(() => {
     const onHash = () => {
@@ -36,8 +41,7 @@ const App = () => {
     }
   }, []);
 
-  return ROUTES[route](go);
+  return ROUTES[route]({ go, language, setLanguage });
 };
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
-

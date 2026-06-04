@@ -1,6 +1,7 @@
 ﻿// Grey Cardinal - public header + magnifier hero
 
-const PublicHeader = ({ go }) => {
+const PublicHeader = ({ go, language, setLanguage }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
   const [scrolled, setScrolled] = React.useState(false);
   React.useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -9,10 +10,10 @@ const PublicHeader = ({ go }) => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
   const nav = [
-    ['Возможности', 'features'],
-    ['Как работает', 'how'],
+    [tr('Возможности', 'Features'), 'features'],
+    [tr('Как работает', 'How it works'), 'how'],
     ['Daemon', 'daemon'],
-    ['Безопасность', 'security'],
+    [tr('Безопасность', 'Security'), 'security'],
   ];
   const jump = (id) => {
     const el = document.getElementById(id);
@@ -28,33 +29,34 @@ const PublicHeader = ({ go }) => {
           ))}
         </nav>
         <div className="gc-header-actions">
-          <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => go('/login')}>Войти</button>
-          <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={() => go('/register')}>Desktop identity</button>
+          <LanguageToggle language={language} setLanguage={setLanguage}/>
+          <button className="gc-btn gc-btn--ghost gc-btn--sm gc-auth-action" onClick={() => go('/login')}>{tr('Войти', 'Sign in')}</button>
+          <button className="gc-btn gc-btn--primary gc-btn--sm gc-auth-action" onClick={() => go('/register')}>{tr('Регистрация', 'Registration')}</button>
         </div>
       </div>
     </header>
   );
 };
 
-const RAW_LINES = [
-  ['Петя', 'Давайте оплату подготовим к четвергу.'],
-  ['Аня', 'Я проверю интеграцию с YouGile сегодня вечером.'],
-  ['Дима', 'Мне нужно до завтра поднять websocket для dashboard.'],
-  ['Петя', 'Если оплата зависнет в Todo до среды - это риск.'],
-  ['Аня', 'Вечерний дайджест соберем в пятницу.'],
-  ['Дима', 'И проверить daemon на Windows перед демо.'],
+const heroRawLines = (language) => [
+  ['Петя', copyText(language, 'Давайте оплату подготовим к четвергу.', 'Let us prepare the payment by Thursday.')],
+  ['Аня', copyText(language, 'Я проверю интеграцию с YouGile сегодня вечером.', 'I will check the YouGile integration tonight.')],
+  ['Дима', copyText(language, 'Мне нужно до завтра поднять websocket для dashboard.', 'I need to bring up the dashboard websocket by tomorrow.')],
+  ['Петя', copyText(language, 'Если оплата зависнет в Todo до среды - это риск.', 'If payment stays in Todo until Wednesday, that is a risk.')],
+  ['Аня', copyText(language, 'Вечерний дайджест соберем в пятницу.', 'We will assemble the evening digest on Friday.')],
+  ['Дима', copyText(language, 'И проверить daemon на Windows перед демо.', 'And test the Windows daemon before the demo.')],
 ];
 
-const HERO_SIGNALS = [
-  ['TASK', '3 задачи найдены', 'из последней встречи'],
-  ['RISK', '1 дедлайн близко', 'нужен статус до среды'],
-  ['SYNC', 'канбан обновлен', 'без ручного переноса'],
+const heroSignals = (language) => [
+  ['TASK', copyText(language, '3 задачи найдены', '3 tasks found'), copyText(language, 'из последней встречи', 'from the last meeting')],
+  ['RISK', copyText(language, '1 дедлайн близко', '1 deadline is close'), copyText(language, 'нужен статус до среды', 'status needed by Wednesday')],
+  ['SYNC', copyText(language, 'канбан обновлен', 'kanban updated'), copyText(language, 'без ручного переноса', 'without manual copying')],
 ];
 
-const useBrainApiStatus = () => {
+const useBrainApiStatus = (language) => {
   const [state, setState] = React.useState(() => ({
     status: 'checking',
-    label: 'Проверяем backend',
+    label: copyText(language, 'Проверяем backend', 'Checking backend'),
     details: GCApi.config().baseUrl,
     latency: null,
   }));
@@ -64,14 +66,14 @@ const useBrainApiStatus = () => {
     let timer;
     const check = async () => {
       const started = performance.now();
-      setState((prev) => ({ ...prev, status: 'checking', label: 'Проверяем backend' }));
+      setState((prev) => ({ ...prev, status: 'checking', label: copyText(language, 'Проверяем backend', 'Checking backend') }));
       try {
         await GCApi.health();
         const latency = Math.max(1, Math.round(performance.now() - started));
         if (!alive) return;
         setState({
           status: 'online',
-          label: 'Brain API отвечает',
+          label: copyText(language, 'Brain API отвечает', 'Brain API is responding'),
           details: `${GCApi.config().baseUrl} / ${latency} ms`,
           latency,
         });
@@ -79,7 +81,7 @@ const useBrainApiStatus = () => {
         if (!alive) return;
         setState({
           status: 'offline',
-          label: 'Backend пока не запущен',
+          label: copyText(language, 'Backend пока не запущен', 'Backend is not running yet'),
           details: error.message,
           latency: null,
         });
@@ -91,15 +93,16 @@ const useBrainApiStatus = () => {
       alive = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [language]);
 
   return state;
 };
 
-const BackendPulse = ({ go }) => {
-  const api = useBrainApiStatus();
+const BackendPulse = ({ language }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  const api = useBrainApiStatus(language);
   const config = GCApi.config();
-  const tokenState = config.internalToken ? 'token ready' : 'token missing';
+  const tokenState = config.internalToken ? tr('token готов', 'token ready') : tr('token отсутствует', 'token missing');
 
   return (
     <div className={'gc-api-ribbon gc-api-ribbon--' + api.status}>
@@ -108,7 +111,7 @@ const BackendPulse = ({ go }) => {
           <Icon name={api.status === 'online' ? 'checkCircle' : api.status === 'checking' ? 'refresh' : 'alert'} size={18}/>
         </span>
         <div className="gc-api-ribbon-copy">
-          <span className="gc-api-ribbon-k">Live backend check</span>
+          <span className="gc-api-ribbon-k">{tr('Проверка backend', 'Live backend check')}</span>
           <strong>{api.label}</strong>
           <small>{api.details}</small>
         </div>
@@ -116,22 +119,22 @@ const BackendPulse = ({ go }) => {
       <div className="gc-api-ribbon-chips">
         <span><span className={'gc-api-dot ' + api.status}></span>Brain API</span>
         <span><Icon name="lock" size={12}/>{tokenState}</span>
-        <span><Icon name="server" size={12}/>CORS enabled</span>
+        <span><Icon name="server" size={12}/>{tr('CORS включен', 'CORS enabled')}</span>
       </div>
     </div>
   );
 };
 
-const HeroPipeline = () => {
+const HeroPipeline = ({ language }) => {
   const nodes = [
     ['ear', 'Audio', 'daemon'],
     ['waves', 'Transcript', 'stream'],
-    ['brain', 'Brain API', 'extract'],
-    ['kanban', 'Board', 'sync'],
+    ['brain', 'Brain API', copyText(language, 'extract', 'extract')],
+    ['kanban', copyText(language, 'Доска', 'Board'), 'sync'],
   ];
 
   return (
-    <div className="gc-hero-pipeline" aria-label="Поток данных Grey Cardinal">
+    <div className="gc-hero-pipeline" aria-label={copyText(language, 'Поток данных Grey Cardinal', 'Grey Cardinal data flow')}>
       {nodes.map(([icon, title, desc], index) => (
         <React.Fragment key={title}>
           <div className="gc-hero-pipe-node" style={{ '--i': index }}>
@@ -146,7 +149,9 @@ const HeroPipeline = () => {
   );
 };
 
-const MagnifierHero = () => {
+const MagnifierHero = ({ language }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  const rawLines = heroRawLines(language);
   const stageRef = React.useRef(null);
   const [pos, setPos] = React.useState({ x: 0.62, y: 0.40 });
   const [active, setActive] = React.useState(false);
@@ -197,11 +202,11 @@ const MagnifierHero = () => {
     >
       <span className="gc-lens-tag">
         <span className="rf-dot rf-dot--brand rf-dot--pulse"></span>
-        LIVE MEETING / RAW
+        {tr('ВСТРЕЧА / СЫРОЙ СИГНАЛ', 'LIVE MEETING / RAW')}
       </span>
 
       <div className="gc-raw-layer" aria-hidden="true">
-        {RAW_LINES.map(([who, text], i) => (
+        {rawLines.map(([who, text], i) => (
           <p key={i} className="gc-raw-line" style={{ '--i': i }}>
             <span className="gc-raw-speaker">{who}: </span>{text}
           </p>
@@ -216,11 +221,11 @@ const MagnifierHero = () => {
 
           <div className="gc-struct-card" style={{ position:'absolute', top:78, left:24, width:240 }}>
             <div className="gc-struct-eyebrow"><span className="rf-dot rf-dot--brand"></span>TASK FOUND</div>
-            <div className="gc-struct-title">Подготовить оплату</div>
+            <div className="gc-struct-title">{tr('Подготовить оплату', 'Prepare payment')}</div>
             <dl className="gc-kv">
-              <dt>Исполнитель</dt><dd>Петя</dd>
-              <dt>Дедлайн</dt><dd>чт, 18:00</dd>
-              <dt>Источник</dt><dd>transcript</dd>
+              <dt>{tr('Исполнитель', 'Owner')}</dt><dd>{tr('Петя', 'Peter')}</dd>
+              <dt>{tr('Дедлайн', 'Deadline')}</dt><dd>{tr('чт, 18:00', 'Thu, 18:00')}</dd>
+              <dt>{tr('Источник', 'Source')}</dt><dd>transcript</dd>
             </dl>
             <div className="gc-conf-row">
               <dl className="gc-kv"><dt>Confidence</dt><dd className="gc-crimson">87%</dd></dl>
@@ -229,17 +234,17 @@ const MagnifierHero = () => {
           </div>
 
           <div className="gc-struct-chip" style={{ top:88, right:34 }}>
-            <span className="gc-dot-brand"></span>Аня / YouGile / 20:00
+            <span className="gc-dot-brand"></span>{tr('Аня', 'Anna')} / YouGile / 20:00
           </div>
           <div className="gc-struct-chip" style={{ top:150, right:54 }}>
-            <span className="gc-dot-brand"></span>Дима / websocket / завтра
+            <span className="gc-dot-brand"></span>{tr('Дима', 'Dima')} / websocket / {tr('завтра', 'tomorrow')}
           </div>
 
           <div className="gc-struct-risk" style={{ top:216, right:44 }}>
             <span className="risk-ic">!</span>
             <div>
-              <div className="rk-t">РИСК / дедлайн близко</div>
-              <div className="rk-d">оплата / Todo / до среды</div>
+              <div className="rk-t">{tr('РИСК / дедлайн близко', 'RISK / deadline close')}</div>
+              <div className="rk-d">{tr('оплата / Todo / до среды', 'payment / Todo / by Wednesday')}</div>
             </div>
           </div>
 
@@ -258,14 +263,14 @@ const MagnifierHero = () => {
       </div>
 
       <div className="gc-lens-ring"></div>
-      <span className="gc-lens-hint" style={{ opacity: active ? 0 : 1 }}>наведите курсор</span>
+      <span className="gc-lens-hint" style={{ opacity: active ? 0 : 1 }}>{tr('наведите курсор', 'move cursor')}</span>
     </div>
   );
 };
 
-const HeroSignals = () => (
-  <div className="gc-hero-signals" aria-label="Короткая сводка">
-    {HERO_SIGNALS.map(([k, v, d], i) => (
+const HeroSignals = ({ language }) => (
+  <div className="gc-hero-signals" aria-label={copyText(language, 'Короткая сводка', 'Short summary')}>
+    {heroSignals(language).map(([k, v, d], i) => (
       <div className="gc-hero-signal" key={k} style={{ '--i': i }}>
         <span className="gc-hero-signal-k">{k}</span>
         <span className="gc-hero-signal-v">{v}</span>
@@ -275,40 +280,45 @@ const HeroSignals = () => (
   </div>
 );
 
-const HeroSection = ({ go }) => (
-  <section className="gc-section gc-hero" id="top">
-    <div className="gc-wrap">
-      <div className="gc-hero-grid">
-        <div className="gc-hero-copy">
-          <span className="gc-eyebrow">Автономный PM-агент</span>
-          <h1 className="gc-display-1">
-            Команда <span className="gc-mobile-stack">говорит.</span><br/>
-            Проект <span className="gc-crimson gc-hero-word">движется сам.</span>
-          </h1>
-          <p className="gc-lead gc-hero-sub">
-            Grey Cardinal слушает встречи, выделяет договоренности, создает задачи,
-            назначает ответственных и заранее подсвечивает риски - без ручного переноса в доску.
-          </p>
-          <BackendPulse go={go}/>
-          <HeroSignals/>
-          <div className="gc-hero-meta">
-            <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">0</span><span className="gc-hero-meta-v">ручного переноса</span></div>
-            <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">3</span><span className="gc-hero-meta-v">платформы daemon</span></div>
-            <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">86%</span><span className="gc-hero-meta-v">средняя уверенность</span></div>
+const HeroSection = ({ language }) => {
+  const tr = (ru, en) => copyText(language, ru, en);
+  return (
+    <section className="gc-section gc-hero" id="top">
+      <div className="gc-wrap">
+        <div className="gc-hero-grid">
+          <div className="gc-hero-copy">
+            <span className="gc-eyebrow">{tr('Автономный PM-агент', 'Autonomous PM agent')}</span>
+            <h1 className="gc-display-1">
+              {tr('Команда', 'Team')} <span className="gc-mobile-stack">{tr('говорит.', 'talks.')}</span><br/>
+              {tr('Проект', 'The project')} <span className="gc-crimson gc-hero-word">{tr('движется сам.', 'moves itself.')}</span>
+            </h1>
+            <p className="gc-lead gc-hero-sub">
+              {tr(
+                'Grey Cardinal слушает встречи, выделяет договоренности, создает задачи, назначает ответственных и заранее подсвечивает риски - без ручного переноса в доску.',
+                'Grey Cardinal listens to meetings, extracts agreements, creates tasks, assigns owners, and highlights risks early without manual board updates.'
+              )}
+            </p>
+            <BackendPulse language={language}/>
+            <HeroSignals language={language}/>
+            <div className="gc-hero-meta">
+              <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">0</span><span className="gc-hero-meta-v">{tr('ручного переноса', 'manual transfers')}</span></div>
+              <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">3</span><span className="gc-hero-meta-v">{tr('платформы daemon', 'daemon platforms')}</span></div>
+              <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">86%</span><span className="gc-hero-meta-v">{tr('средняя уверенность', 'average confidence')}</span></div>
+            </div>
           </div>
-        </div>
-        <div className="gc-hero-visual">
-          <div className="gc-hero-stage-wrap">
-            <MagnifierHero/>
+          <div className="gc-hero-visual">
+            <div className="gc-hero-stage-wrap">
+              <MagnifierHero language={language}/>
+            </div>
+            <p className="gc-mute gc-lens-caption">
+              {tr('Разговор остается разговором. Grey Cardinal превращает его в рабочий проект.', 'Conversation stays natural. Grey Cardinal turns it into a working project.')}
+            </p>
+            <HeroPipeline language={language}/>
           </div>
-          <p className="gc-mute gc-lens-caption">
-            Разговор остается разговором. Grey Cardinal превращает его в рабочий проект.
-          </p>
-          <HeroPipeline/>
         </div>
       </div>
-    </div>
-  </section>
-);
+    </section>
+  );
+};
 
 Object.assign(window, { PublicHeader, MagnifierHero, BackendPulse, HeroPipeline, HeroSection });
