@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     internal_api_token: str = "dev-internal-token"
 
+    # JWT auth (user accounts)
+    jwt_secret: str = "change-me-in-production-use-long-random-string"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_days: int = 30
+    jwt_cookie_name: str = "gc_session"
+    jwt_cookie_secure: bool = True  # False in dev if no HTTPS
+
     database_url: str = "postgresql+asyncpg://grey:grey@postgres:5432/grey_cardinal"
     db_echo: bool = False
 
@@ -69,24 +76,8 @@ class Settings(BaseSettings):
     reminder_quiet_hours_end: str = "09:00"
 
     # ---------------------------------------------------------------------------
-    # Telemost bot worker settings
-    # ---------------------------------------------------------------------------
-    # "mock"       — demo session manager only (default, no browser needed)
-    # "playwright" — real browser automation (requires playwright extra)
-    telemost_worker_mode: str = "mock"
-    telemost_bot_name: str = "Grey Cardinal Bot"
-    telemost_join_timeout_sec: int = 60
-    telemost_max_meeting_minutes: int = 120
-
-    # ---------------------------------------------------------------------------
     # Dev-only: /demo_core автоматически подтверждает proposal, чтобы показать карточку.
     demo_core_auto_confirm: bool = True
-
-    # Demo/dev mode: automatically confirm proposals from desktop transcripts.
-    # When True, the desktop transcript pipeline confirms proposals immediately,
-    # making tasks visible in GET /desktop/tasks without manual confirmation.
-    # WARNING: do not enable in production.
-    desktop_auto_confirm_proposals: bool = False
 
     @property
     def llm_enabled(self) -> bool:

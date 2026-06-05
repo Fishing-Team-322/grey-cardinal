@@ -55,6 +55,16 @@ class UserModel(TimestampMixin, Base):
     telegram_username: Mapped[str | None] = mapped_column(Text, nullable=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Web account fields (migration 0004_user_accounts)
+    email: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True, index=True)
+    login: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bio: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    photo_data_url: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="member")
+
 
 class DeviceModel(TimestampMixin, Base):
     __tablename__ = "devices"

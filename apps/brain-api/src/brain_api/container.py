@@ -46,7 +46,6 @@ class Container:
             evening_digest_hour=settings.evening_digest_hour,
             default_workspace_name=settings.default_workspace_name,
             default_telegram_chat_id=settings.default_telegram_chat_id,
-            desktop_auto_confirm_proposals=settings.desktop_auto_confirm_proposals,
             task_extraction_min_confidence=settings.task_extraction_min_confidence,
             task_extraction_require_action_verb=settings.task_extraction_require_action_verb,
             duplicate_similarity_threshold=settings.duplicate_similarity_threshold,

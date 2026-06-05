@@ -9,16 +9,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from brain_api.api.routes import (
+    accounts,
     agents,
     debug,
-    desktop,
     health,
     internal_audio,
     internal_telegram,
     meetings,
-    public_api,
     tasks,
-    telemost,
     websocket,
 )
 from brain_api.config import get_settings
@@ -59,23 +57,18 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=[
             "Content-Type",
             "X-Internal-Token",
-            "X-GC-User-Id",
-            "X-GC-Device-Id",
-            "X-GC-Client-Session-Id",
         ],
     )
     app.include_router(health.router)
-    app.include_router(public_api.router)
+    app.include_router(accounts.router)
     app.include_router(agents.router)
-    app.include_router(telemost.router)
     app.include_router(demo_routes.router)
     app.include_router(debug.router)
-    app.include_router(desktop.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
     app.include_router(meetings.router)

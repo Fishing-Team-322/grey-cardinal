@@ -18,6 +18,8 @@ dependencies = [
     "httpx>=0.27",
     "python-multipart>=0.0.9",
     "grey-cardinal-contracts",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
 ]
 
 [project.optional-dependencies]

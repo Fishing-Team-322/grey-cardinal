@@ -59,3 +59,5 @@ config.local.*
 !apps/frontend-dashboard/public/downloads/grey-cardinal-daemon-windows.zip
 native/desktop-agent/build-win/
 apps/frontend-dashboard/public/downloads/*-msi-stage/
+
+apps/desktop-app/
