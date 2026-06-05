@@ -71,7 +71,10 @@ async def resolve_recipient(
         )
     if default_chat_id is None:
         return None
-    mention = task.assignee_text or (user.display_name if user else None)
+    if user is not None and user.telegram_username:
+        mention = f"@{user.telegram_username}"
+    else:
+        mention = task.assignee_text or (user.display_name if user else None)
     return ReminderRecipient(
         chat_id=default_chat_id, user_id=None, is_private=False, mention=mention
     )

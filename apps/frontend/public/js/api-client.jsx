@@ -75,6 +75,7 @@ const gcRequest = async (path, options = {}) => {
   try {
     response = await fetch(url, {
       ...options,
+      credentials: options.credentials || 'include',
       headers: {
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...gcHeaders(options.internal !== false),
@@ -191,6 +192,11 @@ const GCApi = {
   health: () => gcRequest('/health', { internal: false }),
   ready: () => gcRequest('/ready', { internal: false }),
   dependencies: () => gcRequest('/internal/debug/health/dependencies'),
+  me: () => gcRequest('/api/auth/me', { internal: false }),
+  startTelegramLink: () => gcRequest('/api/auth/telegram-link/start', {
+    method: 'POST',
+    internal: false,
+  }),
   state: () => gcRequest('/internal/debug/state'),
   tasks: () => gcRequest('/internal/tasks').then((data) => (data.tasks || []).map(gcMapTask)),
   transcripts: () => gcRequest('/internal/audio/transcripts/recent?limit=20').then((data) => (data.items || []).map(gcMapTranscript)),

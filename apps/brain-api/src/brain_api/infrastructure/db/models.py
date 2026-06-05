@@ -66,6 +66,19 @@ class UserModel(TimestampMixin, Base):
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default="member")
 
 
+class TelegramLinkCodeModel(Base):
+    __tablename__ = "telegram_link_codes"
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    code: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DeviceModel(TimestampMixin, Base):
     __tablename__ = "devices"
 
@@ -109,6 +122,9 @@ class TelegramChatModel(TimestampMixin, Base):
     type: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    task_confirmation_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="1"
+    )
 
 
 class ChatMessageModel(TimestampMixin, Base):

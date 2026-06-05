@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from brain_api.application.use_cases.send_deadline_reminders import SendDeadlineReminders
 from brain_api.application.use_cases.send_evening_digest import SendEveningDigest
+from brain_api.application.use_cases.send_morning_task_summary import SendMorningTaskSummary
 from brain_api.application.use_cases.send_stale_status_reminders import SendStaleStatusReminders
 from brain_api.domain.entities import Task
 from brain_api.domain.enums import TaskPriority, TaskSource, TaskStatus
@@ -58,3 +59,37 @@ async def test_digest_action_and_scheduler_send_are_generated_once(
     async with make_uow() as uow:
         sent = await SendEveningDigest(uow, telegram, config).execute()
     assert sent == 0
+
+
+async def test_morning_summary_lists_active_tasks_and_tags_deadline_owner(
+    make_uow, telegram, config, seed_chat
+):
+    project, _ = await seed_chat()
+    async with make_uow() as uow:
+        user = await uow.users.upsert_from_telegram(111, "petya", "Петя")
+        await uow.tasks.add(
+            Task(
+                id=uuid4(),
+                public_id="GC-1",
+                title="Проверить оплату",
+                status=TaskStatus.todo,
+                priority=TaskPriority.medium,
+                source=TaskSource.manual,
+                project_id=project.id,
+                assignee_id=user.id,
+                assignee_text="Петя",
+                deadline=NOW + timedelta(hours=1),
+                last_status_update_at=NOW,
+            )
+        )
+        await uow.commit()
+
+    async with make_uow() as uow:
+        sent = await SendMorningTaskSummary(uow, telegram, config).execute()
+
+    assert sent == 1
+    assert len(telegram.sent) == 1
+    text = telegram.sent[0][1]
+    assert "Утренняя сверка задач" in text
+    assert "@petya" in text
+    assert "Скоро дедлайн" in text

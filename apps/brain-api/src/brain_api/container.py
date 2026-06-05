@@ -44,6 +44,7 @@ class Container:
             timezone=settings.default_timezone,
             reminder_deadline_hours_before=settings.reminder_deadline_hours_before,
             reminder_stale_hours=settings.reminder_stale_hours,
+            morning_summary_hour=settings.morning_summary_hour,
             evening_digest_hour=settings.evening_digest_hour,
             default_workspace_name=settings.default_workspace_name,
             default_telegram_chat_id=settings.default_telegram_chat_id,

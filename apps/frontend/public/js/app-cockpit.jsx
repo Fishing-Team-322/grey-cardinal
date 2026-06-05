@@ -30,6 +30,8 @@ const DEFAULT_PROFILE = {
   status: 'Active',
   bio: 'Runs meeting signals, board decisions, and follow-through from one cockpit.',
   photoDataUrl: '',
+  telegramUserId: null,
+  telegramUsername: '',
 };
 
 const DEFAULT_ORGANIZATION = {
@@ -208,6 +210,8 @@ const normalizeProfile = (value) => {
     displayName: next.displayName || authName || DEFAULT_PROFILE.displayName,
     login: next.login || next.handle || auth?.login || DEFAULT_PROFILE.login,
     email: next.email || auth?.email || DEFAULT_PROFILE.email,
+    telegramUserId: next.telegramUserId || next.telegram_user_id || null,
+    telegramUsername: next.telegramUsername || next.telegram_username || '',
   };
 };
 const normalizeOrganization = (value) => {
@@ -782,6 +786,8 @@ const ProfilePanel = ({
   const tr = (ru, en) => copyText(language, ru, en);
   const fileInputRef = React.useRef(null);
   const [profileView, setProfileView] = React.useState('home');
+  const [telegramLink, setTelegramLink] = React.useState(null);
+  const [telegramStatus, setTelegramStatus] = React.useState('');
   const unlocked = achievements.filter((item) => item.unlocked);
   const completion = Math.round((unlocked.length / achievements.length) * 100);
   const updateProfile = (field, value) => setProfile(prev => ({ ...prev, [field]: value }));
@@ -790,6 +796,33 @@ const ProfilePanel = ({
     if (event.key === 'Enter' || event.key === ' ') openAchievements();
   };
   const organizationName = organization?.name || tr('Без организации', 'No organization');
+  const startTelegramBind = async () => {
+    setTelegramStatus(tr('Создаю ссылку...', 'Creating link...'));
+    try {
+      const link = await GCApi.startTelegramLink();
+      setTelegramLink(link);
+      setTelegramStatus(tr('Открыл Telegram. Заверши привязку в боте.', 'Telegram opened. Finish binding in the bot.'));
+      window.open(link.deep_link, '_blank', 'noopener,noreferrer');
+      for (let i = 0; i < 12; i += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        const me = await GCApi.me();
+        if (me.telegram_user_id) {
+          const next = normalizeProfile({
+            ...profile,
+            telegramUserId: me.telegram_user_id,
+            telegramUsername: me.telegram_username || '',
+          });
+          setProfile(next);
+          saveProfile(next);
+          setTelegramStatus(tr('Telegram привязан.', 'Telegram linked.'));
+          return;
+        }
+      }
+      setTelegramStatus(tr('Жду привязку. Код действует 10 минут.', 'Waiting for binding. Code is valid for 10 minutes.'));
+    } catch (error) {
+      setTelegramStatus(error.message || tr('Не удалось создать ссылку.', 'Could not create link.'));
+    }
+  };
 
   return (
     <div className="gca-profile-page">
@@ -920,6 +953,18 @@ const ProfilePanel = ({
                   onChange={(event) => updateProfile('bio', event.target.value)}
                 />
               </label>
+            </div>
+            <div className="gca-controls">
+              <button className="gc-btn gc-btn--secondary" onClick={startTelegramBind}>
+                <Icon name="link" size={14}/>{tr('Привязать Telegram', 'Link Telegram')}
+              </button>
+              <span>
+                {profile.telegramUserId
+                  ? (profile.telegramUsername ? `@${profile.telegramUsername}` : tr('Telegram привязан', 'Telegram linked'))
+                  : tr('Telegram не привязан', 'Telegram not linked')}
+              </span>
+              {telegramLink && <a href={telegramLink.deep_link} target="_blank" rel="noreferrer">{telegramLink.code}</a>}
+              {telegramStatus && <span className="gca-profile-save-note">{telegramStatus}</span>}
             </div>
             <div className="gca-controls">
               <button className="gc-btn gc-btn--primary" onClick={onSave}><Icon name="check" size={14}/>{tr('Сохранить профиль', 'Save profile')}</button>

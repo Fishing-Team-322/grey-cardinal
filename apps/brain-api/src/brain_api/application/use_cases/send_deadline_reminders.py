@@ -61,6 +61,8 @@ class SendDeadlineReminders:
                 continue
 
             text = render_deadline_reminder(task, self._config.timezone)
+            if not recipient.is_private and recipient.mention:
+                text = f"{recipient.mention}\n\n{text}"
             await self._telegram.send_message(recipient.chat_id, text)
             await uow.reminders.add(
                 ReminderLog(

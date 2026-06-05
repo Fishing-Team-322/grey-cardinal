@@ -12,6 +12,7 @@ class AppConfig:
     timezone: str = "Europe/Moscow"
     reminder_deadline_hours_before: int = 2
     reminder_stale_hours: int = 24
+    morning_summary_hour: int = 9
     evening_digest_hour: int = 20
     default_workspace_name: str = "Hackathon Team"
     default_telegram_chat_id: int | None = None

@@ -40,11 +40,12 @@ def _chat(raw: dict[str, Any]) -> TelegramChatInfo:
 
 
 def build_message_event(update: dict[str, Any], message: dict[str, Any]) -> TelegramMessageEvent:
+    sender_raw = message.get("from") or message.get("sender_chat") or {}
     return TelegramMessageEvent(
         update_id=update.get("update_id", 0),
         message_id=message.get("message_id", 0),
         chat=_chat(message.get("chat", {})),
-        sender=_sender(message.get("from", {})),
+        sender=_sender(sender_raw),
         text=message.get("text", ""),
         date=_ts(message.get("date")),
         raw=update,
@@ -54,11 +55,12 @@ def build_message_event(update: dict[str, Any], message: dict[str, Any]) -> Tele
 def build_command_event(update: dict[str, Any], message: dict[str, Any]) -> TelegramCommandEvent:
     text = message.get("text", "")
     command, args = parse_command(text)
+    sender_raw = message.get("from") or message.get("sender_chat") or {}
     return TelegramCommandEvent(
         update_id=update.get("update_id", 0),
         message_id=message.get("message_id", 0),
         chat=_chat(message.get("chat", {})),
-        sender=_sender(message.get("from", {})),
+        sender=_sender(sender_raw),
         command=command,
         args=args,
         text=text,
