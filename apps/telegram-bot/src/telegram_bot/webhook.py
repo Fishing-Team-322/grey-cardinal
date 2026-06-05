@@ -42,7 +42,12 @@ async def process_update(
         await execute_actions(client, actions.actions)
         return
 
-    message = update.get("message") or update.get("edited_message")
+    message = (
+        update.get("message")
+        or update.get("edited_message")
+        or update.get("channel_post")
+        or update.get("edited_channel_post")
+    )
     if not message:
         logger.debug("Update без message/callback_query пропущен")
         return
@@ -60,12 +65,33 @@ async def process_update(
     # ── Commands ──────────────────────────────────────────────────────────
     if is_command(text):
         command_event = build_command_event(update, message)
-        actions = await brain.send_command_event(command_event)
+        if command_event.command == "start" and _link_code(command_event.args):
+            sender = command_event.sender
+            actions = await brain.send_telegram_link(
+                code=_link_code(command_event.args) or "",
+                tg_user_id=sender.id,
+                chat_id=command_event.chat.id,
+                username=sender.username,
+                first_name=sender.first_name,
+                last_name=sender.last_name,
+            )
+        else:
+            actions = await brain.send_command_event(command_event)
     else:
         message_event = build_message_event(update, message)
         actions = await brain.send_message_event(message_event)
 
     await execute_actions(client, actions.actions)
+
+
+def _link_code(args: list[str]) -> str | None:
+    if not args:
+        return None
+    value = args[0].strip()
+    if not value.startswith("link_"):
+        return None
+    code = value.removeprefix("link_").strip()
+    return code or None
 
 
 async def _handle_bot_joined(
@@ -86,8 +112,9 @@ async def _handle_bot_joined(
     logger.info("Bot joined chat %s (%s), triggering /start", chat_id, chat_type)
 
     # Build a synthetic /start command event
-    from grey_cardinal_contracts import TelegramCommandEvent, TelegramChatInfo, TelegramSender
     from datetime import UTC, datetime
+
+    from grey_cardinal_contracts import TelegramChatInfo, TelegramCommandEvent, TelegramSender
 
     event = TelegramCommandEvent(
         update_id=update.get("update_id", 0),

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
+import string
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -29,6 +32,7 @@ from brain_api.infrastructure.auth.jwt import (
     hash_password,
     verify_password,
 )
+from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.db.models import UserModel
 
 logger = logging.getLogger(__name__)
@@ -118,8 +122,16 @@ class UserResponse(BaseModel):
     bio: str
     photo_data_url: str
     role: str
+    telegram_user_id: int | None = None
+    telegram_username: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class TelegramLinkStartResponse(BaseModel):
+    code: str
+    deep_link: str
+    expires_at: datetime
 
 
 # ── DB session dependency ─────────────────────────────────────────────────────
@@ -143,7 +155,10 @@ async def get_current_user(
 
     user_id = decode_access_token(token, settings.jwt_secret, settings.jwt_algorithm)
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session",
+        )
 
     result = await session.execute(select(UserModel).where(UserModel.id == user_id))
     user = result.scalar_one_or_none()
@@ -223,7 +238,11 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
-    if user is None or not user.password_hash or not verify_password(body.password, user.password_hash):
+    if (
+        user is None
+        or not user.password_hash
+        or not verify_password(body.password, user.password_hash)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -272,6 +291,42 @@ async def update_me(
     return UserResponse.model_validate(current_user)
 
 
+@router.post("/telegram-link/start", response_model=TelegramLinkStartResponse)
+async def start_telegram_link(
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> TelegramLinkStartResponse:
+    """Create a short one-time code for binding Telegram via bot deep-link."""
+    settings = get_settings()
+    now = datetime.now(UTC)
+    existing = await session.execute(
+        select(m.TelegramLinkCodeModel).where(
+            m.TelegramLinkCodeModel.user_id == current_user.id,
+            m.TelegramLinkCodeModel.used_at.is_(None),
+        )
+    )
+    for row in existing.scalars():
+        row.used_at = now
+
+    code = await _unique_telegram_link_code(session)
+    expires_at = now + timedelta(minutes=10)
+    session.add(
+        m.TelegramLinkCodeModel(
+            id=uuid4(),
+            user_id=current_user.id,
+            code=code,
+            expires_at=expires_at,
+        )
+    )
+    await session.commit()
+    username = settings.telegram_bot_username.strip().lstrip("@")
+    return TelegramLinkStartResponse(
+        code=code,
+        deep_link=f"https://t.me/{username}?start=link_{code}",
+        expires_at=expires_at,
+    )
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response) -> None:
     """Clear session cookie."""
@@ -283,6 +338,18 @@ async def logout(response: Response) -> None:
         httponly=True,
         samesite="lax",
     )
+
+
+async def _unique_telegram_link_code(session: AsyncSession) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(10):
+        code = "".join(secrets.choice(alphabet) for _ in range(8))
+        existing = await session.execute(
+            select(m.TelegramLinkCodeModel).where(m.TelegramLinkCodeModel.code == code)
+        )
+        if existing.scalar_one_or_none() is None:
+            return code
+    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Could not generate link code")
 
 
 # ── Cookie helper ─────────────────────────────────────────────────────────────

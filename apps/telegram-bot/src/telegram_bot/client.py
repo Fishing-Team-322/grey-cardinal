@@ -90,7 +90,14 @@ class TelegramClient:
     async def set_webhook(self, url: str, secret_token: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "url": url,
-            "allowed_updates": ["message", "callback_query", "my_chat_member"],
+            "allowed_updates": [
+                "message",
+                "edited_message",
+                "channel_post",
+                "edited_channel_post",
+                "callback_query",
+                "my_chat_member",
+            ],
         }
         if secret_token:
             payload["secret_token"] = secret_token
@@ -105,7 +112,14 @@ class TelegramClient:
         """Long-poll for updates. Uses a request timeout longer than the poll."""
         payload: dict[str, Any] = {
             "timeout": timeout,
-            "allowed_updates": ["message", "callback_query", "my_chat_member"],
+            "allowed_updates": [
+                "message",
+                "edited_message",
+                "channel_post",
+                "edited_channel_post",
+                "callback_query",
+                "my_chat_member",
+            ],
         }
         if offset is not None:
             payload["offset"] = offset

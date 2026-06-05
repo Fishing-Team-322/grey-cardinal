@@ -118,6 +118,7 @@ def _chat(row: m.TelegramChatModel) -> TelegramChat:
         type=row.type,
         title=row.title,
         project_id=row.project_id,
+        task_confirmation_required=row.task_confirmation_required,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -533,6 +534,30 @@ class ChatRepositoryImpl:
         )
         return _chat(row) if row else None
 
+    async def set_confirmation_required(
+        self, telegram_chat_id: int, required: bool
+    ) -> TelegramChat:
+        row = await self._s.scalar(
+            select(m.TelegramChatModel).where(
+                m.TelegramChatModel.telegram_chat_id == telegram_chat_id
+            )
+        )
+        if row is None:
+            row = m.TelegramChatModel(
+                id=uuid4(),
+                telegram_chat_id=telegram_chat_id,
+                type="supergroup",
+                title=None,
+                project_id=None,
+                task_confirmation_required=required,
+            )
+            self._s.add(row)
+        else:
+            row.task_confirmation_required = required
+        await self._s.flush()
+        await self._s.refresh(row)
+        return _chat(row)
+
     async def get(self, chat_id: UUID) -> TelegramChat | None:
         row = await self._s.get(m.TelegramChatModel, chat_id)
         return _chat(row) if row else None
@@ -755,6 +780,18 @@ class MessageRepositoryImpl:
         self._s.add(row)
         await self._s.flush()
         return _message(row)
+
+    async def list_recent_for_chat(self, chat_id: UUID, limit: int = 8) -> list[ChatMessage]:
+        rows = await self._s.scalars(
+            select(m.ChatMessageModel)
+            .where(m.ChatMessageModel.chat_id == chat_id)
+            .order_by(
+                m.ChatMessageModel.created_at.desc(),
+                m.ChatMessageModel.telegram_message_id.desc(),
+            )
+            .limit(max(1, min(limit, 20)))
+        )
+        return list(reversed([_message(row) for row in rows]))
 
 
 class ProposalRepositoryImpl:

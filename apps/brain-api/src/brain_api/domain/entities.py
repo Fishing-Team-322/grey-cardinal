@@ -80,6 +80,7 @@ class TelegramChat:
     type: str
     title: str | None = None
     project_id: UUID | None = None
+    task_confirmation_required: bool = True
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

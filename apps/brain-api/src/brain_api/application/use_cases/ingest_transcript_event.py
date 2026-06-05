@@ -12,13 +12,31 @@ from uuid import uuid4
 
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import (
+    BoardGateway,
     EventPublisher,
     TaskExtractor,
     TelegramGateway,
     UnitOfWork,
 )
-from brain_api.application.use_cases._shared import create_proposal_with_confirmation
+from brain_api.application.use_cases._shared import (
+    create_proposal_and_confirmation,
+    create_proposal_with_confirmation,
+    create_task_from_proposal,
+)
 from brain_api.application.use_cases.send_deadline_reminders import _default_chat_id
+from brain_api.domain.entities import TranscriptEvent as TranscriptEntity
+from brain_api.domain.enums import TaskSource
+from grey_cardinal_contracts import (
+    EventName,
+    KnownUser,
+    TranscriptIngestResponse,
+    TranscriptSource,
+    TranscriptSourceDetails,
+    WebsocketEvent,
+)
+from grey_cardinal_contracts import (
+    TranscriptEvent as TranscriptEventContract,
+)
 
 # Words that are ONLY greetings/acknowledgments — never contain task info alone.
 _TRIVIAL_WORDS: frozenset[str] = frozenset({
@@ -41,32 +59,14 @@ _TASK_ACCEPTANCE_RE = re.compile(
 
 
 def _is_trivial_utterance(text: str) -> bool:
-    """Return True only when text cannot possibly contain a task.
-
-    Conservative: false negatives (thinking something IS trivial when it's not)
-    are far worse than false positives here, so we only skip the most obvious cases.
-    """
+    """Return True only when text cannot possibly contain a task."""
     words = [re.sub(r"[.,!?;:—\-\"']+", "", w) for w in text.lower().split()]
     words = [w for w in words if w]
     if not words:
         return True
-    # Short phrases with only trivial words — but NOT if they contain acceptance verbs
     if len(words) <= 3 and all(w in _TRIVIAL_WORDS for w in words):
         return not bool(_TASK_ACCEPTANCE_RE.search(text))
     return False
-from brain_api.domain.entities import TranscriptEvent as TranscriptEntity
-from brain_api.domain.enums import TaskSource
-from grey_cardinal_contracts import (
-    EventName,
-    KnownUser,
-    TranscriptIngestResponse,
-    TranscriptSource,
-    TranscriptSourceDetails,
-    WebsocketEvent,
-)
-from grey_cardinal_contracts import (
-    TranscriptEvent as TranscriptEventContract,
-)
 
 
 class IngestTranscriptEvent:
@@ -77,12 +77,14 @@ class IngestTranscriptEvent:
         telegram: TelegramGateway,
         events: EventPublisher,
         config: AppConfig,
+        board: BoardGateway | None = None,
     ) -> None:
         self._uow = uow
         self._extractor = extractor
         self._telegram = telegram
         self._events = events
         self._config = config
+        self._board = board
 
     async def execute(self, event: TranscriptEventContract) -> TranscriptIngestResponse:
         uow = self._uow
@@ -169,6 +171,39 @@ class IngestTranscriptEvent:
             return TranscriptIngestResponse(
                 transcript_id=str(entity.id),
                 meeting_public_id=meeting.public_id if meeting else None,
+            )
+
+        default_chat = await uow.chats.get_by_telegram_id(chat_id) if chat_id else None
+        if (
+            chat_id is not None
+            and default_chat is not None
+            and not default_chat.task_confirmation_required
+            and self._board is not None
+        ):
+            proposal, confirmation = await create_proposal_and_confirmation(
+                uow,
+                self._events,
+                source=TaskSource.meeting_transcript,
+                raw_text=event.text,
+                extraction=extraction,
+                chat_telegram_id=chat_id,
+                source_transcript_id=entity.id,
+            )
+            await create_task_from_proposal(
+                uow,
+                self._board,
+                self._events,
+                self._config,
+                proposal,
+                confirmation=confirmation,
+                telegram_chat_id=chat_id,
+            )
+            await uow.commit()
+            return TranscriptIngestResponse(
+                transcript_id=str(entity.id),
+                meeting_public_id=meeting.public_id if meeting else None,
+                proposal_created=True,
+                telegram_notified=False,
             )
 
         action = await create_proposal_with_confirmation(

@@ -7,9 +7,12 @@ UX: все взаимодействия через inline-кнопки. Кома
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy import select
 
 from brain_api.api.deps import get_container, verify_internal_token
 from brain_api.application.rendering import CB_CONFIRM, CB_EDIT, CB_REJECT, EDIT_STUB_TEXT
@@ -29,6 +32,7 @@ from brain_api.application.use_cases.send_personal_evening_digests import (
 )
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.container import Container
+from brain_api.infrastructure.db import models as m
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
@@ -61,6 +65,8 @@ CB_MEETING_STATUS  = "meeting:status"
 CB_TASK_LIST       = "task:list"
 CB_DEMO_RUN        = "demo:run"
 CB_BIND_CHAT       = "chat:bind"
+CB_MODE_CONFIRM    = "mode:confirm"
+CB_MODE_AUTO       = "mode:auto"
 
 _DEMO_LINES = [
     "Петя, подготовь оплату до завтра 18:00",
@@ -91,6 +97,12 @@ def _main_menu_kb(is_group: bool = False) -> dict:
         [("📋 Мои задачи", CB_TASK_LIST), ("📊 Дайджест", CB_MENU_DIGEST)],
         [("🎙 Встречи", CB_MENU_MEETINGS), ("⚙️ Настройки", CB_MENU_SETTINGS)],
         [("🚀 Запустить демо", CB_DEMO_RUN)],
+    )
+
+
+def _confirmation_mode_kb() -> dict:
+    return _kb(
+        [("С подтверждением", CB_MODE_CONFIRM), ("Без подтверждения", CB_MODE_AUTO)],
     )
 
 
@@ -126,12 +138,9 @@ _WELCOME_PRIVATE = (
 
 _WELCOME_GROUP = (
     "🤖 *Серый Кардинал* подключён к чату!\n\n"
-    "Начинаю автономный мониторинг:\n"
-    "✅ Слежу за сообщениями и извлекаю задачи\n"
-    "✅ Обрабатываю голосовые сообщения\n"
-    "✅ Создаю карточки в Jira автоматически\n"
-    "✅ Напоминаю о дедлайнах\n\n"
-    "Первым делом подключите Jira или запустите демо:"
+    "Я буду следить за сообщениями и голосовыми, находить задачи и создавать "
+    "карточки в YouGile.\n\n"
+    "Как создавать задачи?"
 )
 
 _HELP_TEXT = (
@@ -166,7 +175,60 @@ _YOUGILE_SETUP_TEXT = (
 )
 
 
+class TelegramLinkRequest(BaseModel):
+    code: str
+    tg_user_id: int
+    chat_id: int
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@router.post("/link", response_model=ActionsResponse)
+async def link_telegram_account(
+    payload: TelegramLinkRequest,
+    container: Container = Depends(get_container),
+) -> ActionsResponse:
+    now = datetime.now(UTC)
+    code = payload.code.strip().upper()
+    async with container.session_factory() as session:
+        link = await session.scalar(
+            select(m.TelegramLinkCodeModel).where(m.TelegramLinkCodeModel.code == code)
+        )
+        if link is None or link.used_at is not None:
+            return _text(payload.chat_id, "Код привязки не найден или уже использован.")
+
+        expires_at = link.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at < now:
+            link.used_at = now
+            await session.commit()
+            return _text(payload.chat_id, "Код привязки истёк. Создай новый код на сайте.")
+
+        user = await session.get(m.UserModel, link.user_id)
+        if user is None:
+            link.used_at = now
+            await session.commit()
+            return _text(payload.chat_id, "Аккаунт для этого кода не найден.")
+
+        existing = await session.scalar(
+            select(m.UserModel).where(m.UserModel.telegram_user_id == payload.tg_user_id)
+        )
+        if existing is not None and existing.id != user.id:
+            return _text(payload.chat_id, "Этот Telegram уже привязан к другому аккаунту.")
+
+        user.telegram_user_id = payload.tg_user_id
+        user.telegram_username = payload.username
+        if not user.display_name:
+            user.display_name = _telegram_display_name(payload)
+        link.used_at = now
+        await session.commit()
+
+    return _text(payload.chat_id, "✅ Telegram привязан к аккаунту Grey Cardinal.")
+
 
 @router.post("/message", response_model=ActionsResponse)
 async def ingest_message(
@@ -175,7 +237,11 @@ async def ingest_message(
 ) -> ActionsResponse:
     async with container.make_uow() as uow:
         use_case = IngestChatMessage(
-            uow, container.extractor, container.event_publisher, container.config
+            uow,
+            container.extractor,
+            container.event_publisher,
+            container.config,
+            container.board,
         )
         return await use_case.execute(event)
 
@@ -195,7 +261,37 @@ async def ingest_callback(
         return _edit_with_kb(chat_id, msg_id, cq_id, _WELCOME_PRIVATE, _main_menu_kb())
 
     if data == CB_MENU_SETTINGS:
-        return _edit_with_kb(chat_id, msg_id, cq_id, "⚙️ *Настройки интеграций*\n\nВыберите доску:", _settings_kb())
+        return _edit_with_kb(
+            chat_id,
+            msg_id,
+            cq_id,
+            "⚙️ *Настройки интеграций*\n\nВыберите доску:",
+            _settings_kb(),
+        )
+
+    if data in (CB_MODE_CONFIRM, CB_MODE_AUTO):
+        required = data == CB_MODE_CONFIRM
+        async with container.make_uow() as uow:
+            project = await uow.projects.ensure_default(container.config.default_workspace_name)
+            chat = await uow.chats.get_by_telegram_id(chat_id)
+            if chat is None:
+                await uow.chats.upsert(chat_id, "supergroup", None, project.id)
+            else:
+                await uow.chats.upsert(chat_id, chat.type, chat.title, project.id)
+            await uow.chats.set_confirmation_required(chat_id, required)
+            await uow.commit()
+        mode_text = (
+            "✅ Режим включён: задачи создаются после подтверждения в чате."
+            if required
+            else "✅ Режим включён: задачи создаются сразу, без сообщений в чат."
+        )
+        return _edit_with_kb(
+            chat_id,
+            msg_id,
+            cq_id,
+            f"{mode_text}\n\nЯ уже мониторю чат.",
+            _main_menu_kb(is_group=True),
+        )
 
     if data == CB_MENU_MEETINGS:
         return _edit_with_kb(chat_id, msg_id, cq_id, "🎙 *Управление встречами*", _meetings_kb())
@@ -210,7 +306,8 @@ async def ingest_callback(
         async with container.make_uow() as uow:
             project = await uow.projects.ensure_default(container.config.default_workspace_name)
             await uow.chats.upsert(chat_id, "group", None, project.id)
-            await uow.projects.set_default_chat(project.id, (await uow.chats.get_by_telegram_id(chat_id)).id)
+            bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+            await uow.projects.set_default_chat(project.id, bound_chat.id)
             await uow.commit()
         return _edit_with_kb(
             chat_id, msg_id, cq_id,
@@ -229,7 +326,8 @@ async def ingest_callback(
             await uow.commit()
         return _edit_with_kb(
             chat_id, msg_id, cq_id,
-            f"▶️ *Встреча начата*\nID: `{meeting.public_id}`\nЯ слушаю — отправляй голосовые или пиши.",
+            f"▶️ *Встреча начата*\nID: `{meeting.public_id}`\n"
+            "Я слушаю — отправляй голосовые или пиши.",
             _meetings_kb(),
         )
 
@@ -347,7 +445,7 @@ async def ingest_command(
 ) -> ActionsResponse:
     command = event.command.lower()
     chat_id = event.chat.id
-    is_group = event.chat.type in ("group", "supergroup")
+    is_group = event.chat.type in ("group", "supergroup", "channel")
 
     # ── /start — главное меню с кнопками ─────────────────────────────────
     if command == "start":
@@ -364,7 +462,7 @@ async def ingest_command(
                 chat_id=chat_id,
                 text=_WELCOME_GROUP,
                 parse_mode="Markdown",
-                reply_markup=_main_menu_kb(is_group=True),
+                reply_markup=_confirmation_mode_kb(),
             )])
         return ActionsResponse(actions=[SendMessageAction(
             chat_id=chat_id,
@@ -500,7 +598,10 @@ async def ingest_command(
         async with container.make_uow() as uow:
             result = await uow.debug.reset_demo()
             await uow.commit()
-        return _text(chat_id, f"Очищено: встреч {result['meetings']}, реплик {result['transcripts']}.")
+        return _text(
+            chat_id,
+            f"Очищено: Встреч: {result['meetings']}, реплик: {result['transcripts']}.",
+        )
 
     if command == "bind_chat":
         async with container.make_uow() as uow:
@@ -534,6 +635,13 @@ def _text(chat_id: int, text: str) -> ActionsResponse:
     return ActionsResponse(actions=[SendMessageAction(chat_id=chat_id, text=text)])
 
 
+def _telegram_display_name(payload: TelegramLinkRequest) -> str:
+    parts = [p for p in (payload.first_name, payload.last_name) if p]
+    if parts:
+        return " ".join(parts)
+    return payload.username or f"user{payload.tg_user_id}"
+
+
 def _md(chat_id: int, text: str, kb: dict | None = None) -> ActionsResponse:
     return ActionsResponse(actions=[SendMessageAction(
         chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=kb,
@@ -548,11 +656,19 @@ def _edit_with_kb(chat_id: int, msg_id: int, cq_id: str, text: str, kb: dict) ->
     from grey_cardinal_contracts import EditMessageAction
     return ActionsResponse(actions=[
         AnswerCallbackAction(callback_query_id=cq_id, text=""),
-        EditMessageAction(chat_id=chat_id, message_id=msg_id, text=text, reply_markup=kb, parse_mode="Markdown"),
+        EditMessageAction(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text=text,
+            reply_markup=kb,
+            parse_mode="Markdown",
+        ),
     ])
 
 
-def _answer_and_edit(cq_id: str, chat_id: int, msg_id: int, result: ActionsResponse) -> ActionsResponse:
+def _answer_and_edit(
+    cq_id: str, chat_id: int, msg_id: int, result: ActionsResponse
+) -> ActionsResponse:
     return ActionsResponse(actions=[
         AnswerCallbackAction(callback_query_id=cq_id, text=""),
         *result.actions,

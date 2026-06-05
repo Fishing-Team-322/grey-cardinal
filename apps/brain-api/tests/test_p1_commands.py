@@ -1,11 +1,13 @@
 from types import SimpleNamespace
 
 from brain_api.api.routes.debug import dependencies, state
-from brain_api.api.routes.internal_telegram import ingest_command
+from brain_api.api.routes.internal_telegram import ingest_callback, ingest_command
 from conftest import NOW
 from grey_cardinal_contracts import (
+    TelegramCallbackEvent,
     TelegramChatInfo,
     TelegramCommandEvent,
+    TelegramMessageRef,
     TelegramSender,
 )
 
@@ -86,3 +88,34 @@ async def test_bind_chat_replaces_previous_notification_chat(
         chat = await uow.chats.get(project.default_chat_id)
         assert chat is not None
         assert chat.telegram_chat_id == -100222
+
+
+async def test_group_start_asks_confirmation_mode(make_uow, config, extractor, telegram, events):
+    container = _container(make_uow, config, extractor, telegram, events)
+
+    response = await ingest_command(_event("start"), container)
+
+    keyboard = response.actions[0].reply_markup["inline_keyboard"]
+    callbacks = [button["callback_data"] for row in keyboard for button in row]
+    assert callbacks == ["mode:confirm", "mode:auto"]
+
+
+async def test_confirmation_mode_callback_is_persisted(
+    make_uow, config, extractor, telegram, events
+):
+    container = _container(make_uow, config, extractor, telegram, events)
+    event = TelegramCallbackEvent(
+        update_id=1,
+        callback_query_id="cb-1",
+        from_user=TelegramSender(id=111, username="petya", first_name="Петя"),
+        message=TelegramMessageRef(message_id=10, chat_id=-100123456789),
+        data="mode:auto",
+    )
+
+    response = await ingest_callback(event, container)
+
+    assert response.actions[1].type == "edit_message"
+    async with make_uow() as uow:
+        chat = await uow.chats.get_by_telegram_id(-100123456789)
+    assert chat is not None
+    assert chat.task_confirmation_required is False

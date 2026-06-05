@@ -49,3 +49,25 @@ class BrainClient:
 
     async def send_callback_event(self, event: TelegramCallbackEvent) -> ActionsResponse:
         return await self._post("/internal/telegram/callback", event.model_dump(mode="json"))
+
+    async def send_telegram_link(
+        self,
+        *,
+        code: str,
+        tg_user_id: int,
+        chat_id: int,
+        username: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
+    ) -> ActionsResponse:
+        return await self._post(
+            "/internal/telegram/link",
+            {
+                "code": code,
+                "tg_user_id": tg_user_id,
+                "chat_id": chat_id,
+                "username": username,
+                "first_name": first_name,
+                "last_name": last_name,
+            },
+        )

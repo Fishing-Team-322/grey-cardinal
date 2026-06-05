@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     )
     telegram_bot_base_url: str = "http://telegram-bot:8010"
+    telegram_bot_username: str = "grey_cyrdinyl_bot"
 
     llm_provider: str = "openai_compatible"
     llm_base_url: str = ""
@@ -66,6 +67,7 @@ class Settings(BaseSettings):
 
     reminder_deadline_hours_before: int = 2
     reminder_stale_hours: int = 24
+    morning_summary_hour: int = 9
     evening_digest_hour: int = 20
     default_timezone: str = "Europe/Moscow"
     default_workspace_name: str = "Hackathon Team"

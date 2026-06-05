@@ -37,6 +37,7 @@ async def ingest_transcript(
             container.telegram_gateway,
             container.event_publisher,
             container.config,
+            container.board,
         )
         return await use_case.execute(event)
 
