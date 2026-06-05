@@ -158,7 +158,7 @@ const gcDemoCommandPayload = (command) => ({
   args: [],
   text: `/${command}`,
   date: new Date().toISOString(),
-  raw: { source: 'frontend-dashboard' },
+  raw: { source: 'frontend' },
 });
 
 const GCApi = {

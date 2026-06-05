@@ -5,7 +5,7 @@ name: grey-cardinal
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
 # Only Caddy publishes ports (80/443). PostgreSQL, brain-api, telegram-bot,
-# audio-worker, asr-service, frontend-dashboard and tg-proxy stay on the
+# audio-worker, asr-service, frontend and tg-proxy stay on the
 # internal docker network. Secrets come from .env (see .env.example / DEPLOY.md).
 
 services:
@@ -125,9 +125,9 @@ services:
 
   # The real Grey Cardinal app (landing + auth + cockpit/kanban/tasks), wired to
   # the backend via /api and /ws. Built to static and served by Caddy on :5173.
-  frontend-dashboard:
+  frontend:
     build:
-      context: apps/frontend-dashboard
+      context: apps/frontend
       dockerfile: Dockerfile
     expose:
       - "5173"
@@ -148,7 +148,7 @@ services:
       - caddy_config:/config
     depends_on:
       - brain-api
-      - frontend-dashboard
+      - frontend
     restart: unless-stopped
 
 volumes:

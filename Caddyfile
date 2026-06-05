@@ -18,7 +18,7 @@
 
 	# Everything else is the static Grey Cardinal app.
 	handle {
-		reverse_proxy frontend-dashboard:5173
+		reverse_proxy frontend:5173
 	}
 }
 
