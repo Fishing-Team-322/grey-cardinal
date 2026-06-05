@@ -309,20 +309,20 @@ const Sidebar = ({ go, counts, section, setSection, profile, language }) => {
   const tr = (ru, en) => copyText(language, ru, en);
   const nav = [
     { sec:tr('РАБОТА', 'WORK'), items:[
-      { id:'overview', icon:'grid', label:tr('Обзор', 'Overview') },
-      { id:'proposals', icon:'list', label:tr('Предложения', 'Proposals'), count: counts.proposals },
+      { id:'overview', icon:'grid', label:tr('Главная', 'Overview') },
+      { id:'proposals', icon:'list', label:tr('На подтверждение', 'Proposals'), count: counts.proposals },
       { id:'kanban', icon:'kanban', label:tr('Доска', 'Board'), count: counts.tasks },
-      { id:'digest', icon:'bell', label:tr('Дайджест', 'Digest') },
+      { id:'digest', icon:'bell', label:tr('Сводка', 'Digest') },
     ]},
     { sec:'TEAM', items:[
       { id:'profile', icon:'user', label:tr('Профиль', 'Profile') },
       { id:'organization', icon:'users', label:tr('Организация', 'Organization'), count: counts.organization },
-      { id:'achievements', icon:'award', label:tr('Ачивки', 'Achievements'), count: counts.achievements },
+      { id:'achievements', icon:'award', label:tr('Анивки', 'Achievements'), count: counts.achievements },
     ]},
     { sec:tr('ИНТЕГРАЦИИ', 'INTEGRATIONS'), items:[
-      { id:'daemon', icon:'download', label:tr('Загрузки daemon', 'Daemon uploads'), count: counts.daemonUploads },
+      { id:'daemon', icon:'download', label:tr('Daemon', 'Daemon'), count: counts.daemonUploads },
       { id:'yougile', icon:'plug', label:'YouGile' },
-      { id:'api', icon:'server', label:'Brain API' },
+      { id:'api', icon:'server', label:'Backend' },
     ]},
   ];
   return (
@@ -399,14 +399,14 @@ const CockpitHero = ({ apiState, metrics, ygStatus, language }) => {
   return (
   <section className={'gca-hero-panel gca-hero-panel--' + apiState.status}>
     <div className="gca-hero-copy">
-      <span className="gca-panel-eyebrow">BRAIN API / LIVE DEMO</span>
-      <h1>Cockpit</h1>
-      <p>{tr('Отправьте сообщение, проверьте извлеченное предложение, подтвердите его в доску и синхронизируйте с YouGile.', 'Send a message, review the extracted proposal, confirm it into the board, and sync it to YouGile.')}</p>
+      <span className="gca-panel-eyebrow">WORK COCKPIT</span>
+      <h1>{tr('Рабочий центр', 'Work Center')}</h1>
+      <p>{tr('Здесь видно, что требует решения: задачи на подтверждение, текущая доска, сводка по срокам и состояние подключений.', 'Here you can see what needs attention: tasks pending confirmation, the current board, deadline summary and connection status.')}</p>
       <div className="gca-source-strip">
-        <span className="gca-source-chip"><b>API</b><small>{apiState.message}</small></span>
-        <span className="gca-source-chip"><b>WebSocket</b><small>/ws/events</small></span>
+        <span className="gca-source-chip"><b>Backend</b><small>{apiState.message}</small></span>
+        <span className="gca-source-chip"><b>{tr('Решения', 'Proposals')}</b><small>{tr('подтвердить или отклонить', 'confirm or reject')}</small></span>
+        <span className="gca-source-chip"><b>Daemon</b><small>{tr('история в профиле', 'history in profile')}</small></span>
         <span className="gca-source-chip"><b>YouGile</b><small>{ygStatus?.status || 'unknown'}</small></span>
-        <span className="gca-source-chip"><b>Token</b><small>{tr('не используется в demo flow', 'not used by demo flow')}</small></span>
       </div>
     </div>
     <div className="gca-hero-side">
@@ -487,8 +487,8 @@ const ProposalCard = ({ proposal, onConfirm, onReject, busy }) => (
 const ProposalsPanel = ({ proposals, onConfirm, onReject, busy }) => (
   <div className="gca-panel">
     <div className="gca-panel-head">
-      <div className="gca-panel-title"><Icon name="list" size={15}/>Pending proposals</div>
-      <span className="gca-panel-eyebrow">{proposals.length} pending</span>
+      <div className="gca-panel-title"><Icon name="list" size={15}/>{tr('Требуют решения', 'Requiring decisions')}</div>
+      <span className="gca-panel-eyebrow">{proposals.length} {tr('ожидает', 'pending')}</span>
     </div>
     <div className="gca-panel-body">
       {proposals.length === 0
@@ -561,7 +561,7 @@ const BoardPanel = ({ columns, onMove, onSync, busy }) => (
 const DigestPanel = ({ digest, onRefresh }) => (
   <div className="gca-panel">
     <div className="gca-panel-head">
-      <div className="gca-panel-title"><Icon name="bell" size={15}/>Evening digest</div>
+      <div className="gca-panel-title"><Icon name="bell" size={15}/>{tr('Сводка без шума', 'Noiseless digest')}</div>
       <span className="gca-panel-eyebrow">GET /api/digest/evening</span>
     </div>
     <div className="gca-panel-body">
@@ -1297,10 +1297,10 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
     organization: organization ? (organization.members || []).length : null,
   }), [proposals.length, taskCount, daemonUploads.length, unlockedAchievementCount, organization]);
   const metrics = React.useMemo(() => [
-    { label:tr('Pending', 'Pending'), value:String(proposals.length) },
-    { label:tr('Tasks', 'Tasks'), value:String(taskCount) },
-    { label:tr('Uploads', 'Uploads'), value:String(daemonUploads.length) },
-    { label:tr('Done', 'Done'), value:String(doneCount) },
+    { label:'PENDING', value:String(proposals.length) },
+    { label:'TASKS', value:String(taskCount) },
+    { label:'UPLOADS', value:String(daemonUploads.length) },
+    { label:'DONE', value:String(doneCount) },
   ], [proposals.length, taskCount, daemonUploads.length, doneCount, language]);
 
   const loadDashboard = React.useCallback(async () => {
@@ -1487,7 +1487,37 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
             </div>
           )}
 
-          {(section === 'overview' || section === 'proposals') && (
+          {section === 'overview' && (
+            <div className="gca-theater">
+              {apiState.status !== 'online' && (
+                <div className="gca-panel gca-panel--warn" style={{ borderLeft: '4px solid #ef4444', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 2 }}>{tr('СЛЕДУЮЩИЙ ШАГ', 'NEXT STEP')}</div>
+                    <div style={{ fontWeight: 600 }}>{tr('Проверить backend', 'Check backend')}</div>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>brain-api {tr('недоступен: проверьте URL backend, порт 8000 и CORS', 'unavailable: check backend URL, port 8000 and CORS')}</div>
+                  </div>
+                  <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={() => setSection('api')}>{tr('Открыть настройки', 'Open settings')} →</button>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                {[
+                  { icon: 'list', label: tr('На подтверждение', 'Pending approval'), value: proposals.length, desc: tr('Решения, которые ещё не попали в доску.', 'Decisions not yet on the board.'), onClick: () => setSection('proposals') },
+                  { icon: 'kanban', label: tr('Задачи на доске', 'Tasks on board'), value: taskCount, desc: tr('0 в работе', '0 in progress'), onClick: () => setSection('kanban') },
+                  { icon: 'bell', label: tr('Просрочки', 'Overdue'), value: 0, desc: tr('Сводка по срокам и владельцам.', 'Summary by deadlines and owners.'), onClick: () => setSection('digest') },
+                  { icon: 'download', label: tr('Daemon услышал', 'Daemon heard'), value: daemonUploads.length, desc: tr('Полная история лежит в профиле.', 'Full history is in profile.'), onClick: () => setSection('daemon') },
+                ].map((tile) => (
+                  <div key={tile.label} className="gca-panel" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={tile.onClick}>
+                    <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>{tile.value}</div>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{tile.label}</div>
+                    <div style={{ fontSize: 11, color: '#888' }}>{tile.desc}</div>
+                  </div>
+                ))}
+              </div>
+              <ProposalsPanel proposals={proposals} onConfirm={confirmProposal} onReject={rejectProposal} busy={busy}/>
+            </div>
+          )}
+
+          {section === 'proposals' && (
             <div className="gca-theater">
               <ChatPanel
                 text={chatText}
