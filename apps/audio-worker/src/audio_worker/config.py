@@ -21,6 +21,7 @@ class Settings:
     save_chunks: bool
     chunks_dir: Path
     faster_whisper_model: str
+    asr_service_url: str
 
 
 def get_settings() -> Settings:
@@ -32,4 +33,5 @@ def get_settings() -> Settings:
         save_chunks=_bool_env("AUDIO_WORKER_SAVE_CHUNKS", False),
         chunks_dir=Path(os.getenv("AUDIO_WORKER_CHUNKS_DIR", "/tmp/grey-cardinal-audio-chunks")),
         faster_whisper_model=os.getenv("AUDIO_FASTER_WHISPER_MODEL", "base"),
+        asr_service_url=os.getenv("ASR_SERVICE_URL", "http://asr-service:8030"),
     )
