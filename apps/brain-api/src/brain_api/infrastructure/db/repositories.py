@@ -1104,6 +1104,18 @@ class TranscriptRepositoryImpl:
         )
         return [_transcript_event(row) for row in rows]
 
+    async def list_recent_for_meeting(
+        self, meeting_db_id: UUID, limit: int = 8
+    ) -> list[TranscriptEvent]:
+        rows = await self._s.scalars(
+            select(m.TranscriptEventModel)
+            .where(m.TranscriptEventModel.meeting_db_id == meeting_db_id)
+            .where(m.TranscriptEventModel.is_final.is_(True))
+            .order_by(m.TranscriptEventModel.created_at.desc())
+            .limit(max(1, min(limit, 20)))
+        )
+        return list(reversed([_transcript_event(row) for row in rows]))
+
 
 class DebugRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:

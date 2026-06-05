@@ -97,11 +97,28 @@ class IngestTranscriptEvent:
             KnownUser(display_name=u.display_name, telegram_username=u.telegram_username)
             for u in await uow.users.list_known()
         ]
+
+        # Build conversation context window (last 7 final utterances from same meeting).
+        conversation_context: str | None = None
+        if entity.meeting_db_id is not None:
+            recent = await uow.transcripts.list_recent_for_meeting(
+                entity.meeting_db_id, limit=7
+            )
+            # Filter out the current utterance (already added) and format as dialogue.
+            prior = [t for t in recent if t.id != entity.id]
+            if prior:
+                lines = [
+                    f"[{t.speaker_name or t.speaker_id or 'Участник'}]: {t.text}"
+                    for t in prior
+                ]
+                conversation_context = "\n".join(lines)
+
         extraction = await self._extractor.extract_task(
             text=event.text,
             now=self._config.now(),
             timezone=self._config.timezone,
             known_users=known_users,
+            conversation_context=conversation_context,
         )
         if not extraction.has_task:
             await uow.commit()
