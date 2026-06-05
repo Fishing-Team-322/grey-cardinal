@@ -69,7 +69,11 @@ const gcRequest = async (path, options = {}) => {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    const detail = data && (data.detail || data.message);
+    let detail = data && (data.detail || data.message);
+    // Pydantic v2 returns detail as array of validation errors
+    if (Array.isArray(detail)) {
+      detail = detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ');
+    }
     throw new Error(detail || `${response.status} ${response.statusText}`);
   }
   return data;

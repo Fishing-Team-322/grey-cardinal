@@ -203,7 +203,7 @@ const RegisterPage = ({ go, language, setLanguage }) => {
           </div>
           <h1 className="gc-display-4">{tr('Регистрация', 'Registration')}</h1>
           <p className="gc-mute" style={{ marginTop: 8, fontSize: 14 }}>
-            {tr('Заполните данные участника. Пока это frontend-only аккаунт для мокового входа.', 'Fill in participant data. For now this is a frontend-only account for mock sign-in.')}
+            {tr('Заполните данные участника — почта и пароль для входа.', 'Fill in your details — email and password to sign in.')}
           </p>
           <form className="gc-form" onSubmit={submit}>
             <div className="gc-auth-form-grid">

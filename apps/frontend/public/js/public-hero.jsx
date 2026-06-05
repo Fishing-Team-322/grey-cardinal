@@ -298,7 +298,6 @@ const HeroSection = ({ language }) => {
                 'Grey Cardinal listens to meetings, extracts agreements, creates tasks, assigns owners, and highlights risks early without manual board updates.'
               )}
             </p>
-            <BackendPulse language={language}/>
             <HeroSignals language={language}/>
             <div className="gc-hero-meta">
               <div className="gc-hero-meta-item"><span className="gc-hero-meta-k">0</span><span className="gc-hero-meta-v">{tr('ручного переноса', 'manual transfers')}</span></div>
