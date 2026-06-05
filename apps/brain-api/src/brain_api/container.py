@@ -23,6 +23,7 @@ from brain_api.application.semantic_parser import SemanticMessageParser
 from brain_api.config import Settings
 from brain_api.domain.enums import BoardProvider
 from brain_api.infrastructure.board.base import YouGileConfig, resolve_provider
+from brain_api.infrastructure.board.factory import BoardAdapterFactory, TeamScopedBoardGateway
 from brain_api.infrastructure.board.jira import JiraBoardGateway, JiraConfig
 from brain_api.infrastructure.board.mock import MockBoardGateway
 from brain_api.infrastructure.board.yougile import YouGileBoardGateway
@@ -71,7 +72,10 @@ class Container:
         self.llm_provider_factory = LLMProviderFactory(self.session_factory, settings)
         self.semantic_parser = SemanticMessageParser(self.llm_provider_factory)
         self.extractor: TaskExtractor = self._build_extractor(settings)
-        self.board: BoardGateway = self._build_board(settings)
+        self.board_adapter_factory = BoardAdapterFactory(self.session_factory, settings)
+        self.board: BoardGateway = TeamScopedBoardGateway(
+            self.board_adapter_factory, self._build_board(settings)
+        )
 
     # ------------------------------------------------------------------ #
     def make_uow(self) -> UnitOfWork:

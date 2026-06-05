@@ -153,6 +153,7 @@ class TaskProposal:
     priority: TaskPriority
     confidence: float
     raw_text: str
+    team_id: UUID | None = None
     extractor_payload: dict[str, Any] = field(default_factory=dict)
     description: str | None = None
     source_message_id: UUID | None = None
@@ -168,6 +169,7 @@ class Confirmation:
     id: UUID
     proposal_id: UUID
     status: ConfirmationStatus
+    team_id: UUID | None = None
     telegram_chat_id: int | None = None
     telegram_message_id: int | None = None
     created_task_id: UUID | None = None
@@ -184,6 +186,7 @@ class Task:
     status: TaskStatus
     priority: TaskPriority
     source: TaskSource
+    team_id: UUID | None = None
     project_id: UUID | None = None
     description: str | None = None
     assignee_id: UUID | None = None
@@ -203,6 +206,7 @@ class BoardCard:
     task_id: UUID
     provider: BoardProvider
     external_card_id: str
+    team_id: UUID | None = None
     external_url: str | None = None
     external_payload: dict[str, Any] | None = None
     created_at: datetime | None = None

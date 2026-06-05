@@ -13,6 +13,7 @@ native/desktop-agent/chunks/
 # Node / frontend
 node_modules/
 apps/*/node_modules/
+apps/frontend/dist/
 apps/frontend-dashboard/dist/
 
 # Logs
@@ -51,6 +52,7 @@ C:/Temp/
 .env
 .env.*
 !.env.example
+!.env.production.example
 config.local.*
 
 # Archives

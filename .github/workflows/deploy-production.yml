@@ -11,7 +11,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/contracts/python
+          python -m pip install -e "apps/brain-api[dev]"
+          python -m pip install -e "apps/telegram-bot[dev]"
+          python -m pip install -e "apps/audio-worker[dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run ruff
+        run: python -m ruff check .
+
+      - name: Run mypy
+        run: python -m mypy apps/brain-api/src apps/telegram-bot/src packages/contracts/python/grey_cardinal_contracts
+
+      - name: Validate production compose
+        run: docker compose -f docker-compose.prod.yml config
+
   deploy:
+    needs: quality-gate
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH

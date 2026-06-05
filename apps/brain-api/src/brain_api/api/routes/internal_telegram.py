@@ -12,10 +12,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from brain_api.api.deps import get_container, verify_internal_token
-from brain_api.application.rendering import CB_CONFIRM, CB_EDIT, CB_REJECT, EDIT_STUB_TEXT
+from brain_api.application.rendering import (
+    CB_CONFIRM,
+    CB_EDIT,
+    CB_REJECT,
+    EDIT_STUB_TEXT,
+    proposal_keyboard,
+)
+from brain_api.application.semantic_parser import SemanticMessageInput
 from brain_api.application.use_cases.confirm_task import ConfirmTask
 from brain_api.application.use_cases.ingest_chat_message import IngestChatMessage
 from brain_api.application.use_cases.ingest_transcript_event import IngestTranscriptEvent
@@ -184,6 +191,15 @@ class TelegramLinkRequest(BaseModel):
     last_name: str | None = None
 
 
+class TelegramBindTeamRequest(BaseModel):
+    code: str
+    tg_chat_id: int
+    chat_id: int
+    chat_type: str = "group"
+    title: str | None = None
+    linked_by_tg_user_id: int | None = None
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/link", response_model=ActionsResponse)
@@ -230,11 +246,80 @@ async def link_telegram_account(
     return _text(payload.chat_id, "✅ Telegram привязан к аккаунту Grey Cardinal.")
 
 
+@router.post("/bind-team", response_model=ActionsResponse)
+async def bind_team_chat(
+    payload: TelegramBindTeamRequest,
+    container: Container = Depends(get_container),
+) -> ActionsResponse:
+    now = datetime.now(UTC)
+    code = payload.code.strip().upper()
+    async with container.session_factory() as session:
+        teams = (await session.execute(select(m.TeamModel))).scalars().all()
+        team = None
+        for candidate in teams:
+            config = candidate.board_config or {}
+            if str(config.get("telegram_bind_code", "")).upper() != code:
+                continue
+            expires_raw = config.get("telegram_bind_expires_at")
+            if expires_raw:
+                expires_at = datetime.fromisoformat(str(expires_raw))
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=UTC)
+                if expires_at < now:
+                    return _text(payload.chat_id, "Код привязки чата истёк. Создай новый код.")
+            team = candidate
+            break
+        if team is None:
+            return _text(payload.chat_id, "Код привязки команды не найден.")
+
+        linker = None
+        if payload.linked_by_tg_user_id is not None:
+            linker = await session.scalar(
+                select(m.UserModel).where(
+                    m.UserModel.telegram_user_id == payload.linked_by_tg_user_id
+                )
+            )
+        team.tg_chat_id = payload.tg_chat_id
+        config = dict(team.board_config or {})
+        config.pop("telegram_bind_code", None)
+        config.pop("telegram_bind_expires_at", None)
+        team.board_config = config
+        chat = await session.scalar(
+            select(m.TelegramChatModel).where(
+                m.TelegramChatModel.telegram_chat_id == payload.tg_chat_id
+            )
+        )
+        if chat is None:
+            chat = m.TelegramChatModel(
+                team_id=team.id,
+                telegram_chat_id=payload.tg_chat_id,
+                type=payload.chat_type,
+                title=payload.title,
+                linked_by=linker.id if linker else None,
+                linked_at=now,
+            )
+            session.add(chat)
+        else:
+            chat.team_id = team.id
+            chat.type = payload.chat_type
+            chat.title = payload.title
+            chat.linked_by = linker.id if linker else chat.linked_by
+            chat.linked_at = now
+        session.add(team)
+        await session.commit()
+
+    return _text(payload.chat_id, "✅ Чат привязан к команде Grey Cardinal.")
+
+
 @router.post("/message", response_model=ActionsResponse)
 async def ingest_message(
     event: TelegramMessageEvent,
     container: Container = Depends(get_container),
 ) -> ActionsResponse:
+    v2_response = await _try_v2_semantic_message(event, container)
+    if v2_response is not None:
+        return v2_response
+
     async with container.make_uow() as uow:
         use_case = IngestChatMessage(
             uow,
@@ -440,6 +525,338 @@ async def ingest_callback(
     return _answer(cq_id, "Неизвестное действие")
 
 
+async def _try_v2_semantic_message(
+    event: TelegramMessageEvent,
+    container: Container,
+) -> ActionsResponse | None:
+    if event.chat.type not in {"group", "supergroup", "channel"}:
+        return None
+
+    now = datetime.now(UTC)
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == event.chat.id)
+        )
+        if team is None:
+            return _text(
+                event.chat.id,
+                "Этот чат ещё не привязан к команде Grey Cardinal. "
+                "Менеджер команды должен привязать его в настройках команды.",
+            )
+
+        chat = await session.scalar(
+            select(m.TelegramChatModel).where(
+                m.TelegramChatModel.telegram_chat_id == event.chat.id
+            )
+        )
+        if chat is None:
+            chat = m.TelegramChatModel(
+                team_id=team.id,
+                telegram_chat_id=event.chat.id,
+                type=event.chat.type,
+                title=event.chat.title,
+                linked_at=now,
+            )
+            session.add(chat)
+            await session.flush()
+        elif chat.team_id != team.id:
+            chat.team_id = team.id
+
+        sender = await session.scalar(
+            select(m.UserModel).where(m.UserModel.telegram_user_id == event.sender.id)
+        )
+        if sender is None:
+            sender = m.UserModel(
+                telegram_user_id=event.sender.id,
+                telegram_username=event.sender.username,
+                display_name=_display_name_from_event(event),
+            )
+            session.add(sender)
+            await session.flush()
+
+        existing = await session.scalar(
+            select(m.ChatMessageModel).where(
+                m.ChatMessageModel.chat_id == chat.id,
+                m.ChatMessageModel.telegram_message_id == event.message_id,
+            )
+        )
+        if existing is not None:
+            await session.commit()
+            return ActionsResponse(actions=[])
+
+        message = m.ChatMessageModel(
+            telegram_message_id=event.message_id,
+            chat_id=chat.id,
+            sender_id=sender.id,
+            text=event.text,
+            raw_json=event.raw or {},
+        )
+        session.add(message)
+        await session.flush()
+
+        try:
+            parsed = await container.semantic_parser.parse(
+                SemanticMessageInput(
+                    team_id=team.id,
+                    message_text=event.text,
+                    sender_user_id=sender.id,
+                    team_timezone=team.timezone,
+                    now=now,
+                )
+            )
+        except Exception as exc:
+            session.add(
+                m.AuditLogModel(
+                    actor_type="system",
+                    action="semantic_parse_failed",
+                    entity_type="chat_message",
+                    entity_id=message.id,
+                    payload={"team_id": str(team.id), "error": str(exc)},
+                )
+            )
+            await session.commit()
+            return ActionsResponse(actions=[])
+
+        kind = parsed["kind"]
+        confidence = float(parsed["confidence"])
+        if (
+            kind == "task_candidate"
+            and confidence >= container.config.task_extraction_min_confidence
+        ):
+            return await _route_v2_task_candidate(session, team, sender, message, parsed, event)
+        if kind == "meeting_candidate" and confidence >= 0.6:
+            return await _route_v2_meeting_candidate(session, team, sender, message, parsed, event)
+        if kind == "daily_report":
+            return await _route_v2_daily_report(session, team, sender, message, parsed, event)
+        if kind == "absence_notice":
+            return await _route_v2_absence(session, team, sender, message, parsed, event)
+        if kind == "status_update":
+            return await _route_v2_status_update(session, team, sender, message, parsed, event)
+
+        session.add(
+            m.AuditLogModel(
+                actor_type="system",
+                action="semantic_message_ignored",
+                entity_type="chat_message",
+                entity_id=message.id,
+                payload={"team_id": str(team.id), "kind": kind, "confidence": confidence},
+            )
+        )
+        await session.commit()
+        return ActionsResponse(actions=[])
+
+
+async def _route_v2_task_candidate(session, team, sender, message, parsed, event):
+    task = parsed.get("task") or {}
+    title = str(task.get("title") or event.text[:120]).strip()
+    assignee_text = task.get("assignee_text")
+    assignee = await _match_v2_assignee(session, team.id, assignee_text)
+    deadline = _parse_dt(task.get("deadline"))
+    duplicate = await _find_v2_duplicate(session, team.id, title, assignee.id if assignee else None)
+    if duplicate is not None:
+        await session.commit()
+        return _text(
+            event.chat.id,
+            "Похоже, такая задача уже есть:\n\n"
+            f"{duplicate.public_id} {duplicate.title}\n"
+            f"Статус: {duplicate.status}\n\nНе создаю дубль.",
+        )
+
+    proposal = m.TaskProposalModel(
+        team_id=team.id,
+        source="telegram_chat",
+        source_message_id=message.id,
+        title=title,
+        description=task.get("description"),
+        assignee_text=assignee_text,
+        assignee_id=assignee.id if assignee else None,
+        deadline=deadline,
+        deadline_timezone=team.timezone,
+        priority=task.get("priority") or "medium",
+        confidence=float(parsed["confidence"]),
+        raw_text=event.text,
+        extractor_payload=parsed,
+    )
+    session.add(proposal)
+    await session.flush()
+    confirmation = m.ConfirmationModel(
+        team_id=team.id,
+        proposal_id=proposal.id,
+        status="pending",
+        telegram_chat_id=event.chat.id,
+    )
+    session.add(confirmation)
+    await session.commit()
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=(
+                    "🧠 Нашёл задачу\n\n"
+                    f"Что сделать:\n{proposal.title}\n\n"
+                    f"Исполнитель:\n{proposal.assignee_text or 'не указан'}\n\n"
+                    "Дедлайн:\n"
+                    f"{proposal.deadline.isoformat() if proposal.deadline else 'не указан'} "
+                    f"{team.timezone}\n\nСоздать карточку?"
+                ),
+                reply_markup=proposal_keyboard(confirmation.id),
+            )
+        ]
+    )
+
+
+async def _route_v2_meeting_candidate(session, team, sender, message, parsed, event):
+    meeting = parsed.get("meeting") or {}
+    seq = int(await session.scalar(select(func.max(m.MeetingModel.seq))) or 0) + 1
+    scheduled_at = _parse_dt(meeting.get("scheduled_at")) or datetime.now(UTC)
+    row = m.MeetingModel(
+        seq=seq,
+        public_id=f"MTG-{seq}",
+        team_id=team.id,
+        title=meeting.get("title") or "Встреча",
+        status="proposed",
+        state="proposed",
+        created_by=sender.id,
+        scheduled_at=scheduled_at,
+        scheduled_timezone=team.timezone,
+        duration_minutes=int(meeting.get("duration_minutes") or 60),
+        source_message_id=message.id,
+        started_at=scheduled_at,
+    )
+    session.add(row)
+    await session.commit()
+    return _text(
+        event.chat.id,
+        "Похоже, вы планируете встречу.\n\n"
+        f"Время: {scheduled_at.isoformat()}\n"
+        f"Часовой пояс: {team.timezone}\n"
+        f"Команда: {team.name}\n\nСоздать встречу?",
+    )
+
+
+async def _route_v2_daily_report(session, team, sender, message, parsed, event):
+    sync = await session.scalar(
+        select(m.DailySyncSessionModel).where(
+            m.DailySyncSessionModel.team_id == team.id,
+            m.DailySyncSessionModel.status == "open",
+        )
+    )
+    if sync is None:
+        await session.commit()
+        return ActionsResponse(actions=[])
+    report = parsed.get("daily_report") or {}
+    session.add(
+        m.DailySyncReportModel(
+            sync_session_id=sync.id,
+            team_id=team.id,
+            user_id=sender.id,
+            telegram_message_id=message.id,
+            raw_text=event.text,
+            parsed_summary=report.get("summary"),
+            detected_status=report.get("detected_status") or "unknown",
+            confidence=float(parsed["confidence"]),
+        )
+    )
+    await session.commit()
+    return _text(event.chat.id, "Отчёт принят для вечернего синка.")
+
+
+async def _route_v2_absence(session, team, sender, message, parsed, event):
+    absence = parsed.get("absence") or {}
+    starts_at = _parse_dt(absence.get("starts_at")) or datetime.now(UTC)
+    ends_at = _parse_dt(absence.get("ends_at"))
+    session.add(
+        m.AbsencePeriodModel(
+            team_id=team.id,
+            user_id=sender.id,
+            reason=absence.get("reason"),
+            status="active",
+            starts_at=starts_at,
+            ends_at=ends_at,
+            source_message_id=message.id,
+        )
+    )
+    await session.commit()
+    return _text(
+        event.chat.id,
+        "Понял. Я не буду требовать вечерний синк в этот период, "
+        "но подсвечу риски по твоим задачам.",
+    )
+
+
+async def _route_v2_status_update(session, team, sender, message, parsed, event):
+    task = await session.scalar(
+        select(m.TaskModel)
+        .where(
+            m.TaskModel.team_id == team.id,
+            m.TaskModel.assignee_id == sender.id,
+            m.TaskModel.status.in_(["todo", "in_progress", "blocked", "review"]),
+        )
+        .order_by(m.TaskModel.updated_at.desc())
+    )
+    if task is not None:
+        task.last_status_update_at = datetime.now(UTC)
+        report = parsed.get("daily_report") or {}
+        detected = report.get("detected_status")
+        if detected in {"done", "in_progress", "blocked"}:
+            task.status = detected
+            if detected == "done":
+                task.completed_at = datetime.now(UTC)
+    await session.commit()
+    return ActionsResponse(actions=[])
+
+
+async def _match_v2_assignee(session, team_id, assignee_text):
+    if not assignee_text:
+        return None
+    needle = str(assignee_text).strip().lstrip("@").lower()
+    rows = await session.execute(
+        select(m.UserModel)
+        .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+        .where(m.TeamMemberModel.team_id == team_id)
+    )
+    for user in rows.scalars():
+        if user.telegram_username and user.telegram_username.lower() == needle:
+            return user
+        if user.display_name and needle in user.display_name.lower():
+            return user
+    return None
+
+
+async def _find_v2_duplicate(session, team_id, title, assignee_id):
+    tokens = {part for part in title.lower().split() if len(part) > 2}
+    rows = await session.execute(
+        select(m.TaskModel).where(
+            m.TaskModel.team_id == team_id,
+            m.TaskModel.status.in_(["todo", "in_progress", "blocked", "review"]),
+        )
+    )
+    for task in rows.scalars():
+        existing_tokens = {part for part in task.title.lower().split() if len(part) > 2}
+        if not tokens or not existing_tokens:
+            continue
+        overlap = len(tokens & existing_tokens) / max(len(tokens), len(existing_tokens))
+        same_assignee = assignee_id is None or task.assignee_id == assignee_id
+        if same_assignee and overlap >= 0.72:
+            return task
+    return None
+
+
+def _parse_dt(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+
+
+def _display_name_from_event(event: TelegramMessageEvent) -> str:
+    parts = [part for part in (event.sender.first_name, event.sender.last_name) if part]
+    return " ".join(parts) or event.sender.username or f"user{event.sender.id}"
+
+
 @router.post("/command", response_model=ActionsResponse)
 async def ingest_command(
     event: TelegramCommandEvent,
@@ -483,6 +900,21 @@ async def ingest_command(
             parse_mode="MarkdownV2",
             reply_markup=_back_kb(),
         )])
+
+    if command == "bind_team":
+        if not event.args:
+            return _text(chat_id, "Формат: /bind_team CODE")
+        return await bind_team_chat(
+            TelegramBindTeamRequest(
+                code=event.args[0],
+                tg_chat_id=chat_id,
+                chat_id=chat_id,
+                chat_type=event.chat.type,
+                title=event.chat.title,
+                linked_by_tg_user_id=event.sender.id,
+            ),
+            container,
+        )
 
     # ── /jira URL EMAIL TOKEN PROJECT ────────────────────────────────────
     if command == "jira":

@@ -11,13 +11,13 @@ git fetch origin main
 git reset --hard origin/main
 
 echo "Checking env..."
-if [[ ! -f .env.production && ! -f .env ]]; then
-  echo "Missing .env.production or .env" >&2
+if [[ ! -f .env.production ]]; then
+  echo ".env.production is missing" >&2
   exit 1
 fi
-if [[ ! -f .env.production && -f .env ]]; then
-  cp .env .env.production
-fi
+
+echo "Validating compose config..."
+docker compose -f "$COMPOSE_FILE" config >/dev/null
 
 echo "Building images..."
 docker compose -f "$COMPOSE_FILE" build

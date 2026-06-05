@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from telegram_bot.logging import redact_telegram_token
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +23,7 @@ class TelegramClient:
             response = await client.post(url, json=payload)
             data = response.json()
         if not data.get("ok"):
-            logger.warning("Telegram %s failed: %s", method, data)
+            logger.warning("Telegram %s failed: %s", method, redact_telegram_token(str(data)))
         return data
 
     async def send_message(
@@ -74,7 +76,7 @@ class TelegramClient:
                     return resp.content
                 logger.warning("File download failed: %s", resp.status_code)
         except httpx.HTTPError as exc:
-            logger.error("File download error: %s", exc)
+            logger.error("File download error: %s", redact_telegram_token(str(exc)))
         return None
 
     async def answer_callback_query(
@@ -128,6 +130,6 @@ class TelegramClient:
             response = await client.post(url, json=payload)
             data = response.json()
         if not data.get("ok"):
-            logger.warning("Telegram getUpdates failed: %s", data)
+            logger.warning("Telegram getUpdates failed: %s", redact_telegram_token(str(data)))
             return []
         return data.get("result", [])

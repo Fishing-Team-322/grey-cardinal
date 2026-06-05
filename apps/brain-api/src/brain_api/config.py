@@ -135,6 +135,16 @@ class Settings(BaseSettings):
         if not self.is_production:
             return []
         errors: list[str] = []
+        if not self.database_url:
+            errors.append("DATABASE_URL must be set in production")
+        if self.llm_provider == "disabled":
+            errors.append("LLM_PROVIDER=disabled is not allowed in production")
+        if self.llm_provider in {"local", "external_api"} and not self.effective_llm_base_url:
+            errors.append("LLM base URL must be set in production")
+        if self.llm_provider in {"local", "external_api"} and not self.llm_model:
+            errors.append("LLM_MODEL must be set in production")
+        if self.llm_provider == "external_api" and not self.effective_llm_api_key:
+            errors.append("LLM_EXTERNAL_API_KEY must be set for external_api in production")
         if self.llm_provider == "disabled" or not self.llm_enabled:
             errors.append("LLM provider must be configured in production")
         if not self.jwt_secret or self.jwt_secret.startswith("change-me"):

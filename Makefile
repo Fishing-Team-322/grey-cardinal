@@ -5,7 +5,8 @@ PY ?= python
         brain bot audio frontend set-telegram-webhook get-telegram-webhook-info \
         set-telegram-commands yougile-smoke test-agent audio-agent-configure \
         audio-agent-build audio-agent-test audio-agent-run audio-worker-test-chunk \
-        smoke-desktop-flow
+        smoke-desktop-flow smoke-alembic-fresh-db smoke-v2-director \
+        smoke-v2-manager smoke-v2-employee smoke-v2-full
 
 help: ## Показать список команд
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -71,6 +72,21 @@ yougile-smoke: ## Создать и закрыть реальную тестов
 
 smoke-desktop-flow: ## Проверить desktop-first microphone flow через brain-api
 	$(PY) scripts/smoke/desktop_microphone_flow.py
+
+smoke-alembic-fresh-db: ## Проверить Alembic на пустой PostgreSQL DB
+	$(PY) scripts/smoke/alembic_fresh_db_check.py
+
+smoke-v2-director: ## Smoke v2 director scenario через HTTP API
+	$(PY) scripts/smoke/v2_director_scenario.py
+
+smoke-v2-manager: ## Smoke v2 manager scenario через HTTP API
+	$(PY) scripts/smoke/v2_manager_scenario.py
+
+smoke-v2-employee: ## Smoke v2 employee scenario через HTTP API
+	$(PY) scripts/smoke/v2_employee_scenario.py
+
+smoke-v2-full: ## Smoke полный v2 flow через HTTP API
+	$(PY) scripts/smoke/v2_full_flow.py
 
 test-agent: audio-agent-configure audio-agent-build audio-agent-test ## Собрать и протестировать native audio-agent
 
