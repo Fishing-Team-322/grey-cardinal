@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from brain_api.application.ports import BoardGateway
@@ -77,8 +78,24 @@ class BoardAdapterFactory:
         self._cache[team_id] = _CacheEntry(adapter=adapter, expires_at=now + 60)
         return adapter
 
+    async def team_id_for_external_card(self, external_card_id: str) -> UUID | None:
+        """team_id команды, которой принадлежит карточка доски (по external id)."""
+        async with self._session_factory() as session:
+            return await session.scalar(
+                select(m.BoardCardModel.team_id).where(
+                    m.BoardCardModel.external_card_id == external_card_id
+                )
+            )
+
 
 class TeamScopedBoardGateway:
+    """Board gateway, маршрутизирующий вызовы в адаптер конкретной команды.
+
+    create_card берёт team из самой задачи; move/close/comment — резолвят team по
+    BoardCardModel (external_card_id -> team_id). Если команды нет (v1-карточки без
+    team_id) — используется fallback-адаптер.
+    """
+
     def __init__(self, factory: BoardAdapterFactory, fallback: BoardGateway) -> None:
         self._factory = factory
         self._fallback = fallback
@@ -89,11 +106,20 @@ class TeamScopedBoardGateway:
         adapter = await self._factory.for_team(task.team_id)
         return await adapter.create_card(task)
 
+    async def _adapter_for_card(self, external_card_id: str) -> BoardGateway:
+        team_id = await self._factory.team_id_for_external_card(external_card_id)
+        if team_id is None:
+            return self._fallback
+        return await self._factory.for_team(team_id)
+
     async def move_card(self, external_card_id: str, status: TaskStatus) -> None:
-        await self._fallback.move_card(external_card_id, status)
+        adapter = await self._adapter_for_card(external_card_id)
+        await adapter.move_card(external_card_id, status)
 
     async def close_card(self, external_card_id: str) -> None:
-        await self._fallback.close_card(external_card_id)
+        adapter = await self._adapter_for_card(external_card_id)
+        await adapter.close_card(external_card_id)
 
     async def add_comment(self, external_card_id: str, text: str) -> None:
-        await self._fallback.add_comment(external_card_id, text)
+        adapter = await self._adapter_for_card(external_card_id)
+        await adapter.add_comment(external_card_id, text)

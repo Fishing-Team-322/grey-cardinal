@@ -11,12 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from brain_api.api.routes import (
     accounts,
     agents,
+    daemon,
     debug,
     health,
     internal_audio,
     internal_telegram,
     meetings,
-    organizations,
     session,
     tasks,
     v2_tenants,
@@ -70,8 +70,11 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(session.router)
     app.include_router(accounts.router)
-    app.include_router(organizations.router)
+    # organizations.router (старая Organization/OrganizationMember модель) намеренно
+    # НЕ подключается: v2 использует единую Company/Team модель (v2_tenants.router).
+    # Файл routes/organizations.py оставлен как legacy и в production app не маунтится.
     app.include_router(agents.router)
+    app.include_router(daemon.router)
     app.include_router(demo_routes.router)
     app.include_router(debug.router)
     app.include_router(internal_telegram.router)

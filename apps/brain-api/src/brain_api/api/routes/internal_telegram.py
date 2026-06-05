@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -32,10 +33,20 @@ from brain_api.application.use_cases.manage_meetings import (
     start_meeting,
     stop_meeting,
 )
+from brain_api.application.use_cases.meeting_flow import (
+    build_meeting_proposal,
+    handle_meeting_callback,
+    handle_pending_meeting_time,
+    is_meeting_callback,
+)
 from brain_api.application.use_cases.reject_task import RejectTask
 from brain_api.application.use_cases.send_evening_digest import SendEveningDigest
 from brain_api.application.use_cases.send_personal_evening_digests import (
     SendPersonalEveningDigests,
+)
+from brain_api.application.use_cases.task_status_flow import (
+    handle_task_status_callback,
+    is_task_status_callback,
 )
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.container import Container
@@ -316,6 +327,15 @@ async def ingest_message(
     event: TelegramMessageEvent,
     container: Container = Depends(get_container),
 ) -> ActionsResponse:
+    # Личка: руководитель вписывает время созвона, которое бот не распознал.
+    if event.chat.type == "private":
+        async with container.session_factory() as session:
+            pending = await handle_pending_meeting_time(
+                session, event.sender, event.text, datetime.now(UTC)
+            )
+        if pending is not None:
+            return pending
+
     v2_response = await _try_v2_semantic_message(event, container)
     if v2_response is not None:
         return v2_response
@@ -340,6 +360,15 @@ async def ingest_callback(
     chat_id = event.message.chat_id
     msg_id = event.message.message_id
     cq_id = event.callback_query_id
+
+    # ── Meeting (созвон) callbacks: подтверждение времени и RSVP ──────────
+    if is_meeting_callback(data):
+        async with container.session_factory() as session:
+            return await handle_meeting_callback(session, data, event)
+
+    # ── Task status callbacks (сценарий 3): В процессе / Сделал / Не буду ──
+    if is_task_status_callback(data):
+        return await handle_task_status_callback(container, data, event)
 
     # ── Navigation callbacks ──────────────────────────────────────────────
     if data == CB_MENU_MAIN:
@@ -651,7 +680,7 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
     title = str(task.get("title") or event.text[:120]).strip()
     assignee_text = task.get("assignee_text")
     assignee = await _match_v2_assignee(session, team.id, assignee_text)
-    deadline = _parse_dt(task.get("deadline"))
+    deadline = _parse_dt(task.get("deadline"), team.timezone)
     duplicate = await _find_v2_duplicate(session, team.id, title, assignee.id if assignee else None)
     if duplicate is not None:
         await session.commit()
@@ -706,14 +735,23 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
 
 
 async def _route_v2_meeting_candidate(session, team, sender, message, parsed, event):
+    from brain_api.application.use_cases.meeting_flow import _parse_time_to_dt
+
     meeting = parsed.get("meeting") or {}
     seq = int(await session.scalar(select(func.max(m.MeetingModel.seq))) or 0) + 1
-    scheduled_at = _parse_dt(meeting.get("scheduled_at")) or datetime.now(UTC)
+    scheduled_at = _parse_dt(meeting.get("scheduled_at"), team.timezone)  # None, если не распознано
+    # Маленькие локальные LLM часто путают дату/таймзону. Если время пустое или в
+    # прошлом — берём ближайшее «HH:MM» из самого текста в таймзоне команды.
+    now = datetime.now(UTC)
+    if scheduled_at is None or scheduled_at < now:
+        hint = _parse_time_to_dt(event.text, now, team.timezone)
+        if hint is not None:
+            scheduled_at = hint
     row = m.MeetingModel(
         seq=seq,
         public_id=f"MTG-{seq}",
         team_id=team.id,
-        title=meeting.get("title") or "Встреча",
+        title=meeting.get("title") or "Созвон",
         status="proposed",
         state="proposed",
         created_by=sender.id,
@@ -721,17 +759,11 @@ async def _route_v2_meeting_candidate(session, team, sender, message, parsed, ev
         scheduled_timezone=team.timezone,
         duration_minutes=int(meeting.get("duration_minutes") or 60),
         source_message_id=message.id,
-        started_at=scheduled_at,
+        started_at=scheduled_at or datetime.now(UTC),
     )
     session.add(row)
-    await session.commit()
-    return _text(
-        event.chat.id,
-        "Похоже, вы планируете встречу.\n\n"
-        f"Время: {scheduled_at.isoformat()}\n"
-        f"Часовой пояс: {team.timezone}\n"
-        f"Команда: {team.name}\n\nСоздать встречу?",
-    )
+    await session.flush()
+    return await build_meeting_proposal(session, team, sender, row, event.chat.id)
 
 
 async def _route_v2_daily_report(session, team, sender, message, parsed, event):
@@ -763,8 +795,8 @@ async def _route_v2_daily_report(session, team, sender, message, parsed, event):
 
 async def _route_v2_absence(session, team, sender, message, parsed, event):
     absence = parsed.get("absence") or {}
-    starts_at = _parse_dt(absence.get("starts_at")) or datetime.now(UTC)
-    ends_at = _parse_dt(absence.get("ends_at"))
+    starts_at = _parse_dt(absence.get("starts_at"), team.timezone) or datetime.now(UTC)
+    ends_at = _parse_dt(absence.get("ends_at"), team.timezone)
     session.add(
         m.AbsencePeriodModel(
             team_id=team.id,
@@ -842,14 +874,25 @@ async def _find_v2_duplicate(session, team_id, title, assignee_id):
     return None
 
 
-def _parse_dt(value):
+def _parse_dt(value, timezone: str = "UTC"):
+    """ISO-строку -> aware datetime в UTC.
+
+    naive datetime (LLM часто отдаёт без таймзоны) трактуется в таймзоне команды,
+    а не в UTC — иначе «18:00» уезжает на смещение пояса.
+    """
     if not value:
         return None
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+    if parsed.tzinfo is None:
+        try:
+            tz = ZoneInfo(timezone)
+        except Exception:
+            tz = UTC
+        parsed = parsed.replace(tzinfo=tz)
+    return parsed.astimezone(UTC)
 
 
 def _display_name_from_event(event: TelegramMessageEvent) -> str:

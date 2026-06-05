@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -137,7 +138,11 @@ async def create_company(
     admin = m.CompanyAdminModel(
         id=uuid4(), company_id=company.id, user_id=current_user.id, role="director"
     )
-    session.add_all([company, admin])
+    # company должен быть вставлен раньше company_admins (FK). Без ORM-relationship
+    # SQLAlchemy не упорядочивает INSERT'ы сам — на PostgreSQL это FK violation.
+    session.add(company)
+    await session.flush()
+    session.add(admin)
     await session.commit()
     return CompanyResponse(
         id=company.id, name=company.name, timezone=company.timezone, role="director"
@@ -218,7 +223,10 @@ async def create_team(
     manager = m.TeamMemberModel(
         id=uuid4(), team_id=team.id, user_id=current_user.id, role="manager"
     )
-    session.add_all([team, manager])
+    # team раньше team_members (FK), иначе FK violation на PostgreSQL.
+    session.add(team)
+    await session.flush()
+    session.add(manager)
     await session.commit()
     return TeamResponse(
         id=team.id,
@@ -594,7 +602,9 @@ async def start_team_sync(
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
     now = datetime.now(UTC)
-    sync_date = now.date()
+    # Дата синка — в таймзоне команды, а не в UTC (иначе для Asia/Dubai и т.п.
+    # «сегодня» начинается не в полночь по локали команды).
+    sync_date = now.astimezone(ZoneInfo(team.timezone)).date()
     row = await session.scalar(
         select(m.DailySyncSessionModel).where(
             m.DailySyncSessionModel.team_id == team_id,

@@ -227,7 +227,10 @@ class BoardCardModel(TimestampMixin, Base):
     external_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
 
 
-class TranscriptEventModel(TimestampMixin, Base):
+class TranscriptEventModel(Base):
+    # Транскрипт-события неизменяемы (append-only): только created_at, без
+    # updated_at — это совпадает с миграцией 0001_initial_v2 (см. таблицу
+    # transcript_events) и не ломает INSERT ... RETURNING на PostgreSQL.
     __tablename__ = "transcript_events"
 
     id: Mapped[UUID] = _uuid_pk()
@@ -241,6 +244,9 @@ class TranscriptEventModel(TimestampMixin, Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False, default="audio_worker")
     raw_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class MeetingModel(TimestampMixin, Base):

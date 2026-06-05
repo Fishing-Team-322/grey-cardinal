@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -42,7 +41,18 @@ class SemanticMessageParser:
         self._provider_factory = provider_factory
 
     async def parse(self, payload: SemanticMessageInput) -> dict:
-        provider = await self._provider_factory.for_team(payload.team_id)
+        # 1. Резолвим LLM-провайдера команды. Если LLM не настроен — сразу
+        #    эвристический fallback (бот не должен «молчать» без LLM).
+        try:
+            provider = await self._provider_factory.for_team(payload.team_id)
+        except Exception as exc:  # noqa: BLE001 — любая проблема резолва => fallback
+            logger.info(
+                "No LLM provider for team_id=%s (%s); using heuristic fallback",
+                payload.team_id,
+                exc,
+            )
+            return self._heuristic(payload)
+
         max_retries = getattr(getattr(provider, "config", None), "max_retries", 2)
         prompt = self._build_prompt(payload)
         last_error: Exception | None = None
@@ -50,15 +60,30 @@ class SemanticMessageParser:
             try:
                 result = await provider.complete_json(prompt, "semantic_message_v2")
                 return self._validate(result)
-            except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            except Exception as exc:  # noqa: BLE001 — сеть/JSON/валидация => retry/fallback
                 last_error = exc
                 logger.warning(
-                    "Semantic parse JSON validation failed (team_id=%s attempt=%s): %s",
+                    "Semantic parse failed (team_id=%s attempt=%s): %s",
                     payload.team_id,
                     attempt + 1,
                     exc,
                 )
-        raise SemanticParseFailed("semantic_parse_failed") from last_error
+        # 2. LLM не справился после ретраев — деградируем на эвристику, а не падаем.
+        logger.warning(
+            "LLM semantic parse exhausted retries (team_id=%s): %s; heuristic fallback",
+            payload.team_id,
+            last_error,
+        )
+        return self._heuristic(payload)
+
+    def _heuristic(self, payload: SemanticMessageInput) -> dict:
+        from brain_api.application.heuristic_semantic import classify_message
+
+        return classify_message(
+            text=payload.message_text,
+            now=payload.now,
+            timezone=payload.team_timezone,
+        )
 
     def _build_prompt(self, payload: SemanticMessageInput) -> str:
         return (

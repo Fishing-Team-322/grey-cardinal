@@ -57,7 +57,7 @@ const useBrainApiStatus = (language) => {
   const [state, setState] = React.useState(() => ({
     status: 'checking',
     label: copyText(language, 'Проверяем backend', 'Checking backend'),
-    details: GCApi.config().baseUrl,
+    details: GCApi.origin() || window.location.origin,
     latency: null,
   }));
 
@@ -74,7 +74,7 @@ const useBrainApiStatus = (language) => {
         setState({
           status: 'online',
           label: copyText(language, 'Brain API отвечает', 'Brain API is responding'),
-          details: `${GCApi.config().baseUrl} / ${latency} ms`,
+          details: `${GCApi.origin() || window.location.origin} / ${latency} ms`,
           latency,
         });
       } catch (error) {
@@ -101,8 +101,6 @@ const useBrainApiStatus = (language) => {
 const BackendPulse = ({ language }) => {
   const tr = (ru, en) => copyText(language, ru, en);
   const api = useBrainApiStatus(language);
-  const config = GCApi.config();
-  const tokenState = config.internalToken ? tr('token готов', 'token ready') : tr('token отсутствует', 'token missing');
 
   return (
     <div className={'gc-api-ribbon gc-api-ribbon--' + api.status}>
@@ -118,8 +116,7 @@ const BackendPulse = ({ language }) => {
       </div>
       <div className="gc-api-ribbon-chips">
         <span><span className={'gc-api-dot ' + api.status}></span>Brain API</span>
-        <span><Icon name="lock" size={12}/>{tokenState}</span>
-        <span><Icon name="server" size={12}/>{tr('CORS включен', 'CORS enabled')}</span>
+        <span><Icon name="server" size={12}/>{tr('cookie-сессия', 'cookie session')}</span>
       </div>
     </div>
   );

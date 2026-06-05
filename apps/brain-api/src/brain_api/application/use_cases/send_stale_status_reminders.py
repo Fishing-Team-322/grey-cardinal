@@ -21,6 +21,7 @@ from brain_api.application.use_cases.send_deadline_reminders import (
     _default_chat_id,
     _publish_suppressed,
 )
+from brain_api.application.use_cases.task_status_flow import task_status_keyboard
 from brain_api.domain.entities import ReminderLog
 from brain_api.domain.enums import ReminderKind
 from grey_cardinal_contracts import EventName, WebsocketEvent
@@ -68,7 +69,9 @@ class SendStaleStatusReminders:
                 continue
 
             text = render_stale_reminder(task)
-            await self._telegram.send_message(recipient.chat_id, text)
+            await self._telegram.send_message(
+                recipient.chat_id, text, reply_markup=task_status_keyboard(task.id)
+            )
             await uow.reminders.add(
                 ReminderLog(
                     id=uuid4(),

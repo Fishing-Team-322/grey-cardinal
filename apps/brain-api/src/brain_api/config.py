@@ -93,6 +93,10 @@ class Settings(BaseSettings):
 
     demo_core_auto_confirm: bool = True
 
+    # Daemon / meeting state-machine окна.
+    meeting_arm_minutes_before: int = 5
+    meeting_default_duration_minutes: int = 60
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in {"prod", "production"}
