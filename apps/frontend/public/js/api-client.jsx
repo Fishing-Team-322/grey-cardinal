@@ -1,6 +1,6 @@
 // Grey Cardinal — v2 browser API client.
 // Только публичные /api/* эндпоинты + httpOnly cookie-сессия (credentials: include).
-// БЕЗ X-Internal-Token, без /internal/*, без demo-эндпоинтов.
+// Без internal-токенов и сервисных роутов, без demo-эндпоинтов.
 
 const gcApiOrigin = () => String(window.GC_API_ORIGIN || '').replace(/\/$/, '');
 
