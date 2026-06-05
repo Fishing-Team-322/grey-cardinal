@@ -18,6 +18,28 @@ const gcApiConfig = () => ({
   desktopIdentity: JSON.parse(localStorage.getItem(GC_API_STORAGE.desktopIdentity) || 'null'),
 });
 
+const gcApiOrigin = (baseUrl) => {
+  const base = String(baseUrl || '').replace(/\/$/, '');
+  return base.endsWith('/api') ? base.slice(0, -4) : base;
+};
+
+const gcBuildUrl = (path, baseUrl) => {
+  const target = String(path || '');
+  if (/^https?:\/\//.test(target)) return target;
+
+  const base = String(baseUrl || '').replace(/\/$/, '');
+  const normalizedTarget = target.startsWith('/') ? target : `/${target}`;
+  if (!base) return normalizedTarget;
+
+  if (base.endsWith('/api')) {
+    if (normalizedTarget === '/api') return base;
+    if (normalizedTarget.startsWith('/api/')) return `${base}${normalizedTarget.slice(4)}`;
+    return `${gcApiOrigin(base)}${normalizedTarget}`;
+  }
+
+  return `${base}${normalizedTarget}`;
+};
+
 const gcSaveApiConfig = ({ baseUrl, internalToken, desktopIdentity }) => {
   if (baseUrl != null) localStorage.setItem(GC_API_STORAGE.baseUrl, baseUrl.replace(/\/$/, ''));
   if (internalToken != null) localStorage.setItem(GC_API_STORAGE.internalToken, internalToken);
@@ -48,10 +70,7 @@ const gcDesktopHeaders = () => {
 
 const gcRequest = async (path, options = {}) => {
   const config = gcApiConfig();
-  const normalizedPath = config.baseUrl.endsWith('/api') && path.startsWith('/api/')
-    ? path.slice(4)
-    : path;
-  const url = normalizedPath.startsWith('http') ? normalizedPath : `${config.baseUrl}${normalizedPath}`;
+  const url = gcBuildUrl(path, config.baseUrl);
   let response;
   try {
     response = await fetch(url, {
@@ -67,7 +86,12 @@ const gcRequest = async (path, options = {}) => {
     throw new Error('brain-api недоступен: проверьте URL backend, порт 8000 и CORS');
   }
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (_) {
+    data = { message: text || response.statusText };
+  }
   if (!response.ok) {
     const detail = data && (data.detail || data.message);
     throw new Error(detail || `${response.status} ${response.statusText}`);
@@ -164,7 +188,7 @@ const gcDemoCommandPayload = (command) => ({
 const GCApi = {
   config: gcApiConfig,
   saveConfig: gcSaveApiConfig,
-  health: () => gcRequest('/api/health', { internal: false }),
+  health: () => gcRequest('/health', { internal: false }),
   ready: () => gcRequest('/ready', { internal: false }),
   dependencies: () => gcRequest('/internal/debug/health/dependencies'),
   state: () => gcRequest('/internal/debug/state'),
@@ -214,12 +238,12 @@ const GCApi = {
   wsUrl: () => {
     const configured = window.GC_WS_URL;
     if (configured) return configured;
-    const base = gcApiConfig().baseUrl;
-    if (/^https?:\/\//.test(base) && !base.endsWith('/api')) {
+    const base = gcApiOrigin(gcApiConfig().baseUrl);
+    if (/^https?:\/\//.test(base)) {
       return base.replace(/^http/, 'ws') + '/ws/events';
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws/events`;
+    return `${protocol}//${window.location.host}${base}/ws/events`;
   },
   mapTask: gcMapTask,
   mapTranscript: gcMapTranscript,
