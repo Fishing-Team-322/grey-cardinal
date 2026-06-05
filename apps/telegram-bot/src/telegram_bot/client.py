@@ -25,22 +25,57 @@ class TelegramClient:
         return data
 
     async def send_message(
-        self, chat_id: int, text: str, reply_markup: dict | None = None
+        self,
+        chat_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = None,
     ) -> int | None:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         data = await self._call("sendMessage", payload)
         result = data.get("result") or {}
         return result.get("message_id")
 
     async def edit_message_text(
-        self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         await self._call("editMessageText", payload)
+
+    async def get_file(self, file_id: str) -> dict | None:
+        """Get file info from Telegram (returns file_path for download)."""
+        data = await self._call("getFile", {"file_id": file_id})
+        return data.get("result")
+
+    async def download_file(self, file_path: str) -> bytes | None:
+        """Download a file from Telegram servers."""
+        # api_base looks like https://api.telegram.org/bot{token}
+        # download url is https://api.telegram.org/file/bot{token}/{file_path}
+        token_part = self._api_base.split("/bot", 1)[-1]
+        url = f"https://api.telegram.org/file/bot{token_part}/{file_path}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Route through proxy if configured
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    return resp.content
+                logger.warning("File download failed: %s", resp.status_code)
+        except httpx.HTTPError as exc:
+            logger.error("File download error: %s", exc)
+        return None
 
     async def answer_callback_query(
         self, callback_query_id: str, text: str | None = None, show_alert: bool = False
@@ -55,7 +90,7 @@ class TelegramClient:
     async def set_webhook(self, url: str, secret_token: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "url": url,
-            "allowed_updates": ["message", "callback_query"],
+            "allowed_updates": ["message", "callback_query", "my_chat_member"],
         }
         if secret_token:
             payload["secret_token"] = secret_token
@@ -70,7 +105,7 @@ class TelegramClient:
         """Long-poll for updates. Uses a request timeout longer than the poll."""
         payload: dict[str, Any] = {
             "timeout": timeout,
-            "allowed_updates": ["message", "callback_query"],
+            "allowed_updates": ["message", "callback_query", "my_chat_member"],
         }
         if offset is not None:
             payload["offset"] = offset

@@ -22,6 +22,7 @@ from brain_api.application.ports import (
 from brain_api.config import Settings
 from brain_api.domain.enums import BoardProvider
 from brain_api.infrastructure.board.base import YouGileConfig, resolve_provider
+from brain_api.infrastructure.board.jira import JiraBoardGateway, JiraConfig
 from brain_api.infrastructure.board.mock import MockBoardGateway
 from brain_api.infrastructure.board.yougile import YouGileBoardGateway
 from brain_api.infrastructure.db.repositories import SqlAlchemyUnitOfWork
@@ -89,6 +90,19 @@ class Container:
 
     def _build_board(self, settings: Settings) -> BoardGateway:
         provider = resolve_provider(settings.board_provider)
+        if provider == BoardProvider.jira:
+            cfg = JiraConfig(
+                url=settings.jira_url,
+                email=settings.jira_email,
+                api_token=settings.jira_api_token,
+                project_key=settings.jira_project_key,
+                done_transition_id=settings.jira_done_transition_id,
+                in_progress_transition_id=settings.jira_in_progress_transition_id,
+            )
+            if cfg.is_configured:
+                logger.info("Board provider: Jira (%s / %s)", cfg.url, cfg.project_key)
+                return JiraBoardGateway(cfg)
+            logger.warning("BOARD_PROVIDER=jira, but not configured — falling back to mock")
         if provider == BoardProvider.yougile:
             cfg = YouGileConfig(
                 api_base_url=settings.yougile_api_base_url,

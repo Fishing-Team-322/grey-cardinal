@@ -26,10 +26,14 @@ async def execute_actions(client: TelegramClient, actions: Iterable[BotAction]) 
 
 async def _execute_one(client: TelegramClient, action: BotAction) -> None:
     if action.type == "send_message":
-        await client.send_message(action.chat_id, action.text, action.reply_markup)
+        await client.send_message(
+            action.chat_id, action.text, action.reply_markup,
+            parse_mode=getattr(action, "parse_mode", None),
+        )
     elif action.type == "edit_message":
         await client.edit_message_text(
-            action.chat_id, action.message_id, action.text, action.reply_markup
+            action.chat_id, action.message_id, action.text, action.reply_markup,
+            parse_mode=getattr(action, "parse_mode", None),
         )
     elif action.type == "answer_callback":
         await client.answer_callback_query(action.callback_query_id, action.text, action.show_alert)

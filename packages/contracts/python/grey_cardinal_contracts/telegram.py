@@ -78,6 +78,7 @@ class SendMessageAction(BaseModel):
     chat_id: int
     text: str
     reply_markup: dict[str, Any] | None = None
+    parse_mode: str | None = None
 
 
 class EditMessageAction(BaseModel):
@@ -86,6 +87,7 @@ class EditMessageAction(BaseModel):
     message_id: int
     text: str
     reply_markup: dict[str, Any] | None = None
+    parse_mode: str | None = None
 
 
 class AnswerCallbackAction(BaseModel):

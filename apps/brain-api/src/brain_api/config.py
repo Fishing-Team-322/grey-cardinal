@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     llm_model: str = ""
 
     board_provider: str = "mock"
+
+    # Jira Cloud integration
+    jira_url: str = ""
+    jira_email: str = ""
+    jira_api_token: str = ""
+    jira_project_key: str = ""
+    jira_done_transition_id: str = "31"
+    jira_in_progress_transition_id: str = "21"
+
     yougile_enabled: bool = False
     yougile_api_base_url: str = "https://ru.yougile.com"
     yougile_api_key: str = ""

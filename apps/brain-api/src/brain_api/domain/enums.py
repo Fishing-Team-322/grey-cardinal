@@ -53,6 +53,7 @@ class ConfirmationStatus(StrEnum):
 
 class BoardProvider(StrEnum):
     yougile = "yougile"
+    jira = "jira"
     mock = "mock"
 
 

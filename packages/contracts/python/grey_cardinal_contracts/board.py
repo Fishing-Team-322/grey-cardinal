@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class BoardProvider(StrEnum):
     yougile = "yougile"
+    jira = "jira"
     mock = "mock"
 
 
