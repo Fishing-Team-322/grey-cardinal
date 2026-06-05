@@ -14,10 +14,13 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     func,
@@ -54,6 +57,7 @@ class UserModel(TimestampMixin, Base):
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     telegram_username: Mapped[str | None] = mapped_column(Text, nullable=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Web account fields (migration 0004_user_accounts)
     email: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True, index=True)
@@ -340,8 +344,10 @@ class UserXpTotalModel(Base):
 
 # ── Organizations (migration 0005) ────────────────────────────────────────────
 
+
 class OrganizationModel(TimestampMixin, Base):
     """Workspace / team owned by one user, with multiple members."""
+
     __tablename__ = "organizations"
 
     id: Mapped[UUID] = _uuid_pk()
@@ -354,10 +360,9 @@ class OrganizationModel(TimestampMixin, Base):
 
 class OrganizationMemberModel(TimestampMixin, Base):
     """Membership record: active member or pending invite."""
+
     __tablename__ = "organization_members"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "user_id", name="uq_org_member_user"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_org_member_user"),)
 
     id: Mapped[UUID] = _uuid_pk()
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), nullable=False)
@@ -371,3 +376,342 @@ class OrganizationMemberModel(TimestampMixin, Base):
     invited_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Token used in join link
     invite_token: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
+
+
+# --- Grey Cardinal v2 production domain ------------------------------------
+
+
+class CompanyModel(TimestampMixin, Base):
+    __tablename__ = "companies"
+
+    id: Mapped[UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+
+class CompanyAdminModel(Base):
+    __tablename__ = "company_admins"
+    __table_args__ = (
+        CheckConstraint("role in ('director')", name="ck_company_admin_role"),
+        UniqueConstraint("company_id", "user_id", name="uq_company_admin_user"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class LLMSettingsModel(TimestampMixin, Base):
+    __tablename__ = "llm_settings"
+    __table_args__ = (
+        CheckConstraint("provider in ('local','external_api')", name="ck_llm_settings_provider"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, server_default="2")
+    strict_json: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+
+
+class TeamModel(TimestampMixin, Base):
+    __tablename__ = "teams"
+    __table_args__ = (
+        CheckConstraint("board_provider in ('yougile')", name="ck_team_board_provider"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    tg_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    board_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="yougile")
+    board_credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    board_config: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    llm_settings_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("llm_settings.id"), nullable=True
+    )
+
+
+class TeamMemberModel(Base):
+    __tablename__ = "team_members"
+    __table_args__ = (
+        CheckConstraint("role in ('manager','employee')", name="ck_team_member_role"),
+        UniqueConstraint("team_id", "user_id", name="uq_team_member_user"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    invited_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class InviteModel(Base):
+    __tablename__ = "invites"
+    __table_args__ = (
+        CheckConstraint("scope in ('company','team')", name="ck_invite_scope"),
+        CheckConstraint("role in ('director','manager','employee')", name="ck_invite_role"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    token: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    max_uses: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    uses: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class V2TelegramChatModel(TimestampMixin, Base):
+    __tablename__ = "v2_telegram_chats"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    tg_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    linked_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class V2TaskModel(TimestampMixin, Base):
+    __tablename__ = "v2_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('todo','in_progress','blocked','review','done','cancelled')",
+            name="ck_v2_task_status",
+        ),
+        CheckConstraint(
+            "priority in ('low','medium','high','critical')",
+            name="ck_v2_task_priority",
+        ),
+        UniqueConstraint("team_id", "public_id", name="uq_v2_task_public_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    public_id: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[str] = mapped_column(Text, nullable=False)
+    assignee_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    assignee_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_message_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    created_from_proposal_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status_update_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class V2TaskProposalModel(Base):
+    __tablename__ = "v2_task_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "priority in ('low','medium','high','critical')", name="ck_v2_task_proposal_priority"
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_message_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assignee_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assignee_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    extractor_payload: Mapped[dict[str, Any]] = mapped_column(
+        JsonType, nullable=False, default=dict
+    )
+    similar_task_id: Mapped[UUID | None] = mapped_column(ForeignKey("v2_tasks.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class V2ConfirmationModel(TimestampMixin, Base):
+    __tablename__ = "v2_confirmations"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','accepted','rejected','expired')",
+            name="ck_v2_confirmation_status",
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    proposal_id: Mapped[UUID] = mapped_column(ForeignKey("v2_task_proposals.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_task_id: Mapped[UUID | None] = mapped_column(ForeignKey("v2_tasks.id"), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class V2MeetingModel(TimestampMixin, Base):
+    __tablename__ = "v2_meetings"
+    __table_args__ = (
+        CheckConstraint(
+            "state in ('proposed','scheduled','finished','cancelled')", name="ck_v2_meeting_state"
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    scheduled_timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="proposed")
+    source_message_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    poll_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DailySyncSessionModel(TimestampMixin, Base):
+    __tablename__ = "daily_sync_sessions"
+    __table_args__ = (
+        CheckConstraint("status in ('open','closed')", name="ck_daily_sync_status"),
+        UniqueConstraint("team_id", "date", name="uq_daily_sync_team_date"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    date: Mapped[Any] = mapped_column(Date, nullable=False)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DailySyncReportModel(Base):
+    __tablename__ = "daily_sync_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "detected_status in ('done','in_progress','blocked','unknown')",
+            name="ck_daily_sync_report_status",
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    sync_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("daily_sync_sessions.id"), nullable=False
+    )
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    telegram_message_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    parsed_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    matched_task_id: Mapped[UUID | None] = mapped_column(ForeignKey("v2_tasks.id"), nullable=True)
+    detected_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AbsencePeriodModel(TimestampMixin, Base):
+    __tablename__ = "absence_periods"
+    __table_args__ = (
+        CheckConstraint("status in ('active','expired','cancelled')", name="ck_absence_status"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_message_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+
+
+class V2BoardCardModel(TimestampMixin, Base):
+    __tablename__ = "v2_board_cards"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("v2_tasks.id"), unique=True, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    external_card_id: Mapped[str] = mapped_column(Text, nullable=False)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class V2ReminderLogModel(Base):
+    __tablename__ = "v2_reminder_logs"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("v2_tasks.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    recipient_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class V2DigestLogModel(Base):
+    __tablename__ = "v2_digest_logs"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    date: Mapped[Any] = mapped_column(Date, nullable=False)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class GamificationEventModel(Base):
+    __tablename__ = "gamification_events"
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    xp_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

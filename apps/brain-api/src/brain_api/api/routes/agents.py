@@ -276,7 +276,7 @@ async def daemon_hearing_history(
     store: AgentsStore = Depends(get_agents_store),
     brain: BrainStore = Depends(get_brain_store),
 ) -> dict[str, Any]:
-    """Return recent daemon uploads enriched with proposal/task data for the cockpit history panel."""
+    """Return recent daemon uploads enriched for the cockpit history panel."""
     uploads = store.list_uploads(workspace_id)
     uploads = uploads[-limit:] if len(uploads) > limit else uploads
 

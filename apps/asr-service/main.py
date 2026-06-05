@@ -56,7 +56,12 @@ _model = None
 def get_model():
     global _model
     if _model is None:
-        logger.info("Loading faster-whisper model=%s device=%s compute_type=%s", MODEL_SIZE, DEVICE, COMPUTE_TYPE)
+        logger.info(
+            "Loading faster-whisper model=%s device=%s compute_type=%s",
+            MODEL_SIZE,
+            DEVICE,
+            COMPUTE_TYPE,
+        )
         t0 = time.time()
         from faster_whisper import WhisperModel
         _model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
@@ -155,11 +160,10 @@ async def transcribe(request: Request):
 
     # WAV duration for logging
     duration_ms = 0
-    with contextlib.suppress(Exception):
-        with wave.open(io.BytesIO(body)) as wf:
-            frames, rate = wf.getnframes(), wf.getframerate()
-            if rate > 0:
-                duration_ms = int(frames * 1000 / rate)
+    with contextlib.suppress(Exception), wave.open(io.BytesIO(body)) as wf:
+        frames, rate = wf.getnframes(), wf.getframerate()
+        if rate > 0:
+            duration_ms = int(frames * 1000 / rate)
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(body)

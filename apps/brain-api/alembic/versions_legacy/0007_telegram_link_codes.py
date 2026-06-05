@@ -4,7 +4,7 @@ Revision ID: 0007_telegram_link_codes
 Revises: 0006_chat_confirmation_mode
 Create Date: 2026-06-05
 """
-
+# ruff: noqa: E501
 from __future__ import annotations
 
 import sqlalchemy as sa

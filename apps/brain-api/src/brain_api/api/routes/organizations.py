@@ -19,7 +19,7 @@ import re
 import secrets
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +128,10 @@ async def _get_org_or_404(org_id: UUID, session: AsyncSession) -> OrganizationMo
 
 async def _require_owner(org: OrganizationModel, user: UserModel) -> None:
     if org.owner_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can do this")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can do this",
+        )
 
 
 async def _require_owner_or_admin(
@@ -145,7 +148,10 @@ async def _require_owner_or_admin(
         )
     )
     if not result.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
 
 
 async def _build_org_response(org: OrganizationModel, session: AsyncSession) -> OrgResponse:
@@ -437,7 +443,10 @@ async def remove_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
     if member.user_id == org.owner_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove the owner")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove the owner",
+        )
 
     await session.delete(member)
     await session.commit()

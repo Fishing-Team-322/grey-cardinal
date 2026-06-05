@@ -32,7 +32,11 @@ async def session_current(
         return {
             "active": True,
             "meeting_id": meeting.public_id,
-            "status": meeting.status.value if hasattr(meeting.status, "value") else str(meeting.status),
+            "status": (
+                meeting.status.value
+                if hasattr(meeting.status, "value")
+                else str(meeting.status)
+            ),
             "transcript_count": dto.transcript_count,
             "proposal_count": dto.proposal_count,
             "started_at": meeting.started_at.isoformat() if meeting.started_at else None,

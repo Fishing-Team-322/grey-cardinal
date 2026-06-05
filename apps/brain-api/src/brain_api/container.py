@@ -19,6 +19,7 @@ from brain_api.application.ports import (
     TelegramGateway,
     UnitOfWork,
 )
+from brain_api.application.semantic_parser import SemanticMessageParser
 from brain_api.config import Settings
 from brain_api.domain.enums import BoardProvider
 from brain_api.infrastructure.board.base import YouGileConfig, resolve_provider
@@ -32,6 +33,7 @@ from brain_api.infrastructure.events.websocket_manager import WebSocketManager
 from brain_api.infrastructure.llm.client import OpenAICompatibleClient
 from brain_api.infrastructure.llm.extractor import LLMTaskExtractor
 from brain_api.infrastructure.llm.heuristic_extractor import HeuristicTaskExtractor
+from brain_api.infrastructure.llm.providers import LLMProviderFactory
 from brain_api.infrastructure.telegram_gateway.client import HttpTelegramGateway
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,8 @@ class Container:
         self.telegram_gateway: TelegramGateway = HttpTelegramGateway(
             settings.telegram_bot_base_url, settings.internal_api_token
         )
+        self.llm_provider_factory = LLMProviderFactory(self.session_factory, settings)
+        self.semantic_parser = SemanticMessageParser(self.llm_provider_factory)
         self.extractor: TaskExtractor = self._build_extractor(settings)
         self.board: BoardGateway = self._build_board(settings)
 
@@ -81,18 +85,21 @@ class Container:
         if settings.llm_enabled:
             logger.info("LLM extractor enabled (model=%s)", settings.llm_model)
             client = OpenAICompatibleClient(
-                base_url=settings.llm_base_url,
-                api_key=settings.llm_api_key,
+                base_url=settings.effective_llm_base_url,
+                api_key=settings.effective_llm_api_key,
                 model=settings.llm_model,
+                timeout=settings.llm_timeout_seconds,
             )
             return LLMTaskExtractor(client)
+        if settings.is_production:
+            raise RuntimeError("LLM provider must be configured in production")
         logger.info("LLM_API_KEY пуст — используется HeuristicTaskExtractor")
         return HeuristicTaskExtractor()
 
     def _build_board(self, settings: Settings) -> BoardGateway:
         provider = resolve_provider(settings.board_provider)
         if provider == BoardProvider.jira:
-            cfg = JiraConfig(
+            jira_cfg = JiraConfig(
                 url=settings.jira_url,
                 email=settings.jira_email,
                 api_token=settings.jira_api_token,
@@ -100,12 +107,14 @@ class Container:
                 done_transition_id=settings.jira_done_transition_id,
                 in_progress_transition_id=settings.jira_in_progress_transition_id,
             )
-            if cfg.is_configured:
-                logger.info("Board provider: Jira (%s / %s)", cfg.url, cfg.project_key)
-                return JiraBoardGateway(cfg)
+            if jira_cfg.is_configured:
+                logger.info("Board provider: Jira (%s / %s)", jira_cfg.url, jira_cfg.project_key)
+                return cast(BoardGateway, JiraBoardGateway(jira_cfg))
+            if settings.is_production:
+                raise RuntimeError("BOARD_PROVIDER=jira is incomplete in production")
             logger.warning("BOARD_PROVIDER=jira, but not configured — falling back to mock")
         if provider == BoardProvider.yougile:
-            cfg = YouGileConfig(
+            yougile_cfg = YouGileConfig(
                 api_base_url=settings.yougile_api_base_url,
                 api_key=settings.yougile_api_key,
                 company_id=settings.yougile_company_id or None,
@@ -118,12 +127,16 @@ class Container:
                 column_blocked_id=settings.yougile_column_blocked_id or None,
                 column_done_id=settings.yougile_column_done_id or None,
             )
-            if cfg.is_configured:
+            if yougile_cfg.is_configured:
                 logger.info("Board provider: YouGile")
-                return YouGileBoardGateway(cfg)
+                return YouGileBoardGateway(yougile_cfg)
+            if settings.is_production:
+                raise RuntimeError("BOARD_PROVIDER=yougile is incomplete in production")
             logger.warning(
                 "BOARD_PROVIDER=yougile, но не настроен (%s) — откат на MockBoardGateway",
-                ", ".join(cfg.missing_required),
+                ", ".join(yougile_cfg.missing_required),
             )
+        if settings.is_production:
+            raise RuntimeError("Mock board is not allowed in production")
         logger.info("Board provider: mock")
         return MockBoardGateway()

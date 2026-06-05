@@ -17,10 +17,9 @@ YouGile Integration Setup
 import argparse
 import json
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from typing import Any
-
 
 BASE = "https://ru.yougile.com/api-v2"
 
@@ -73,7 +72,7 @@ def main():
     args = parser.parse_args()
 
     key = args.key.strip()
-    print(f"\n=== YouGile Integration Setup ===")
+    print("\n=== YouGile Integration Setup ===")
     print(f"API key: {key[:8]}...{key[-4:]}\n")
 
     # 1. Verify key and get companies

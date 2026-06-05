@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     logger.info("telegram-bot started (env=%s)", settings.app_env)
 
     poll_task: asyncio.Task | None = None
-    if settings.telegram_use_polling and settings.telegram_bot_token:
+    if settings.use_polling and settings.telegram_bot_token:
         poll_task = asyncio.create_task(_poll_loop(app))
 
     yield

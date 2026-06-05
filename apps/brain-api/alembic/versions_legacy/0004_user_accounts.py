@@ -4,11 +4,11 @@ Revision ID: 0004_user_accounts
 Revises: 0003_desktop_first_audio
 Create Date: 2026-06-05
 """
-
+# ruff: noqa: E501
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0004_user_accounts"
 down_revision = "0003_desktop_first_audio"

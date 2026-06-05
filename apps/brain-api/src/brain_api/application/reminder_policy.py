@@ -71,6 +71,7 @@ async def resolve_recipient(
         )
     if default_chat_id is None:
         return None
+    mention: str | None
     if user is not None and user.telegram_username:
         mention = f"@{user.telegram_username}"
     else:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -122,11 +122,15 @@ class DesktopTranscriptRequest(BaseModel):
         ):
             return value
 
-        source = value.get("source") if isinstance(value.get("source"), dict) else {}
-        speaker = value.get("speaker") if isinstance(value.get("speaker"), dict) else {}
-        asr = value.get("asr") if isinstance(value.get("asr"), dict) else {}
-        audio = value.get("audio") if isinstance(value.get("audio"), dict) else {}
-        raw = value.get("raw") if isinstance(value.get("raw"), dict) else {}
+        def dict_field(name: str) -> dict[str, Any]:
+            field = value.get(name)
+            return field if isinstance(field, dict) else {}
+
+        source = dict_field("source")
+        speaker = dict_field("speaker")
+        asr = dict_field("asr")
+        audio = dict_field("audio")
+        raw = dict_field("raw")
 
         return {
             "meeting_id": value.get("meeting_id"),

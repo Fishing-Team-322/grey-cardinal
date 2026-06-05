@@ -1,6 +1,8 @@
-"""Конфигурация brain-api (pydantic-settings, читается из окружения)."""
+"""Runtime settings for brain-api."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,12 +15,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     internal_api_token: str = "dev-internal-token"
 
-    # JWT auth (user accounts)
     jwt_secret: str = "change-me-in-production-use-long-random-string"
     jwt_algorithm: str = "HS256"
     jwt_expire_days: int = 30
     jwt_cookie_name: str = "gc_session"
-    jwt_cookie_secure: bool = True  # False in dev if no HTTPS
+    jwt_cookie_secure: bool = True
 
     database_url: str = "postgresql+asyncpg://grey:grey@postgres:5432/grey_cardinal"
     db_echo: bool = False
@@ -30,15 +31,25 @@ class Settings(BaseSettings):
     )
     telegram_bot_base_url: str = "http://telegram-bot:8010"
     telegram_bot_username: str = "grey_cyrdinyl_bot"
+    telegram_bot_token: str = ""
+    telegram_mode: str = "polling"
+    telegram_webhook_secret: str = ""
+    telegram_public_base_url: str = ""
 
-    llm_provider: str = "openai_compatible"
+    llm_provider: str = "local"
+    llm_local_base_url: str = "http://ollama:11434/v1"
+    llm_external_base_url: str = ""
+    llm_external_api_key: str = ""
     llm_base_url: str = ""
     llm_api_key: str = ""
-    llm_model: str = ""
+    llm_model: str = "qwen2.5:7b"
+    llm_timeout_seconds: int = 20
+    llm_max_retries: int = 2
+    llm_strict_json: bool = True
 
-    board_provider: str = "mock"
+    board_provider: str = "yougile"
+    board_creds_encryption_key: str = ""
 
-    # Jira Cloud integration
     jira_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""
@@ -58,12 +69,10 @@ class Settings(BaseSettings):
     yougile_column_review_id: str = ""
     yougile_column_blocked_id: str = ""
     yougile_column_done_id: str = ""
-    # Optional assignee → YouGile user-id mapping, JSON string.
-    # Example: {"Иван":"user_id_1","Денис":"user_id_2"}
     yougile_user_map: str = ""
 
-    # Demo brain store location. If empty, defaults to {UPLOADS_DIR}/brain/brain.json.
     brain_store_path: str = ""
+    uploads_dir: str = "/data/uploads"
 
     reminder_deadline_hours_before: int = 2
     reminder_stale_hours: int = 24
@@ -73,35 +82,94 @@ class Settings(BaseSettings):
     default_workspace_name: str = "Hackathon Team"
     default_telegram_chat_id: int | None = None
 
-    # Политика извлечения задач: порог уверенности и требование глагола-поручения.
     task_extraction_min_confidence: float = 0.65
     task_extraction_require_action_verb: bool = True
-
-    # Порог похожести для детекции дублей (см. FindSimilarTask).
     duplicate_similarity_threshold: float = 0.72
 
-    # Анти-спам политика напоминаний.
     reminder_min_interval_minutes: int = 120
     reminder_max_daily_per_user: int = 3
     reminder_quiet_hours_start: str = "22:00"
     reminder_quiet_hours_end: str = "09:00"
 
-    # ---------------------------------------------------------------------------
-    # Dev-only: /demo_core автоматически подтверждает proposal, чтобы показать карточку.
     demo_core_auto_confirm: bool = True
 
     @property
-    def llm_enabled(self) -> bool:
-        return bool(self.llm_api_key and self.llm_base_url and self.llm_model)
+    def is_production(self) -> bool:
+        return self.app_env.lower() in {"prod", "production"}
 
     @property
     def cors_origins(self) -> list[str]:
         return [item.strip() for item in self.frontend_allowed_origins.split(",") if item.strip()]
 
+    @property
+    def effective_llm_base_url(self) -> str:
+        if self.llm_provider == "local":
+            return self.llm_local_base_url or self.llm_base_url
+        if self.llm_provider == "external_api":
+            return self.llm_external_base_url or self.llm_base_url
+        return self.llm_base_url
+
+    @property
+    def effective_llm_api_key(self) -> str:
+        if self.llm_provider == "external_api":
+            return self.llm_external_api_key or self.llm_api_key
+        return self.llm_api_key
+
+    @property
+    def llm_enabled(self) -> bool:
+        if self.llm_provider == "disabled":
+            return False
+        if self.llm_provider == "local":
+            return bool(self.effective_llm_base_url and self.llm_model)
+        if self.llm_provider == "external_api":
+            return bool(
+                self.effective_llm_base_url and self.effective_llm_api_key and self.llm_model
+            )
+        return False
+
+    @property
+    def storage_paths(self) -> list[Path]:
+        return [Path(self.uploads_dir)]
+
+    def production_config_errors(self) -> list[str]:
+        if not self.is_production:
+            return []
+        errors: list[str] = []
+        if self.llm_provider == "disabled" or not self.llm_enabled:
+            errors.append("LLM provider must be configured in production")
+        if not self.jwt_secret or self.jwt_secret.startswith("change-me"):
+            errors.append("JWT_SECRET must be set in production")
+        if not self.internal_api_token or self.internal_api_token == "dev-internal-token":
+            errors.append("INTERNAL_API_TOKEN must be set in production")
+        if not self.board_creds_encryption_key:
+            errors.append("BOARD_CREDS_ENCRYPTION_KEY must be set in production")
+        if not self.telegram_bot_token:
+            errors.append("TELEGRAM_BOT_TOKEN must be set in production")
+        if self.board_provider == "mock":
+            errors.append("BOARD_PROVIDER=mock is not allowed in production")
+        return errors
+
     @field_validator("default_telegram_chat_id", mode="before")
     @classmethod
     def blank_chat_id_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("llm_provider")
+    @classmethod
+    def validate_llm_provider(cls, value: str) -> str:
+        value = value.strip().lower()
+        allowed = {"local", "external_api", "disabled"}
+        if value not in allowed:
+            raise ValueError(f"LLM_PROVIDER must be one of: {', '.join(sorted(allowed))}")
+        return value
+
+    @field_validator("telegram_mode")
+    @classmethod
+    def validate_telegram_mode(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"polling", "webhook"}:
+            raise ValueError("TELEGRAM_MODE must be polling or webhook")
+        return value
 
 
 def get_settings() -> Settings:

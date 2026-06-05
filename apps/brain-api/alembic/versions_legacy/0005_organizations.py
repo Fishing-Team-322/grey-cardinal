@@ -4,7 +4,7 @@ Revision ID: 0005_organizations
 Revises: 0004_user_accounts
 Create Date: 2026-06-05
 """
-
+# ruff: noqa: E501
 from __future__ import annotations
 
 import sqlalchemy as sa

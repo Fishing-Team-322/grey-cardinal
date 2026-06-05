@@ -16,15 +16,16 @@ Logs:   %LOCALAPPDATA%\GreyCardinal\Agent\tray_agent.log
 
 from __future__ import annotations
 
-import os
-import sys
+import contextlib
 import json
 import logging
+import os
 import subprocess
+import sys
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -208,7 +209,11 @@ class AgentRunner:
                 "--duration-sec", str(self._cfg.chunk_sec),
                 "--capture-mode", self._cfg.capture_mode,
             ]
-            log.info("Starting agent chunk: meeting=%s duration=%ds", meeting_id, self._cfg.chunk_sec)
+            log.info(
+                "Starting agent chunk: meeting=%s duration=%ds",
+                meeting_id,
+                self._cfg.chunk_sec,
+            )
             self._proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
@@ -294,7 +299,7 @@ class TrayApp:
             meeting_id = self._session.meeting_id
 
             if self._session.error:
-                self._update_icon(ICON_ERROR, f"Ошибка подключения")
+                self._update_icon(ICON_ERROR, "Ошибка подключения")
             elif self._session.active and meeting_id:
                 # Session is active
                 if not self._runner.is_running:
@@ -319,10 +324,8 @@ class TrayApp:
 
             # Update menu
             if self._icon:
-                try:
+                with contextlib.suppress(Exception):
                     self._icon.update_menu()
-                except Exception:
-                    pass
 
             # If recording is done (chunk completed) but session still active → restart
             if self._session.active and not self._runner.is_running and meeting_id:

@@ -19,6 +19,7 @@ from brain_api.api.routes import (
     organizations,
     session,
     tasks,
+    v2_tenants,
     websocket,
 )
 from brain_api.config import get_settings
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(internal_audio.router)
     app.include_router(meetings.router)
     app.include_router(tasks.router)
+    app.include_router(v2_tenants.router)
     app.include_router(websocket.router)
     return app
 

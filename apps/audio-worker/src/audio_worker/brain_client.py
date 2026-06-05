@@ -12,8 +12,6 @@ from grey_cardinal_contracts import (
     TranscriptIngestResponse,
 )
 
-
-
 logger = logging.getLogger(__name__)
 
 

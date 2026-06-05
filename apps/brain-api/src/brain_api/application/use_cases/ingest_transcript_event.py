@@ -39,18 +39,51 @@ from grey_cardinal_contracts import (
 )
 
 # Words that are ONLY greetings/acknowledgments — never contain task info alone.
-_TRIVIAL_WORDS: frozenset[str] = frozenset({
-    "да", "нет", "ок", "окей", "okay", "угу", "ага", "мхм",
-    "привет", "здравствуйте", "здрасте", "хай", "хэй", "приветствую",
-    "слушаю", "слушаем", "слышу",
-    "готов", "готова", "готовы", "готово",
-    "погнали", "поехали", "понятно", "ясно",
-    "спасибо", "пасиб", "благодарю",
-    "пока", "всё",
-    "конечно", "разумеется", "естественно",
-    "хорошо", "отлично", "супер", "класс",
-    "наверное", "наверно", "возможно", "может",
-})
+_TRIVIAL_WORDS: frozenset[str] = frozenset(
+    {
+        "да",
+        "нет",
+        "ок",
+        "окей",
+        "okay",
+        "угу",
+        "ага",
+        "мхм",
+        "привет",
+        "здравствуйте",
+        "здрасте",
+        "хай",
+        "хэй",
+        "приветствую",
+        "слушаю",
+        "слушаем",
+        "слышу",
+        "готов",
+        "готова",
+        "готовы",
+        "готово",
+        "погнали",
+        "поехали",
+        "понятно",
+        "ясно",
+        "спасибо",
+        "пасиб",
+        "благодарю",
+        "пока",
+        "всё",
+        "конечно",
+        "разумеется",
+        "естественно",
+        "хорошо",
+        "отлично",
+        "супер",
+        "класс",
+        "наверное",
+        "наверно",
+        "возможно",
+        "может",
+    }
+)
 
 _TASK_ACCEPTANCE_RE = re.compile(
     r"\b(возьм|берус|сделаю|подготовл|проверю|отправлю|разверну|обновл|напишу|починю)\w*\b",
@@ -147,15 +180,12 @@ class IngestTranscriptEvent:
         # Build conversation context window (last 7 final utterances from same meeting).
         conversation_context: str | None = None
         if entity.meeting_db_id is not None:
-            recent = await uow.transcripts.list_recent_for_meeting(
-                entity.meeting_db_id, limit=7
-            )
+            recent = await uow.transcripts.list_recent_for_meeting(entity.meeting_db_id, limit=7)
             # Filter out the current utterance (already added) and format as dialogue.
             prior = [t for t in recent if t.id != entity.id]
             if prior:
                 lines = [
-                    f"[{t.speaker_name or t.speaker_id or 'Участник'}]: {t.text}"
-                    for t in prior
+                    f"[{t.speaker_name or t.speaker_id or 'Участник'}]: {t.text}" for t in prior
                 ]
                 conversation_context = "\n".join(lines)
 
@@ -166,6 +196,17 @@ class IngestTranscriptEvent:
             known_users=known_users,
             conversation_context=conversation_context,
         )
+        if (
+            extraction.has_task
+            and not extraction.assignee
+            and _source_value(event.source) == "desktop_app"
+            and event.speaker_name
+            and event.text.strip().lower().startswith("я ")
+        ):
+            updates = {"assignee": event.speaker_name}
+            if extraction.title and extraction.title.lower().startswith("я подготовлю "):
+                updates["title"] = "Подготовить " + extraction.title[len("Я подготовлю ") :]
+            extraction = extraction.model_copy(update=updates)
         if not extraction.has_task:
             await uow.commit()
             return TranscriptIngestResponse(

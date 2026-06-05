@@ -307,6 +307,8 @@ async def ingest_callback(
             project = await uow.projects.ensure_default(container.config.default_workspace_name)
             await uow.chats.upsert(chat_id, "group", None, project.id)
             bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+            if bound_chat is None:
+                raise RuntimeError("chat binding failed")
             await uow.projects.set_default_chat(project.id, bound_chat.id)
             await uow.commit()
         return _edit_with_kb(
@@ -454,8 +456,11 @@ async def ingest_command(
             async with container.make_uow() as uow:
                 project = await uow.projects.ensure_default(container.config.default_workspace_name)
                 await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
+                bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+                if bound_chat is None:
+                    raise RuntimeError("chat binding failed")
                 await uow.projects.set_default_chat(
-                    project.id, (await uow.chats.get_by_telegram_id(chat_id)).id
+                    project.id, bound_chat.id
                 )
                 await uow.commit()
             return ActionsResponse(actions=[SendMessageAction(
@@ -484,19 +489,19 @@ async def ingest_command(
         args = event.args
         if len(args) < 4:
             return _md(chat_id, _JIRA_SETUP_TEXT, _back_kb())
-        jira_url, email, token, project = args[0], args[1], args[2], args[3]
+        jira_url, email, token, project_key = args[0], args[1], args[2], args[3]
         # Store in env (runtime — in-memory for demo; persistent via .env in prod)
         import os
         os.environ["JIRA_URL"] = jira_url
         os.environ["JIRA_EMAIL"] = email
         os.environ["JIRA_API_TOKEN"] = token
-        os.environ["JIRA_PROJECT_KEY"] = project
+        os.environ["JIRA_PROJECT_KEY"] = project_key
         os.environ["BOARD_PROVIDER"] = "jira"
         return _md(
             chat_id,
             f"✅ *Jira подключена!*\n\n"
             f"URL: `{jira_url}`\n"
-            f"Проект: `{project}`\n\n"
+            f"Проект: `{project_key}`\n\n"
             "Теперь задачи из переписки будут создаваться в Jira автоматически.",
             _main_menu_kb(is_group),
         )
@@ -607,8 +612,11 @@ async def ingest_command(
         async with container.make_uow() as uow:
             project = await uow.projects.ensure_default(container.config.default_workspace_name)
             await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
+            bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+            if bound_chat is None:
+                raise RuntimeError("chat binding failed")
             await uow.projects.set_default_chat(
-                project.id, (await uow.chats.get_by_telegram_id(chat_id)).id
+                project.id, bound_chat.id
             )
             await uow.commit()
         return _text(chat_id, f"✅ Чат привязан к workspace: {project.name}")
