@@ -21,3 +21,9 @@
 		reverse_proxy frontend-dashboard:5173
 	}
 }
+
+# API subdomain — exposes brain-api directly (Swagger UI at /docs).
+api.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy brain-api:8000
+}
