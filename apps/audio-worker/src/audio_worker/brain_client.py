@@ -12,6 +12,8 @@ from grey_cardinal_contracts import (
     TranscriptIngestResponse,
 )
 
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,20 @@ class BrainClient:
             request.model_dump(mode="json"),
         )
         return MeetingStatusResponse.model_validate(data) if data else None
+
+    async def get_active_meeting(self) -> MeetingStatusResponse | None:
+        """Return the currently active workspace meeting, or None if none is running."""
+        url = f"{self._base_url}/internal/meetings/active"
+        headers = {"X-Internal-Token": self._internal_token}
+        try:
+            async with httpx.AsyncClient(timeout=4.0, trust_env=False) as client:
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    data = response.json()
+                    return MeetingStatusResponse.model_validate(data) if data else None
+        except httpx.HTTPError:
+            logger.debug("get_active_meeting failed")
+        return None
 
     async def _post(self, path: str, payload: dict) -> dict | None:
         url = f"{self._base_url}{path}"

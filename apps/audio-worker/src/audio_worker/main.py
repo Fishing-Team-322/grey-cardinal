@@ -221,6 +221,21 @@ async def transcribe(
     return {"text": text}
 
 
+@app.get("/session/current")
+async def session_current() -> dict[str, object]:
+    """Return the active team meeting session, if any. Agents can poll this."""
+    meeting = await brain_client.get_active_meeting()
+    if meeting is None:
+        return {"active": False, "meeting_id": None}
+    return {
+        "active": True,
+        "meeting_id": meeting.public_id,
+        "status": meeting.status,
+        "started_at": meeting.started_at.isoformat() if meeting.started_at else None,
+        "transcript_count": meeting.transcript_count,
+    }
+
+
 @app.post("/api/audio/upload")
 async def legacy_audio_upload(
     audio: UploadFile | None = File(default=None),
@@ -230,8 +245,12 @@ async def legacy_audio_upload(
     started_at: str = Form(default=""),
     ended_at: str = Form(default=""),
 ) -> dict[str, object]:
-    """Multipart upload from the C++ desktop agent. Transcribes with Whisper and returns result."""
+    """Multipart upload from the C++ desktop agent.
 
+    Automatically routes to the active team session if one is running,
+    so all agents in the workspace contribute to the same meeting without
+    manual meeting_id coordination.
+    """
     if audio is None:
         raise HTTPException(status_code=400, detail="audio file is required")
 
@@ -239,7 +258,18 @@ async def legacy_audio_upload(
     if len(wav_bytes) < 44:
         raise HTTPException(status_code=400, detail="audio file too small")
 
-    effective_meeting_id = meeting_id or f"agent-{agent_id}"
+    # Session discovery: prefer active workspace meeting over agent-local ID
+    effective_meeting_id = meeting_id or ""
+    session_source = "agent_provided"
+    if not effective_meeting_id or not effective_meeting_id.startswith("MTG-"):
+        active = await brain_client.get_active_meeting()
+        if active is not None:
+            effective_meeting_id = active.public_id
+            session_source = "active_session"
+        else:
+            effective_meeting_id = effective_meeting_id or f"agent-{agent_id}"
+            session_source = "agent_local"
+
     text = await asr_engine.transcribe_wav(wav_bytes)
 
     if text:
@@ -256,6 +286,7 @@ async def legacy_audio_upload(
                 "started_at": started_at,
                 "ended_at": ended_at,
                 "byte_size": len(wav_bytes),
+                "session_source": session_source,
             },
         )
         await brain_client.send_transcript(event)
@@ -268,4 +299,5 @@ async def legacy_audio_upload(
         "text": text,
         "agent_id": agent_id,
         "meeting_id": effective_meeting_id,
+        "session_source": session_source,
     }
