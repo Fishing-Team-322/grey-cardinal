@@ -403,10 +403,10 @@ const CockpitHero = ({ apiState, metrics, ygStatus, language }) => {
       <h1>{tr('Рабочий центр', 'Work Center')}</h1>
       <p>{tr('Здесь видно, что требует решения: задачи на подтверждение, текущая доска, сводка по срокам и состояние подключений.', 'Here you can see what needs attention: tasks pending confirmation, the current board, deadline summary and connection status.')}</p>
       <div className="gca-source-strip">
-        <span className="gca-source-chip"><b>Backend</b><small>{apiState.message}</small></span>
-        <span className="gca-source-chip"><b>{tr('Решения', 'Proposals')}</b><small>{tr('подтвердить или отклонить', 'confirm or reject')}</small></span>
-        <span className="gca-source-chip"><b>Daemon</b><small>{tr('история в профиле', 'history in profile')}</small></span>
+        <span className="gca-source-chip"><b>API</b><small>{apiState.message}</small></span>
+        <span className="gca-source-chip"><b>WebSocket</b><small>/ws/events</small></span>
         <span className="gca-source-chip"><b>YouGile</b><small>{ygStatus?.status || 'unknown'}</small></span>
+        <span className="gca-source-chip"><b>Token</b><small>{tr('не используется в demo flow', 'not used by demo flow')}</small></span>
       </div>
     </div>
     <div className="gca-hero-side">
@@ -487,8 +487,8 @@ const ProposalCard = ({ proposal, onConfirm, onReject, busy }) => (
 const ProposalsPanel = ({ proposals, onConfirm, onReject, busy }) => (
   <div className="gca-panel">
     <div className="gca-panel-head">
-      <div className="gca-panel-title"><Icon name="list" size={15}/>{tr('Требуют решения', 'Requiring decisions')}</div>
-      <span className="gca-panel-eyebrow">{proposals.length} {tr('ожидает', 'pending')}</span>
+      <div className="gca-panel-title"><Icon name="list" size={15}/>Pending proposals</div>
+      <span className="gca-panel-eyebrow">{proposals.length} pending</span>
     </div>
     <div className="gca-panel-body">
       {proposals.length === 0
@@ -561,7 +561,7 @@ const BoardPanel = ({ columns, onMove, onSync, busy }) => (
 const DigestPanel = ({ digest, onRefresh }) => (
   <div className="gca-panel">
     <div className="gca-panel-head">
-      <div className="gca-panel-title"><Icon name="bell" size={15}/>{tr('Сводка без шума', 'Noiseless digest')}</div>
+      <div className="gca-panel-title"><Icon name="bell" size={15}/>Evening digest</div>
       <span className="gca-panel-eyebrow">GET /api/digest/evening</span>
     </div>
     <div className="gca-panel-body">
@@ -591,86 +591,6 @@ const DigestPanel = ({ digest, onRefresh }) => (
     </div>
   </div>
 );
-
-const gcAgentBadge = (a) => {
-  if (!a.online) return ['gca-badge', 'offline'];
-  if (a.recording_status === 'recording') return ['gca-badge gca-badge--warn', 'recording'];
-  if (a.status === 'uploading') return ['gca-badge gca-badge--warn', 'uploading'];
-  if (a.status === 'error') return ['gca-badge gca-badge--err', 'error'];
-  return ['gca-badge gca-badge--ok', a.status || 'idle'];
-};
-
-const DaemonPairingPanel = ({ profile, agents, onRefresh }) => {
-  const [pairing, setPairing] = React.useState(null);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState('');
-  const workspaceId = profile && profile.workspace_id;
-  const genCode = async () => {
-    setBusy(true); setError('');
-    try { setPairing(await GCApi.createPairingCode(workspaceId)); }
-    catch (e) { setError(String((e && e.message) || e)); }
-    finally { setBusy(false); }
-  };
-  const unpair = async (id) => {
-    setError('');
-    try { await GCApi.unpairAgent(id, workspaceId); onRefresh(); }
-    catch (e) { setError(String((e && e.message) || e)); }
-  };
-  const list = agents || [];
-  return (
-    <div className="gca-panel">
-      <div className="gca-panel-head">
-        <div className="gca-panel-title"><Icon name="server" size={15}/>Connected daemons</div>
-        <span className="gca-panel-eyebrow">{profile ? profile.account_number : 'GET /api/profile'}</span>
-      </div>
-      <div className="gca-panel-body">
-        <p className="gca-muted" style={{ marginTop: 0 }}>
-          Workspace number: <strong>{profile ? profile.account_number : '…'}</strong>
-          {' '}— этот код нужен только для привязки устройства, не отправляйте посторонним.
-        </p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-          <button className="gc-btn gc-btn--primary gc-btn--sm" disabled={busy} onClick={genCode}>
-            <Icon name="link" size={13}/>{busy ? '…' : 'Сгенерировать код привязки'}
-          </button>
-          <a className="gc-btn gc-btn--secondary gc-btn--sm" href="/downloads/grey-cardinal-daemon-windows-x64.msi">
-            <Icon name="download" size={13}/>Скачать Windows MSI
-          </a>
-          <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={onRefresh}>
-            <Icon name="refresh" size={13}/>Обновить
-          </button>
-        </div>
-        {pairing && (
-          <div className="gca-callout" style={{ marginBottom: 10 }}>
-            Pairing code: <strong style={{ fontSize: 18 }}>{pairing.pairing_code}</strong>
-            {' '}— действует {pairing.expires_in_minutes} мин. Введите его в трее daemon → «Pair device».
-          </div>
-        )}
-        {error && <div className="gca-badge gca-badge--err" style={{ marginBottom: 8 }}>{error}</div>}
-        {list.length === 0 ? (
-          <EmptyState icon="server" title="Нет подключённых устройств" desc="Сгенерируйте код, установите MSI и привяжите daemon."/>
-        ) : (
-          <div className="gca-board">
-            {list.map((a, i) => {
-              const [cls, label] = gcAgentBadge(a);
-              return (
-                <div className="gca-board-row" key={a.agent_id || i}>
-                  <span className="gca-board-rank">{i + 1}</span>
-                  <span className="gca-avatar">{(a.device_name || 'DA').slice(0, 2).toUpperCase()}</span>
-                  <span className="gca-board-name">
-                    {a.device_name}<small> · {a.os} · v{a.version || '—'}</small>
-                  </span>
-                  <span className="gca-board-xp">{a.online ? 'online' : 'offline'}</span>
-                  <span className={cls}>{label}</span>
-                  <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => unpair(a.agent_id)}>Unpair</button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 const DaemonUploadsPanel = ({ uploads, onRefresh }) => (
   <div className="gca-panel">
@@ -1264,8 +1184,6 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
   const [digest, setDigest] = React.useState(null);
   const [ygStatus, setYgStatus] = React.useState(null);
   const [daemonUploads, setDaemonUploads] = React.useState([]);
-  const [accountProfile, setAccountProfile] = React.useState(null);
-  const [agents, setAgents] = React.useState([]);
   const [signals, setSignals] = React.useState([]);
 
   const taskCount = React.useMemo(
@@ -1297,10 +1215,10 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
     organization: organization ? (organization.members || []).length : null,
   }), [proposals.length, taskCount, daemonUploads.length, unlockedAchievementCount, organization]);
   const metrics = React.useMemo(() => [
-    { label:'PENDING', value:String(proposals.length) },
-    { label:'TASKS', value:String(taskCount) },
-    { label:'UPLOADS', value:String(daemonUploads.length) },
-    { label:'DONE', value:String(doneCount) },
+    { label:tr('Pending', 'Pending'), value:String(proposals.length) },
+    { label:tr('Tasks', 'Tasks'), value:String(taskCount) },
+    { label:tr('Uploads', 'Uploads'), value:String(daemonUploads.length) },
+    { label:tr('Done', 'Done'), value:String(doneCount) },
   ], [proposals.length, taskCount, daemonUploads.length, doneCount, language]);
 
   const loadDashboard = React.useCallback(async () => {
@@ -1309,23 +1227,18 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
     GCApi.saveConfig(config);
     try {
       await GCApi.health();
-      const [proposalRes, boardRes, digestRes, ygRes, daemonRes, profileRes, agentsRes] =
-        await Promise.allSettled([
-          GCApi.getProposals('pending'),
-          GCApi.getBoard(),
-          GCApi.getEveningDigest(),
-          GCApi.getYouGileStatus(),
-          GCApi.daemonUploads(),
-          GCApi.getProfile(),
-          GCApi.listAgents(),
-        ]);
+      const [proposalRes, boardRes, digestRes, ygRes, daemonRes] = await Promise.allSettled([
+        GCApi.getProposals('pending'),
+        GCApi.getBoard(),
+        GCApi.getEveningDigest(),
+        GCApi.getYouGileStatus(),
+        GCApi.daemonUploads(),
+      ]);
       if (proposalRes.status === 'fulfilled') setProposals(proposalRes.value);
       if (boardRes.status === 'fulfilled') setColumns(boardRes.value);
       if (digestRes.status === 'fulfilled') setDigest(digestRes.value);
       if (ygRes.status === 'fulfilled') setYgStatus(ygRes.value);
       if (daemonRes.status === 'fulfilled') setDaemonUploads(daemonRes.value);
-      if (profileRes.status === 'fulfilled') setAccountProfile(profileRes.value);
-      if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value);
       setSignals(prev => [{
         id:String(Date.now()),
         kind:'create',
@@ -1487,37 +1400,7 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
             </div>
           )}
 
-          {section === 'overview' && (
-            <div className="gca-theater">
-              {apiState.status !== 'online' && (
-                <div className="gca-panel gca-panel--warn" style={{ borderLeft: '4px solid #ef4444', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px' }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 2 }}>{tr('СЛЕДУЮЩИЙ ШАГ', 'NEXT STEP')}</div>
-                    <div style={{ fontWeight: 600 }}>{tr('Проверить backend', 'Check backend')}</div>
-                    <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>brain-api {tr('недоступен: проверьте URL backend, порт 8000 и CORS', 'unavailable: check backend URL, port 8000 and CORS')}</div>
-                  </div>
-                  <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={() => setSection('api')}>{tr('Открыть настройки', 'Open settings')} →</button>
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-                {[
-                  { icon: 'list', label: tr('На подтверждение', 'Pending approval'), value: proposals.length, desc: tr('Решения, которые ещё не попали в доску.', 'Decisions not yet on the board.'), onClick: () => setSection('proposals') },
-                  { icon: 'kanban', label: tr('Задачи на доске', 'Tasks on board'), value: taskCount, desc: tr('0 в работе', '0 in progress'), onClick: () => setSection('kanban') },
-                  { icon: 'bell', label: tr('Просрочки', 'Overdue'), value: 0, desc: tr('Сводка по срокам и владельцам.', 'Summary by deadlines and owners.'), onClick: () => setSection('digest') },
-                  { icon: 'download', label: tr('Daemon услышал', 'Daemon heard'), value: daemonUploads.length, desc: tr('Полная история лежит в профиле.', 'Full history is in profile.'), onClick: () => setSection('daemon') },
-                ].map((tile) => (
-                  <div key={tile.label} className="gca-panel" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={tile.onClick}>
-                    <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>{tile.value}</div>
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{tile.label}</div>
-                    <div style={{ fontSize: 11, color: '#888' }}>{tile.desc}</div>
-                  </div>
-                ))}
-              </div>
-              <ProposalsPanel proposals={proposals} onConfirm={confirmProposal} onReject={rejectProposal} busy={busy}/>
-            </div>
-          )}
-
-          {section === 'proposals' && (
+          {(section === 'overview' || section === 'proposals') && (
             <div className="gca-theater">
               <ChatPanel
                 text={chatText}
@@ -1538,10 +1421,6 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
 
           {(section === 'overview' || section === 'digest') && (
             <DigestPanel digest={digest} onRefresh={loadDashboard}/>
-          )}
-
-          {(section === 'overview' || section === 'daemon') && (
-            <DaemonPairingPanel profile={accountProfile} agents={agents} onRefresh={loadDashboard}/>
           )}
 
           {(section === 'overview' || section === 'daemon') && (
