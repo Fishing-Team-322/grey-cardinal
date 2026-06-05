@@ -9,6 +9,11 @@
 		reverse_proxy telegram-bot:8010
 	}
 
+	# C++ desktop agent uploads WAV → audio-worker (more specific than /api/*).
+	handle /api/audio/upload {
+		reverse_proxy audio-worker:8020
+	}
+
 	# Backend API + live events + desktop ingestion → brain-api.
 	# WebSocket upgrades on /ws/* are handled transparently by reverse_proxy.
 	@backend path /api/* /ws/* /desktop/* /health /ready /docs /docs/* /openapi.json /redoc /redoc/*

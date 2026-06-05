@@ -17,6 +17,7 @@ from brain_api.api.routes import (
     internal_telegram,
     meetings,
     organizations,
+    session,
     tasks,
     websocket,
 )
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
         ],
     )
     app.include_router(health.router)
+    app.include_router(session.router)
     app.include_router(accounts.router)
     app.include_router(organizations.router)
     app.include_router(agents.router)

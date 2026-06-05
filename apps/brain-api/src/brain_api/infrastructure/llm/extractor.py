@@ -34,14 +34,17 @@ class LLMTaskExtractor:
         now: datetime,
         timezone: str,
         known_users: list[KnownUser],
+        conversation_context: str | None = None,
     ) -> TaskExtractionResult:
-        user_prompt = build_user_prompt(text, now, timezone, known_users)
+        user_prompt = build_user_prompt(text, now, timezone, known_users, conversation_context)
         try:
             raw = await self._client.chat(SYSTEM_PROMPT, user_prompt)
             return _parse(raw)
         except Exception as exc:  # сеть/JSON/таймаут — не валим pipeline
             logger.warning("LLM extraction failed, falling back to heuristic: %s", exc)
-            return await self._fallback.extract_task(text, now, timezone, known_users)
+            return await self._fallback.extract_task(
+                text, now, timezone, known_users, conversation_context
+            )
 
 
 def _parse(raw: str) -> TaskExtractionResult:

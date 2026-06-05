@@ -51,6 +51,7 @@ class TaskExtractor(Protocol):
         now: datetime,
         timezone: str,
         known_users: list[KnownUser],
+        conversation_context: str | None = None,
     ) -> TaskExtractionResult: ...
 
 
@@ -220,6 +221,9 @@ class TranscriptRepository(Protocol):
     async def list_recent(self, limit: int = 20) -> list[TranscriptEvent]: ...
     async def list_recent_for_user(
         self, user_id: UUID, limit: int = 20
+    ) -> list[TranscriptEvent]: ...
+    async def list_recent_for_meeting(
+        self, meeting_db_id: UUID, limit: int = 8
     ) -> list[TranscriptEvent]: ...
 
 

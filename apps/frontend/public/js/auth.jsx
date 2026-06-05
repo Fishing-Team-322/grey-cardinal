@@ -62,12 +62,13 @@ const LoginPage = ({ go, language, setLanguage }) => {
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState(false);
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault();
     setBusy(true);
-    setStatus('');
 
     const normalizedEmail = normalizeAuthEmail(email);
+    const account = loadAuthAccount();
+
     if (!validAuthEmail(normalizedEmail)) {
       setStatus(tr('Введите корректную почту.', 'Enter a valid email.'));
       setBusy(false);
@@ -78,17 +79,20 @@ const LoginPage = ({ go, language, setLanguage }) => {
       setBusy(false);
       return;
     }
-
-    try {
-      const user = await GCApi.login(normalizedEmail, password);
-      // Store minimal user info for display (cookie handles auth)
-      saveAuthSession({ email: user.email, login: user.login, displayName: user.display_name });
-      setStatus(tr('Вход выполнен. Открываю cockpit.', 'Signed in. Opening cockpit.'));
-      window.setTimeout(() => go('/app'), 220);
-    } catch (err) {
-      setStatus(err.message || tr('Ошибка входа.', 'Login failed.'));
+    if (!account) {
+      setStatus(tr('Аккаунт пока не создан. Зарегистрируйтесь сначала.', 'No account exists yet. Register first.'));
       setBusy(false);
+      return;
     }
+    if (account.email !== normalizedEmail || account.passwordHash !== hashAuthPassword(password)) {
+      setStatus(tr('Почта или пароль не совпадают.', 'Email or password does not match.'));
+      setBusy(false);
+      return;
+    }
+
+    saveAuthSession(account);
+    setStatus(tr('Вход выполнен. Открываю cockpit.', 'Signed in. Opening cockpit.'));
+    window.setTimeout(() => go('/app'), 220);
   };
 
   return (
@@ -135,10 +139,9 @@ const RegisterPage = ({ go, language, setLanguage }) => {
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState(false);
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault();
     setBusy(true);
-    setStatus('');
 
     const normalizedEmail = normalizeAuthEmail(email);
     const normalizedLogin = login.trim();
@@ -171,22 +174,18 @@ const RegisterPage = ({ go, language, setLanguage }) => {
       return;
     }
 
-    try {
-      const user = await GCApi.register(normalizedEmail, normalizedLogin, normalizedFirstName, normalizedLastName, password);
-      saveAuthSession({ email: user.email, login: user.login, displayName: user.display_name });
-      setStatus(tr('Аккаунт создан. Открываю cockpit.', 'Account created. Opening cockpit.'));
-      window.setTimeout(() => go('/app'), 220);
-    } catch (err) {
-      const msg = err.message || '';
-      if (msg.includes('Email already')) {
-        setStatus(tr('Эта почта уже зарегистрирована.', 'This email is already registered.'));
-      } else if (msg.includes('Login already')) {
-        setStatus(tr('Этот логин уже занят.', 'This login is already taken.'));
-      } else {
-        setStatus(msg || tr('Ошибка регистрации.', 'Registration failed.'));
-      }
-      setBusy(false);
-    }
+    const account = {
+      email: normalizedEmail,
+      login: normalizedLogin,
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+      passwordHash: hashAuthPassword(password),
+      createdAt: new Date().toISOString(),
+    };
+    localStorage.setItem(GC_AUTH_ACCOUNT_KEY, JSON.stringify(account));
+    saveAuthSession(account);
+    setStatus(tr('Аккаунт создан. Открываю cockpit.', 'Account created. Opening cockpit.'));
+    window.setTimeout(() => go('/app'), 220);
   };
 
   return (
@@ -203,7 +202,7 @@ const RegisterPage = ({ go, language, setLanguage }) => {
           </div>
           <h1 className="gc-display-4">{tr('Регистрация', 'Registration')}</h1>
           <p className="gc-mute" style={{ marginTop: 8, fontSize: 14 }}>
-            {tr('Заполните данные участника — почта и пароль для входа.', 'Fill in your details — email and password to sign in.')}
+            {tr('Заполните данные участника. Пока это frontend-only аккаунт для мокового входа.', 'Fill in participant data. For now this is a frontend-only account for mock sign-in.')}
           </p>
           <form className="gc-form" onSubmit={submit}>
             <div className="gc-auth-form-grid">

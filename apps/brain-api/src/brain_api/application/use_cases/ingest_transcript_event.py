@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from brain_api.application.config import AppConfig
@@ -18,6 +19,41 @@ from brain_api.application.ports import (
 )
 from brain_api.application.use_cases._shared import create_proposal_with_confirmation
 from brain_api.application.use_cases.send_deadline_reminders import _default_chat_id
+
+# Words that are ONLY greetings/acknowledgments — never contain task info alone.
+_TRIVIAL_WORDS: frozenset[str] = frozenset({
+    "да", "нет", "ок", "окей", "okay", "угу", "ага", "мхм",
+    "привет", "здравствуйте", "здрасте", "хай", "хэй", "приветствую",
+    "слушаю", "слушаем", "слышу",
+    "готов", "готова", "готовы", "готово",
+    "погнали", "поехали", "понятно", "ясно",
+    "спасибо", "пасиб", "благодарю",
+    "пока", "всё",
+    "конечно", "разумеется", "естественно",
+    "хорошо", "отлично", "супер", "класс",
+    "наверное", "наверно", "возможно", "может",
+})
+
+_TASK_ACCEPTANCE_RE = re.compile(
+    r"\b(возьм|берус|сделаю|подготовл|проверю|отправлю|разверну|обновл|напишу|починю)\w*\b",
+    re.IGNORECASE,
+)
+
+
+def _is_trivial_utterance(text: str) -> bool:
+    """Return True only when text cannot possibly contain a task.
+
+    Conservative: false negatives (thinking something IS trivial when it's not)
+    are far worse than false positives here, so we only skip the most obvious cases.
+    """
+    words = [re.sub(r"[.,!?;:—\-\"']+", "", w) for w in text.lower().split()]
+    words = [w for w in words if w]
+    if not words:
+        return True
+    # Short phrases with only trivial words — but NOT if they contain acceptance verbs
+    if len(words) <= 3 and all(w in _TRIVIAL_WORDS for w in words):
+        return not bool(_TASK_ACCEPTANCE_RE.search(text))
+    return False
 from brain_api.domain.entities import TranscriptEvent as TranscriptEntity
 from brain_api.domain.enums import TaskSource
 from grey_cardinal_contracts import (
@@ -93,15 +129,40 @@ class IngestTranscriptEvent:
                 meeting_public_id=meeting.public_id if meeting else None,
             )
 
+        # Pre-filter: skip LLM for trivially non-task utterances (saves API calls).
+        if _is_trivial_utterance(event.text):
+            await uow.commit()
+            return TranscriptIngestResponse(
+                transcript_id=str(entity.id),
+                meeting_public_id=meeting.public_id if meeting else None,
+            )
+
         known_users = [
             KnownUser(display_name=u.display_name, telegram_username=u.telegram_username)
             for u in await uow.users.list_known()
         ]
+
+        # Build conversation context window (last 7 final utterances from same meeting).
+        conversation_context: str | None = None
+        if entity.meeting_db_id is not None:
+            recent = await uow.transcripts.list_recent_for_meeting(
+                entity.meeting_db_id, limit=7
+            )
+            # Filter out the current utterance (already added) and format as dialogue.
+            prior = [t for t in recent if t.id != entity.id]
+            if prior:
+                lines = [
+                    f"[{t.speaker_name or t.speaker_id or 'Участник'}]: {t.text}"
+                    for t in prior
+                ]
+                conversation_context = "\n".join(lines)
+
         extraction = await self._extractor.extract_task(
             text=event.text,
             now=self._config.now(),
             timezone=self._config.timezone,
             known_users=known_users,
+            conversation_context=conversation_context,
         )
         if not extraction.has_task:
             await uow.commit()

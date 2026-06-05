@@ -48,6 +48,7 @@ class HeuristicTaskExtractor:
         now: datetime,
         timezone: str,
         known_users: list[KnownUser],
+        conversation_context: str | None = None,
     ) -> TaskExtractionResult:
         lowered = text.lower()
 

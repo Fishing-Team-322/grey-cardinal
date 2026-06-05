@@ -8,21 +8,24 @@ from datetime import datetime
 from grey_cardinal_contracts import KnownUser
 
 SYSTEM_PROMPT = (
-    "Ты — ассистент проджект-менеджера. Из сообщения команды в чате ты извлекаешь "
-    "ровно одну задачу, если она есть. Отвечай СТРОГО валидным JSON без markdown.\n"
-    "Схема ответа:\n"
+    "Ты — ассистент проджект-менеджера. Анализируешь реплику или фрагмент диалога команды "
+    "и извлекаешь ровно одну задачу, если она есть.\n"
+    "Важные правила:\n"
+    "- 'Сделаю', 'Возьму', 'Окей, берусь' в ответ на поручение = принятая задача для этого участника.\n"
+    "- Если участник отвечает согласием на реплику другого — исполнитель тот, кто согласился.\n"
+    "- Если диалог дан как контекст — фокусируйся на последней реплике, используй контекст для уточнения.\n"
+    "Отвечай СТРОГО валидным JSON без markdown:\n"
     "{\n"
     '  "has_task": bool,\n'
-    '  "title": "краткая формулировка задачи в инфинитиве или null",\n'
+    '  "title": "краткая задача в инфинитиве или null",\n'
     '  "description": "уточнение или null",\n'
-    '  "assignee": "имя/username ответственного или null",\n'
-    '  "deadline": "ISO8601 с таймзоной или null",\n'
+    '  "assignee": "имя/username исполнителя или null",\n'
+    '  "deadline": "ISO8601 или null",\n'
     '  "priority": "low|medium|high|critical",\n'
     '  "confidence": 0.0-1.0,\n'
     '  "reason": "короткое объяснение"\n'
     "}\n"
-    "Если поручения нет — верни has_task=false. Дедлайн вычисляй относительно "
-    "переданного текущего времени и таймзоны."
+    "Если поручения нет — has_task=false. Дедлайн вычисляй от текущего времени."
 )
 
 
@@ -31,16 +34,23 @@ def build_user_prompt(
     now: datetime,
     timezone: str,
     known_users: list[KnownUser],
+    conversation_context: str | None = None,
 ) -> str:
     users = [{"name": u.display_name, "username": u.telegram_username} for u in known_users]
-    context = {
+    payload: dict = {
         "now": now.isoformat(),
         "timezone": timezone,
         "known_users": users,
-        "message": text,
     }
+    if conversation_context:
+        payload["conversation_context"] = conversation_context
+        payload["last_message"] = text
+    else:
+        payload["message"] = text
+
+    suffix = "Извлеки задачу из последней реплики, используя контекст диалога." if conversation_context else "Извлеки задачу согласно схеме."
     return (
-        "Контекст и сообщение (JSON):\n"
-        + json.dumps(context, ensure_ascii=False)
-        + "\nИзвлеки задачу согласно схеме."
+        "Данные (JSON):\n"
+        + json.dumps(payload, ensure_ascii=False)
+        + f"\n{suffix}"
     )

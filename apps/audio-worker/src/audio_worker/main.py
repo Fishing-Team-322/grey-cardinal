@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 
 from grey_cardinal_contracts import (
     DemoScenarioPayload,
@@ -204,4 +204,100 @@ async def receive_audio_chunk(
         "meeting_id": x_meeting_id,
         "text": text,
         "sent_to_brain": sent_to_brain is not None,
+    }
+
+
+@app.post("/transcribe")
+async def transcribe(
+    request: Request,
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+) -> dict[str, object]:
+    """Raw WAV bytes → transcribed text. Used by brain-api as ASR_SERVICE_URL."""
+    _validate_internal_token(x_internal_token)
+    wav_bytes = await request.body()
+    if not wav_bytes:
+        raise HTTPException(status_code=400, detail="empty audio")
+    text = await asr_engine.transcribe_wav(wav_bytes)
+    return {"text": text}
+
+
+@app.get("/session/current")
+async def session_current() -> dict[str, object]:
+    """Return the active team meeting session, if any. Agents can poll this."""
+    meeting = await brain_client.get_active_meeting()
+    if meeting is None:
+        return {"active": False, "meeting_id": None}
+    return {
+        "active": True,
+        "meeting_id": meeting.public_id,
+        "status": meeting.status,
+        "started_at": meeting.started_at.isoformat() if meeting.started_at else None,
+        "transcript_count": meeting.transcript_count,
+    }
+
+
+@app.post("/api/audio/upload")
+async def legacy_audio_upload(
+    audio: UploadFile | None = File(default=None),
+    agent_id: str = Form(default="desktop-agent"),
+    meeting_id: str = Form(default=""),
+    source: str = Form(default="microphone"),
+    started_at: str = Form(default=""),
+    ended_at: str = Form(default=""),
+) -> dict[str, object]:
+    """Multipart upload from the C++ desktop agent.
+
+    Automatically routes to the active team session if one is running,
+    so all agents in the workspace contribute to the same meeting without
+    manual meeting_id coordination.
+    """
+    if audio is None:
+        raise HTTPException(status_code=400, detail="audio file is required")
+
+    wav_bytes = await audio.read()
+    if len(wav_bytes) < 44:
+        raise HTTPException(status_code=400, detail="audio file too small")
+
+    # Session discovery: prefer active workspace meeting over agent-local ID
+    effective_meeting_id = meeting_id or ""
+    session_source = "agent_provided"
+    if not effective_meeting_id or not effective_meeting_id.startswith("MTG-"):
+        active = await brain_client.get_active_meeting()
+        if active is not None:
+            effective_meeting_id = active.public_id
+            session_source = "active_session"
+        else:
+            effective_meeting_id = effective_meeting_id or f"agent-{agent_id}"
+            session_source = "agent_local"
+
+    text = await asr_engine.transcribe_wav(wav_bytes)
+
+    if text:
+        event = TranscriptEvent(
+            meeting_id=effective_meeting_id,
+            speaker_id=agent_id,
+            speaker_name=None,
+            text=text,
+            ts=datetime.now(UTC),
+            is_final=True,
+            raw={
+                "source": f"audio-worker.{source}",
+                "agent_id": agent_id,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "byte_size": len(wav_bytes),
+                "session_source": session_source,
+            },
+        )
+        await brain_client.send_transcript(event)
+
+    import uuid
+    return {
+        "ok": True,
+        "audio_id": str(uuid.uuid4()),
+        "message": f"transcribed {len(wav_bytes)} bytes",
+        "text": text,
+        "agent_id": agent_id,
+        "meeting_id": effective_meeting_id,
+        "session_source": session_source,
     }

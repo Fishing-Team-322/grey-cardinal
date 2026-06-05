@@ -18,6 +18,28 @@ const gcApiConfig = () => ({
   desktopIdentity: JSON.parse(localStorage.getItem(GC_API_STORAGE.desktopIdentity) || 'null'),
 });
 
+const gcApiOrigin = (baseUrl) => {
+  const base = String(baseUrl || '').replace(/\/$/, '');
+  return base.endsWith('/api') ? base.slice(0, -4) : base;
+};
+
+const gcBuildUrl = (path, baseUrl) => {
+  const target = String(path || '');
+  if (/^https?:\/\//.test(target)) return target;
+
+  const base = String(baseUrl || '').replace(/\/$/, '');
+  const normalizedTarget = target.startsWith('/') ? target : `/${target}`;
+  if (!base) return normalizedTarget;
+
+  if (base.endsWith('/api')) {
+    if (normalizedTarget === '/api') return base;
+    if (normalizedTarget.startsWith('/api/')) return `${base}${normalizedTarget.slice(4)}`;
+    return `${gcApiOrigin(base)}${normalizedTarget}`;
+  }
+
+  return `${base}${normalizedTarget}`;
+};
+
 const gcSaveApiConfig = ({ baseUrl, internalToken, desktopIdentity }) => {
   if (baseUrl != null) localStorage.setItem(GC_API_STORAGE.baseUrl, baseUrl.replace(/\/$/, ''));
   if (internalToken != null) localStorage.setItem(GC_API_STORAGE.internalToken, internalToken);
@@ -48,18 +70,15 @@ const gcDesktopHeaders = () => {
 
 const gcRequest = async (path, options = {}) => {
   const config = gcApiConfig();
-  const normalizedPath = config.baseUrl.endsWith('/api') && path.startsWith('/api/')
-    ? path.slice(4)
-    : path;
-  const url = normalizedPath.startsWith('http') ? normalizedPath : `${config.baseUrl}${normalizedPath}`;
+  const url = gcBuildUrl(path, config.baseUrl);
   let response;
   try {
     response = await fetch(url, {
       ...options,
-      credentials: 'include',          // send httpOnly cookie on every request
       headers: {
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...gcHeaders(options.internal !== false),
+        ...(options.desktop ? gcDesktopHeaders() : {}),
         ...(options.headers || {}),
       },
     });
@@ -67,13 +86,14 @@ const gcRequest = async (path, options = {}) => {
     throw new Error('brain-api недоступен: проверьте URL backend, порт 8000 и CORS');
   }
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (_) {
+    data = { message: text || response.statusText };
+  }
   if (!response.ok) {
-    let detail = data && (data.detail || data.message);
-    // Pydantic v2 returns detail as array of validation errors
-    if (Array.isArray(detail)) {
-      detail = detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ');
-    }
+    const detail = data && (data.detail || data.message);
     throw new Error(detail || `${response.status} ${response.statusText}`);
   }
   return data;
@@ -168,72 +188,7 @@ const gcDemoCommandPayload = (command) => ({
 const GCApi = {
   config: gcApiConfig,
   saveConfig: gcSaveApiConfig,
-  health: () => gcRequest('/api/health', { internal: false }),
-
-  // ── Auth / Account ────────────────────────────────────────────────────────
-  register: (email, login, firstName, lastName, password) =>
-    gcRequest('/api/auth/register', {
-      method: 'POST', internal: false,
-      body: JSON.stringify({ email, login, first_name: firstName, last_name: lastName, password }),
-    }),
-  login: (email, password) =>
-    gcRequest('/api/auth/login', {
-      method: 'POST', internal: false,
-      body: JSON.stringify({ email, password }),
-    }),
-  logout: () => gcRequest('/api/auth/logout', { method: 'POST', internal: false }),
-  getMe: () => gcRequest('/api/auth/me', { internal: false }),
-  updateMe: (fields) => gcRequest('/api/auth/me', {
-    method: 'PATCH', internal: false,
-    body: JSON.stringify(fields),
-  }),
-
-  // ── Organizations ─────────────────────────────────────────────────────────
-  createOrg: (name, slug, description = '') =>
-    gcRequest('/api/organizations', {
-      method: 'POST', internal: false,
-      body: JSON.stringify({ name, slug, description }),
-    }),
-  getMyOrgs: () => gcRequest('/api/organizations/me', { internal: false }),
-  getOrg: (id) => gcRequest(`/api/organizations/${id}`, { internal: false }),
-  updateOrg: (id, fields) => gcRequest(`/api/organizations/${id}`, {
-    method: 'PATCH', internal: false,
-    body: JSON.stringify(fields),
-  }),
-  deleteOrg: (id) => gcRequest(`/api/organizations/${id}`, { method: 'DELETE', internal: false }),
-  getOrgMembers: (id) => gcRequest(`/api/organizations/${id}/members`, { internal: false }),
-  inviteMember: (orgId, email, role = 'member') =>
-    gcRequest(`/api/organizations/${orgId}/invite`, {
-      method: 'POST', internal: false,
-      body: JSON.stringify({ email, role }),
-    }),
-  removeMember: (orgId, memberId) =>
-    gcRequest(`/api/organizations/${orgId}/members/${memberId}`, { method: 'DELETE', internal: false }),
-  joinOrg: (inviteToken) =>
-    gcRequest(`/api/organizations/join/${inviteToken}`, { method: 'POST', internal: false }),
-
-  // ── Daemon / Agents ───────────────────────────────────────────────────────
-  getProfile: (workspaceId) =>
-    gcRequest(`/api/profile${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false }),
-  createPairingCode: (workspaceId) => gcRequest('/api/agents/pairing-code', {
-    method: 'POST', internal: false,
-    body: JSON.stringify({ workspace_id: workspaceId || null }),
-  }),
-  listAgents: (workspaceId) =>
-    gcRequest(`/api/agents${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false })
-      .then((data) => data.agents || []),
-  listDaemonUploads: (workspaceId) =>
-    gcRequest(`/api/daemon/uploads${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false })
-      .then((data) => data.uploads || []),
-  daemonHearingHistory: (workspaceId, limit = 20) =>
-    gcRequest(`/api/daemon/hearing-history?limit=${limit}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { internal: false })
-      .then((data) => data.items || []),
-  unpairAgent: (agentId, workspaceId) =>
-    gcRequest(`/api/agents/${agentId}/unpair${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, {
-      method: 'POST', internal: false,
-    }),
-
-  // ── Internal / Debug ──────────────────────────────────────────────────────
+  health: () => gcRequest('/health', { internal: false }),
   ready: () => gcRequest('/ready', { internal: false }),
   dependencies: () => gcRequest('/internal/debug/health/dependencies'),
   state: () => gcRequest('/internal/debug/state'),
@@ -245,44 +200,51 @@ const GCApi = {
     method: 'POST',
     body: JSON.stringify(gcDemoCommandPayload(command)),
   }),
-
-  // ── Demo / Brain ──────────────────────────────────────────────────────────
+  registerDesktop: (payload) => gcRequest('/desktop/devices/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  desktopTasks: () => gcRequest('/desktop/tasks', { desktop: true }).then((data) => (data.tasks || []).map(gcMapTask)),
+  desktopTranscripts: () => gcRequest('/desktop/transcripts/recent?limit=20', { desktop: true }).then((data) => (data.items || []).map(gcMapTranscript)),
+  desktopGamification: () => gcRequest('/desktop/gamification/me', { desktop: true }),
   sendChatMessage: (text, author = 'demo-user') => gcRequest('/api/chat/messages', {
-    method: 'POST', internal: false,
+    method: 'POST',
+    internal: false,
     body: JSON.stringify({ chat_id: 'demo', message_id: `web-${Date.now()}`, author, text }),
   }),
   getProposals: (status) => gcRequest(`/api/task-proposals${status ? `?status=${encodeURIComponent(status)}` : ''}`, { internal: false })
     .then((data) => data.proposals || []),
   confirmProposal: (proposalId) => gcRequest(`/api/task-proposals/${proposalId}/confirm`, {
-    method: 'POST', internal: false,
+    method: 'POST',
+    internal: false,
   }).then((data) => data.task),
   rejectProposal: (proposalId) => gcRequest(`/api/task-proposals/${proposalId}/reject`, {
-    method: 'POST', internal: false,
+    method: 'POST',
+    internal: false,
   }),
   getBoard: () => gcRequest('/api/board', { internal: false }).then((data) => data.columns || []),
   moveTask: (taskId, status) => gcRequest(`/api/tasks/${taskId}/move`, {
-    method: 'POST', internal: false,
+    method: 'POST',
+    internal: false,
     body: JSON.stringify({ status }),
   }).then((data) => data.task),
   getEveningDigest: () => gcRequest('/api/digest/evening', { internal: false }),
   getYouGileStatus: () => gcRequest('/api/integrations/yougile/status', { internal: false }),
-  daemonUploads: () => gcRequest('/api/daemon/uploads', { internal: false }).then((data) => data.uploads || []),
+  daemonUploads: () => gcRequest('/api/meetings', { internal: false }).then((data) => data.meetings || []),
   syncTaskYouGile: (taskId) => gcRequest(`/api/tasks/${taskId}/sync-yougile`, {
-    method: 'POST', internal: false,
+    method: 'POST',
+    internal: false,
   }).then((data) => data.task),
-
-  // ── WebSocket ─────────────────────────────────────────────────────────────
   wsUrl: () => {
     const configured = window.GC_WS_URL;
     if (configured) return configured;
-    const base = gcApiConfig().baseUrl;
-    if (/^https?:\/\//.test(base) && !base.endsWith('/api')) {
+    const base = gcApiOrigin(gcApiConfig().baseUrl);
+    if (/^https?:\/\//.test(base)) {
       return base.replace(/^http/, 'ws') + '/ws/events';
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws/events`;
+    return `${protocol}//${window.location.host}${base}/ws/events`;
   },
-
   mapTask: gcMapTask,
   mapTranscript: gcMapTranscript,
   buildKanban: gcBuildKanban,

@@ -309,20 +309,20 @@ const Sidebar = ({ go, counts, section, setSection, profile, language }) => {
   const tr = (ru, en) => copyText(language, ru, en);
   const nav = [
     { sec:tr('РАБОТА', 'WORK'), items:[
-      { id:'overview', icon:'grid', label:tr('Обзор', 'Overview') },
-      { id:'proposals', icon:'list', label:tr('Предложения', 'Proposals'), count: counts.proposals },
+      { id:'overview', icon:'grid', label:tr('Главная', 'Overview') },
+      { id:'proposals', icon:'list', label:tr('На подтверждение', 'Proposals'), count: counts.proposals },
       { id:'kanban', icon:'kanban', label:tr('Доска', 'Board'), count: counts.tasks },
-      { id:'digest', icon:'bell', label:tr('Дайджест', 'Digest') },
+      { id:'digest', icon:'bell', label:tr('Сводка', 'Digest') },
     ]},
     { sec:'TEAM', items:[
       { id:'profile', icon:'user', label:tr('Профиль', 'Profile') },
       { id:'organization', icon:'users', label:tr('Организация', 'Organization'), count: counts.organization },
-      { id:'achievements', icon:'award', label:tr('Ачивки', 'Achievements'), count: counts.achievements },
+      { id:'achievements', icon:'award', label:tr('Анивки', 'Achievements'), count: counts.achievements },
     ]},
     { sec:tr('ИНТЕГРАЦИИ', 'INTEGRATIONS'), items:[
-      { id:'daemon', icon:'download', label:tr('Загрузки daemon', 'Daemon uploads'), count: counts.daemonUploads },
+      { id:'daemon', icon:'download', label:tr('Daemon', 'Daemon'), count: counts.daemonUploads },
       { id:'yougile', icon:'plug', label:'YouGile' },
-      { id:'api', icon:'server', label:'Brain API' },
+      { id:'api', icon:'server', label:'Backend' },
     ]},
   ];
   return (
@@ -399,9 +399,9 @@ const CockpitHero = ({ apiState, metrics, ygStatus, language }) => {
   return (
   <section className={'gca-hero-panel gca-hero-panel--' + apiState.status}>
     <div className="gca-hero-copy">
-      <span className="gca-panel-eyebrow">BRAIN API / LIVE DEMO</span>
-      <h1>Cockpit</h1>
-      <p>{tr('Отправьте сообщение, проверьте извлеченное предложение, подтвердите его в доску и синхронизируйте с YouGile.', 'Send a message, review the extracted proposal, confirm it into the board, and sync it to YouGile.')}</p>
+      <span className="gca-panel-eyebrow">WORK COCKPIT</span>
+      <h1>{tr('Рабочий центр', 'Work Center')}</h1>
+      <p>{tr('Здесь видно, что требует решения: задачи на подтверждение, текущая доска, сводка по срокам и состояние подключений.', 'Here you can see what needs attention: tasks pending confirmation, the current board, deadline summary and connection status.')}</p>
       <div className="gca-source-strip">
         <span className="gca-source-chip"><b>API</b><small>{apiState.message}</small></span>
         <span className="gca-source-chip"><b>WebSocket</b><small>/ws/events</small></span>
@@ -591,86 +591,6 @@ const DigestPanel = ({ digest, onRefresh }) => (
     </div>
   </div>
 );
-
-const gcAgentBadge = (a) => {
-  if (!a.online) return ['gca-badge', 'offline'];
-  if (a.recording_status === 'recording') return ['gca-badge gca-badge--warn', 'recording'];
-  if (a.status === 'uploading') return ['gca-badge gca-badge--warn', 'uploading'];
-  if (a.status === 'error') return ['gca-badge gca-badge--err', 'error'];
-  return ['gca-badge gca-badge--ok', a.status || 'idle'];
-};
-
-const DaemonPairingPanel = ({ profile, agents, onRefresh }) => {
-  const [pairing, setPairing] = React.useState(null);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState('');
-  const workspaceId = profile && profile.workspace_id;
-  const genCode = async () => {
-    setBusy(true); setError('');
-    try { setPairing(await GCApi.createPairingCode(workspaceId)); }
-    catch (e) { setError(String((e && e.message) || e)); }
-    finally { setBusy(false); }
-  };
-  const unpair = async (id) => {
-    setError('');
-    try { await GCApi.unpairAgent(id, workspaceId); onRefresh(); }
-    catch (e) { setError(String((e && e.message) || e)); }
-  };
-  const list = agents || [];
-  return (
-    <div className="gca-panel">
-      <div className="gca-panel-head">
-        <div className="gca-panel-title"><Icon name="server" size={15}/>Connected daemons</div>
-        <span className="gca-panel-eyebrow">{profile ? profile.account_number : 'GET /api/profile'}</span>
-      </div>
-      <div className="gca-panel-body">
-        <p className="gca-muted" style={{ marginTop: 0 }}>
-          Workspace number: <strong>{profile ? profile.account_number : '…'}</strong>
-          {' '}— этот код нужен только для привязки устройства, не отправляйте посторонним.
-        </p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-          <button className="gc-btn gc-btn--primary gc-btn--sm" disabled={busy} onClick={genCode}>
-            <Icon name="link" size={13}/>{busy ? '…' : 'Сгенерировать код привязки'}
-          </button>
-          <a className="gc-btn gc-btn--secondary gc-btn--sm" href="/downloads/grey-cardinal-daemon-windows-x64.msi">
-            <Icon name="download" size={13}/>Скачать Windows MSI
-          </a>
-          <button className="gc-btn gc-btn--secondary gc-btn--sm" onClick={onRefresh}>
-            <Icon name="refresh" size={13}/>Обновить
-          </button>
-        </div>
-        {pairing && (
-          <div className="gca-callout" style={{ marginBottom: 10 }}>
-            Pairing code: <strong style={{ fontSize: 18 }}>{pairing.pairing_code}</strong>
-            {' '}— действует {pairing.expires_in_minutes} мин. Введите его в трее daemon → «Pair device».
-          </div>
-        )}
-        {error && <div className="gca-badge gca-badge--err" style={{ marginBottom: 8 }}>{error}</div>}
-        {list.length === 0 ? (
-          <EmptyState icon="server" title="Нет подключённых устройств" desc="Сгенерируйте код, установите MSI и привяжите daemon."/>
-        ) : (
-          <div className="gca-board">
-            {list.map((a, i) => {
-              const [cls, label] = gcAgentBadge(a);
-              return (
-                <div className="gca-board-row" key={a.agent_id || i}>
-                  <span className="gca-board-rank">{i + 1}</span>
-                  <span className="gca-avatar">{(a.device_name || 'DA').slice(0, 2).toUpperCase()}</span>
-                  <span className="gca-board-name">
-                    {a.device_name}<small> · {a.os} · v{a.version || '—'}</small>
-                  </span>
-                  <span className="gca-board-xp">{a.online ? 'online' : 'offline'}</span>
-                  <span className={cls}>{label}</span>
-                  <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => unpair(a.agent_id)}>Unpair</button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 const DaemonUploadsPanel = ({ uploads, onRefresh }) => (
   <div className="gca-panel">
@@ -1264,8 +1184,6 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
   const [digest, setDigest] = React.useState(null);
   const [ygStatus, setYgStatus] = React.useState(null);
   const [daemonUploads, setDaemonUploads] = React.useState([]);
-  const [accountProfile, setAccountProfile] = React.useState(null);
-  const [agents, setAgents] = React.useState([]);
   const [signals, setSignals] = React.useState([]);
 
   const taskCount = React.useMemo(
@@ -1309,23 +1227,18 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
     GCApi.saveConfig(config);
     try {
       await GCApi.health();
-      const [proposalRes, boardRes, digestRes, ygRes, daemonRes, profileRes, agentsRes] =
-        await Promise.allSettled([
-          GCApi.getProposals('pending'),
-          GCApi.getBoard(),
-          GCApi.getEveningDigest(),
-          GCApi.getYouGileStatus(),
-          GCApi.daemonUploads(),
-          GCApi.getProfile(),
-          GCApi.listAgents(),
-        ]);
+      const [proposalRes, boardRes, digestRes, ygRes, daemonRes] = await Promise.allSettled([
+        GCApi.getProposals('pending'),
+        GCApi.getBoard(),
+        GCApi.getEveningDigest(),
+        GCApi.getYouGileStatus(),
+        GCApi.daemonUploads(),
+      ]);
       if (proposalRes.status === 'fulfilled') setProposals(proposalRes.value);
       if (boardRes.status === 'fulfilled') setColumns(boardRes.value);
       if (digestRes.status === 'fulfilled') setDigest(digestRes.value);
       if (ygRes.status === 'fulfilled') setYgStatus(ygRes.value);
       if (daemonRes.status === 'fulfilled') setDaemonUploads(daemonRes.value);
-      if (profileRes.status === 'fulfilled') setAccountProfile(profileRes.value);
-      if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value);
       setSignals(prev => [{
         id:String(Date.now()),
         kind:'create',
@@ -1508,10 +1421,6 @@ const AppDashboardPage = ({ go, language, setLanguage }) => {
 
           {(section === 'overview' || section === 'digest') && (
             <DigestPanel digest={digest} onRefresh={loadDashboard}/>
-          )}
-
-          {(section === 'overview' || section === 'daemon') && (
-            <DaemonPairingPanel profile={accountProfile} agents={agents} onRefresh={loadDashboard}/>
           )}
 
           {(section === 'overview' || section === 'daemon') && (
