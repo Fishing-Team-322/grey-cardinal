@@ -62,13 +62,12 @@ const LoginPage = ({ go, language, setLanguage }) => {
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
+    setStatus('');
 
     const normalizedEmail = normalizeAuthEmail(email);
-    const account = loadAuthAccount();
-
     if (!validAuthEmail(normalizedEmail)) {
       setStatus(tr('Введите корректную почту.', 'Enter a valid email.'));
       setBusy(false);
@@ -79,20 +78,17 @@ const LoginPage = ({ go, language, setLanguage }) => {
       setBusy(false);
       return;
     }
-    if (!account) {
-      setStatus(tr('Аккаунт пока не создан. Зарегистрируйтесь сначала.', 'No account exists yet. Register first.'));
-      setBusy(false);
-      return;
-    }
-    if (account.email !== normalizedEmail || account.passwordHash !== hashAuthPassword(password)) {
-      setStatus(tr('Почта или пароль не совпадают.', 'Email or password does not match.'));
-      setBusy(false);
-      return;
-    }
 
-    saveAuthSession(account);
-    setStatus(tr('Вход выполнен. Открываю cockpit.', 'Signed in. Opening cockpit.'));
-    window.setTimeout(() => go('/app'), 220);
+    try {
+      const user = await GCApi.login(normalizedEmail, password);
+      // Store minimal user info for display (cookie handles auth)
+      saveAuthSession({ email: user.email, login: user.login, displayName: user.display_name });
+      setStatus(tr('Вход выполнен. Открываю cockpit.', 'Signed in. Opening cockpit.'));
+      window.setTimeout(() => go('/app'), 220);
+    } catch (err) {
+      setStatus(err.message || tr('Ошибка входа.', 'Login failed.'));
+      setBusy(false);
+    }
   };
 
   return (
@@ -139,9 +135,10 @@ const RegisterPage = ({ go, language, setLanguage }) => {
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
+    setStatus('');
 
     const normalizedEmail = normalizeAuthEmail(email);
     const normalizedLogin = login.trim();
@@ -174,18 +171,22 @@ const RegisterPage = ({ go, language, setLanguage }) => {
       return;
     }
 
-    const account = {
-      email: normalizedEmail,
-      login: normalizedLogin,
-      firstName: normalizedFirstName,
-      lastName: normalizedLastName,
-      passwordHash: hashAuthPassword(password),
-      createdAt: new Date().toISOString(),
-    };
-    localStorage.setItem(GC_AUTH_ACCOUNT_KEY, JSON.stringify(account));
-    saveAuthSession(account);
-    setStatus(tr('Аккаунт создан. Открываю cockpit.', 'Account created. Opening cockpit.'));
-    window.setTimeout(() => go('/app'), 220);
+    try {
+      const user = await GCApi.register(normalizedEmail, normalizedLogin, normalizedFirstName, normalizedLastName, password);
+      saveAuthSession({ email: user.email, login: user.login, displayName: user.display_name });
+      setStatus(tr('Аккаунт создан. Открываю cockpit.', 'Account created. Opening cockpit.'));
+      window.setTimeout(() => go('/app'), 220);
+    } catch (err) {
+      const msg = err.message || '';
+      if (msg.includes('Email already')) {
+        setStatus(tr('Эта почта уже зарегистрирована.', 'This email is already registered.'));
+      } else if (msg.includes('Login already')) {
+        setStatus(tr('Этот логин уже занят.', 'This login is already taken.'));
+      } else {
+        setStatus(msg || tr('Ошибка регистрации.', 'Registration failed.'));
+      }
+      setBusy(false);
+    }
   };
 
   return (

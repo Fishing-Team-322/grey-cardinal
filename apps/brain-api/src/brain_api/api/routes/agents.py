@@ -267,3 +267,38 @@ async def list_daemon_uploads(
     store: AgentsStore = Depends(get_agents_store),
 ) -> dict[str, Any]:
     return {"ok": True, "uploads": store.list_uploads(workspace_id)}
+
+
+@router.get("/daemon/hearing-history")
+async def daemon_hearing_history(
+    workspace_id: str | None = None,
+    limit: int = 20,
+    store: AgentsStore = Depends(get_agents_store),
+    brain: BrainStore = Depends(get_brain_store),
+) -> dict[str, Any]:
+    """Return recent daemon uploads enriched with proposal/task data for the cockpit history panel."""
+    uploads = store.list_uploads(workspace_id)
+    uploads = uploads[-limit:] if len(uploads) > limit else uploads
+
+    # Enrich each upload with its corresponding proposal
+    proposals_by_id = {p["proposal_id"]: p for p in brain.list_proposals() if "proposal_id" in p}
+
+    history = []
+    for up in reversed(uploads):
+        proposal_id = up.get("proposal_id", "")
+        proposal = proposals_by_id.get(proposal_id)
+        history.append(
+            {
+                "upload_id": up.get("upload_id", ""),
+                "time": up.get("uploaded_at", ""),
+                "agent_id": up.get("agent_id", ""),
+                "duration_sec": up.get("duration_sec"),
+                "transcript_text": up.get("transcript_text", ""),
+                "proposal_id": proposal_id,
+                "prepared_task": proposal.get("title", "") if proposal else "",
+                "assignee": proposal.get("assignee_text", "") if proposal else "",
+                "confidence": proposal.get("confidence", 0) if proposal else 0,
+                "status": proposal.get("status", "unknown") if proposal else "no_proposal",
+            }
+        )
+    return {"ok": True, "items": history, "total": len(history)}
