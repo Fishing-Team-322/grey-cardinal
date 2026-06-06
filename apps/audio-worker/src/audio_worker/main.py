@@ -221,21 +221,6 @@ async def transcribe(
     return {"text": text}
 
 
-@app.get("/session/current")
-async def session_current() -> dict[str, object]:
-    """Return the active team meeting session, if any. Agents can poll this."""
-    meeting = await brain_client.get_active_meeting()
-    if meeting is None:
-        return {"active": False, "meeting_id": None}
-    return {
-        "active": True,
-        "meeting_id": meeting.public_id,
-        "status": meeting.status,
-        "started_at": meeting.started_at.isoformat() if meeting.started_at else None,
-        "transcript_count": meeting.transcript_count,
-    }
-
-
 @app.post("/api/audio/upload")
 async def legacy_audio_upload(
     audio: UploadFile | None = File(default=None),

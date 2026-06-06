@@ -14,10 +14,11 @@ from brain_api.application.ports import BoardGateway
 from brain_api.config import Settings
 from brain_api.domain.entities import Task
 from brain_api.domain.enums import TaskStatus
-from brain_api.infrastructure.board.base import YouGileConfig
-from brain_api.infrastructure.board.yougile import YouGileBoardGateway
+from brain_api.infrastructure.board.mock import MockBoardGateway
+from brain_api.infrastructure.board.yougile import YouGileBoardAdapter
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.security.encryption import SecretCipher
+from brain_api.integrations.yougile import YouGileClient
 
 
 class BoardConfigurationError(RuntimeError):
@@ -47,33 +48,28 @@ class BoardAdapterFactory:
             team = await session.get(m.TeamModel, team_id)
             if team is None:
                 raise BoardConfigurationError("Team not found")
-            if team.board_provider != "yougile":
+            # Disconnected / not-yet-connected teams use the mock board so task
+            # creation keeps working locally (see disconnect + auth-error fallback).
+            if team.board_provider == "mock" or not team.board_credentials_encrypted:
+                adapter: BoardGateway = MockBoardGateway()
+            elif team.board_provider == "yougile":
+                credentials = json.loads(
+                    self._cipher.decrypt_text(team.board_credentials_encrypted) or "{}"
+                )
+                config = dict(team.board_config or {})
+                client = YouGileClient(
+                    credentials.get("api_key", ""),
+                    base_url=self._settings.yougile_api_base_url,
+                    rate_per_minute=self._settings.yougile_rate_limit_per_minute,
+                )
+                adapter = YouGileBoardAdapter(
+                    self._session_factory,
+                    team_id,
+                    client,
+                    config.get("default_column_ids", {}),
+                )
+            else:
                 raise BoardConfigurationError(f"Unsupported board provider: {team.board_provider}")
-            if not team.board_credentials_encrypted:
-                raise BoardConfigurationError(
-                    "YouGile credentials are not configured for this team"
-                )
-
-            credentials_raw = self._cipher.decrypt_text(team.board_credentials_encrypted)
-            credentials = json.loads(credentials_raw or "{}")
-            config = dict(team.board_config or {})
-            adapter = YouGileBoardGateway(
-                YouGileConfig(
-                    api_base_url=config.get("api_base_url") or self._settings.yougile_api_base_url,
-                    api_key=credentials.get("api_key") or config.get("api_key") or "",
-                    company_id=config.get("company_id") or credentials.get("company_id"),
-                    project_id=config.get("project_id") or credentials.get("project_id"),
-                    board_id=config.get("board_id") or credentials.get("board_id"),
-                    column_backlog_id=config.get("column_backlog_id"),
-                    column_todo_id=(
-                        config.get("column_todo_id") or credentials.get("column_todo_id")
-                    ),
-                    column_in_progress_id=config.get("column_in_progress_id"),
-                    column_review_id=config.get("column_review_id"),
-                    column_blocked_id=config.get("column_blocked_id"),
-                    column_done_id=config.get("column_done_id"),
-                )
-            )
 
         self._cache[team_id] = _CacheEntry(adapter=adapter, expires_at=now + 60)
         return adapter

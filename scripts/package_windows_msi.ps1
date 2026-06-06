@@ -15,7 +15,7 @@ $templateDir = Join-Path $agentRoot "package\windows"
 $wixSource = Join-Path $agentRoot "installer\windows\wix\GreyCardinalDaemon.wxs"
 $toolsDir = Join-Path $repoRoot ".tools"
 $wixExe = Join-Path $toolsDir "wix.exe"
-$downloadDir = Join-Path $repoRoot "apps\frontend-dashboard\public\downloads"
+$downloadDir = Join-Path $repoRoot "apps\frontend\public\downloads"
 $stageDir = Join-Path $downloadDir "grey-cardinal-daemon-windows-msi-stage"
 $msiPath = Join-Path $downloadDir "grey-cardinal-daemon-windows-x64.msi"
 

@@ -432,36 +432,16 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("user_id", "workspace_id", name="uq_user_xp_total_scope"),
     )
-    op.create_table(
-        "organizations",
-        sa.Column("id", UUID, primary_key=True),
-        sa.Column("name", sa.Text(), nullable=False),
-        sa.Column("slug", sa.Text(), unique=True, nullable=False),
-        sa.Column("description", sa.Text(), nullable=False, server_default=""),
-        sa.Column("photo_data_url", sa.Text(), nullable=False, server_default=""),
-        sa.Column("owner_id", UUID, sa.ForeignKey("users.id"), nullable=False),
-        *timestamps(),
-    )
-    op.create_table(
-        "organization_members",
-        sa.Column("id", UUID, primary_key=True),
-        sa.Column("organization_id", UUID, sa.ForeignKey("organizations.id"), nullable=False),
-        sa.Column("user_id", UUID, sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("role", sa.Text(), nullable=False, server_default="member"),
-        sa.Column("status", sa.Text(), nullable=False, server_default="active"),
-        sa.Column("invited_email", sa.Text(), nullable=True),
-        sa.Column("invite_token", sa.Text(), unique=True, nullable=True),
-        *timestamps(),
-        sa.UniqueConstraint("organization_id", "user_id", name="uq_org_member_user"),
-    )
+    # NOTE: legacy `organizations` / `organization_members` tables were removed in
+    # favour of the unified Company/Team model. They are intentionally NOT created
+    # here. Migration 0002_drop_legacy_organizations drops them on databases that
+    # were initialised before this cleanup.
 
 
 def downgrade() -> None:
     for table in (
         "audit_logs",
         "gamification_events",
-        "organization_members",
-        "organizations",
         "user_xp_totals",
         "user_xp_events",
         "digest_logs",
