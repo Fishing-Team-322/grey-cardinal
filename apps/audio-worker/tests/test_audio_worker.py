@@ -81,6 +81,14 @@ def test_health(monkeypatch):
     assert response.json()["ok"] is True
 
 
+def test_legacy_session_current_is_not_exposed(monkeypatch):
+    install_fakes(monkeypatch)
+
+    response = TestClient(audio_main.app).get("/session/current")
+
+    assert response.status_code == 404
+
+
 def test_audio_chunk_accepts_tiny_wav_and_sends_transcript(monkeypatch):
     fake_brain = install_fakes(monkeypatch)
     client = TestClient(audio_main.app)
