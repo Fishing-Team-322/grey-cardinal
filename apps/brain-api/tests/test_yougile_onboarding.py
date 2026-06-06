@@ -8,12 +8,12 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from yougile_fakes import FakeYouGile
 
 from brain_api.api.deps import get_container
 from brain_api.api.routes import yougile as yg_routes
 from brain_api.api.routes.accounts import get_current_user, get_db
 from brain_api.infrastructure.db import models as m
-from yougile_fakes import FakeYouGile
 
 
 @pytest_asyncio.fixture
@@ -22,7 +22,10 @@ async def manager_and_team(session_factory):
         user = m.UserModel(id=uuid4(), display_name="Mgr", email="mgr@e.com", login="mgr")
         company = m.CompanyModel(id=uuid4(), name="C", timezone="Europe/Moscow", created_by=user.id)
         team = m.TeamModel(
-            id=uuid4(), company_id=company.id, name="Team", timezone="Europe/Moscow",
+            id=uuid4(),
+            company_id=company.id,
+            name="Team",
+            timezone="Europe/Moscow",
             board_provider="yougile",
         )
         session.add_all([user, company, team])

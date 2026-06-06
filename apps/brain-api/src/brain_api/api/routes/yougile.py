@@ -98,7 +98,10 @@ async def yougile_login(
     try:
         companies = await client.auth_companies(body.login, body.password)
     except YouGileAuthError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"error": "invalid_credentials"})
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"error": "invalid_credentials"},
+        ) from None
     except YouGileError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"YouGile unavailable: {exc}") from exc
 
@@ -140,11 +143,16 @@ async def yougile_connect(
     client = YouGileClient("", base_url=settings.yougile_api_base_url)
     try:
         keys = await client.auth_keys_get(onboarding.login, password, body.company_id)
-        api_key = keys[0]["key"] if keys else await client.auth_keys_create(
-            onboarding.login, password, body.company_id
+        api_key = (
+            keys[0]["key"]
+            if keys
+            else await client.auth_keys_create(onboarding.login, password, body.company_id)
         )
     except YouGileAuthError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"error": "invalid_credentials"})
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"error": "invalid_credentials"},
+        ) from None
     except YouGileError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"YouGile unavailable: {exc}") from exc
 
@@ -233,13 +241,20 @@ async def yougile_status(
         primary = {"id": config["yougile_project_id"], "name": config.get("yougile_project_name")}
     remaining = None
     try:
-        api_key = json.loads(_cipher(settings).decrypt_text(team.board_credentials_encrypted) or "{}").get("api_key", "")
-        remaining = YouGileClient(api_key, base_url=settings.yougile_api_base_url).rate_limit_remaining
+        api_key = json.loads(
+            _cipher(settings).decrypt_text(team.board_credentials_encrypted) or "{}"
+        ).get("api_key", "")
+        remaining = YouGileClient(
+            api_key, base_url=settings.yougile_api_base_url
+        ).rate_limit_remaining
     except Exception:  # noqa: BLE001 — status must not fail on rate-limit probe
         pass
     return {
         "connected": True,
-        "company": {"id": config.get("yougile_company_id"), "name": config.get("yougile_company_name")},
+        "company": {
+            "id": config.get("yougile_company_id"),
+            "name": config.get("yougile_company_name"),
+        },
         "last_synced_at": config.get("synced_at"),
         "primary_project": primary,
         "stats": stats,
@@ -275,8 +290,17 @@ async def yougile_disconnect(
     team.board_provider = "mock"
     team.board_credentials_encrypted = None
     team.board_config = {
-        k: v for k, v in config.items() if not k.startswith("yougile_") and k not in
-        {"webhook_secret", "webhook_subscriptions", "default_board_id", "default_column_ids", "synced_at"}
+        k: v
+        for k, v in config.items()
+        if not k.startswith("yougile_")
+        and k
+        not in {
+            "webhook_secret",
+            "webhook_subscriptions",
+            "default_board_id",
+            "default_column_ids",
+            "synced_at",
+        }
     }
     session.add(team)
     await session.commit()

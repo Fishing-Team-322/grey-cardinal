@@ -39,7 +39,10 @@ def _client(handler, **kw) -> YouGileClient:
 
 
 def _page(content, has_next=False):
-    return {"paging": {"count": len(content), "limit": 50, "offset": 0, "next": has_next}, "content": content}
+    return {
+        "paging": {"count": len(content), "limit": 50, "offset": 0, "next": has_next},
+        "content": content,
+    }
 
 
 @pytest.mark.asyncio
@@ -81,6 +84,28 @@ async def test_auth_endpoints_send_no_bearer():
     companies = await _client(handler).auth_companies("a@b.com", "pw")
     assert companies == [{"id": "co", "name": "C"}]
     assert seen["auth"] is None
+
+
+@pytest.mark.asyncio
+async def test_webhook_and_comment_payloads_match_openapi():
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((req.url.path, req.read().decode()))
+        return httpx.Response(201, json={"id": "created"})
+
+    client = _client(handler)
+    await client.create_webhook("https://example.test/hook", "task-*")
+    await client.create_chat_message("task-1", "Ready <today>")
+
+    assert seen[0] == (
+        "/api-v2/webhooks",
+        '{"url":"https://example.test/hook","event":"task-*","filters":[]}',
+    )
+    assert seen[1] == (
+        "/api-v2/chats/task-1/messages",
+        '{"text":"Ready <today>","textHtml":"<p>Ready &lt;today&gt;</p>","label":"Grey Cardinal"}',
+    )
 
 
 @pytest.mark.asyncio

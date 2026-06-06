@@ -6,12 +6,12 @@ import json
 from uuid import uuid4
 
 import pytest
+from yougile_fakes import FakeYouGile
 
 from brain_api.application.use_cases.yougile_discovery import discover_yougile_workspace
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.security.encryption import SecretCipher
 from brain_api.integrations.yougile import YouGileMappingRepo
-from yougile_fakes import FakeYouGile
 
 CIPHER = SecretCipher("unit-test-encryption-key")
 
@@ -20,7 +20,10 @@ async def _seed_connected_team(session, member_email="member@example.com"):
     user = m.UserModel(id=uuid4(), display_name="M", email=member_email, login="m")
     company = m.CompanyModel(id=uuid4(), name="C", timezone="Europe/Moscow", created_by=user.id)
     team = m.TeamModel(
-        id=uuid4(), company_id=company.id, name="Команда А", timezone="Europe/Moscow",
+        id=uuid4(),
+        company_id=company.id,
+        name="Команда А",
+        timezone="Europe/Moscow",
         board_provider="yougile",
         board_credentials_encrypted=CIPHER.encrypt_text(json.dumps({"api_key": "k"})),
     )
@@ -60,7 +63,9 @@ async def test_discovery_mirrors_populated_account(session_factory):
         assert cfg["yougile_project_id"] == "p1"
         assert cfg["synced_at"] is not None
         assert cfg["default_column_ids"] == {
-            "todo": "c-todo", "in_progress": "c-prog", "done": "c-done"
+            "todo": "c-todo",
+            "in_progress": "c-prog",
+            "done": "c-done",
         }
         # user matched to local team member by email
         umap = await repo.find_by_yougile("user", "u1")

@@ -81,21 +81,21 @@ router = APIRouter(
 )
 
 # ── Callback action prefixes ─────────────────────────────────────────────────
-CB_MENU_MAIN       = "menu:main"
-CB_MENU_TASKS      = "menu:tasks"
-CB_MENU_MEETINGS   = "menu:meetings"
-CB_MENU_SETTINGS   = "menu:settings"
-CB_MENU_DIGEST     = "menu:digest"
-CB_SETUP_JIRA      = "setup:jira"
-CB_SETUP_YOUGILE   = "setup:yougile"
-CB_MEETING_START   = "meeting:start"
-CB_MEETING_STOP    = "meeting:stop"
-CB_MEETING_STATUS  = "meeting:status"
-CB_TASK_LIST       = "task:list"
-CB_DEMO_RUN        = "demo:run"
-CB_BIND_CHAT       = "chat:bind"
-CB_MODE_CONFIRM    = "mode:confirm"
-CB_MODE_AUTO       = "mode:auto"
+CB_MENU_MAIN = "menu:main"
+CB_MENU_TASKS = "menu:tasks"
+CB_MENU_MEETINGS = "menu:meetings"
+CB_MENU_SETTINGS = "menu:settings"
+CB_MENU_DIGEST = "menu:digest"
+CB_SETUP_JIRA = "setup:jira"
+CB_SETUP_YOUGILE = "setup:yougile"
+CB_MEETING_START = "meeting:start"
+CB_MEETING_STOP = "meeting:stop"
+CB_MEETING_STATUS = "meeting:status"
+CB_TASK_LIST = "task:list"
+CB_DEMO_RUN = "demo:run"
+CB_BIND_CHAT = "chat:bind"
+CB_MODE_CONFIRM = "mode:confirm"
+CB_MODE_AUTO = "mode:auto"
 
 _DEMO_LINES = [
     "Петя, подготовь оплату до завтра 18:00",
@@ -105,14 +105,10 @@ _DEMO_LINES = [
 
 # ── Inline keyboard builders ─────────────────────────────────────────────────
 
+
 def _kb(*rows: list[tuple[str, str]]) -> dict:
     """Build inline_keyboard reply_markup from rows of (text, callback_data)."""
-    return {
-        "inline_keyboard": [
-            [{"text": t, "callback_data": d} for t, d in row]
-            for row in rows
-        ]
-    }
+    return {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in row] for row in rows]}
 
 
 def _main_menu_kb(is_group: bool = False) -> dict:
@@ -193,12 +189,8 @@ _JIRA_SETUP_TEXT = (
 
 _YOUGILE_SETUP_TEXT = (
     "🟡 *Подключение YouGile*\n\n"
-    "Задайте переменные окружения на сервере:\n"
-    "`BOARD_PROVIDER=yougile`\n"
-    "`YOUGILE_API_KEY=...`\n"
-    "`YOUGILE_PROJECT_ID=...`\n"
-    "`YOUGILE_COLUMN_TODO_ID=...`\n\n"
-    "После настройки перезапустите бота."
+    "Откройте настройки команды на сайте и войдите в YouGile. "
+    "Ключ API будет получен и зашифрован автоматически."
 )
 
 
@@ -221,6 +213,7 @@ class TelegramBindTeamRequest(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @router.post("/link", response_model=ActionsResponse)
 async def link_telegram_account(
@@ -447,7 +440,9 @@ async def ingest_callback(
             await uow.projects.set_default_chat(project.id, bound_chat.id)
             await uow.commit()
         return _edit_with_kb(
-            chat_id, msg_id, cq_id,
+            chat_id,
+            msg_id,
+            cq_id,
             "✅ Чат привязан к workspace!\nТеперь я буду следить за сообщениями здесь.",
             _back_kb(),
         )
@@ -456,13 +451,18 @@ async def ingest_callback(
     if data == CB_MEETING_START:
         async with container.make_uow() as uow:
             meeting = await start_meeting(
-                uow, container.config,
-                telegram_chat_id=chat_id, chat_type="group",
-                chat_title=None, external_source="telegram",
+                uow,
+                container.config,
+                telegram_chat_id=chat_id,
+                chat_type="group",
+                chat_title=None,
+                external_source="telegram",
             )
             await uow.commit()
         return _edit_with_kb(
-            chat_id, msg_id, cq_id,
+            chat_id,
+            msg_id,
+            cq_id,
             f"▶️ *Встреча начата*\nID: `{meeting.public_id}`\n"
             "Я слушаю — отправляй голосовые или пиши.",
             _meetings_kb(),
@@ -477,7 +477,9 @@ async def ingest_callback(
             await uow.commit()
             dto = await meeting_response(uow, active)
         return _edit_with_kb(
-            chat_id, msg_id, cq_id,
+            chat_id,
+            msg_id,
+            cq_id,
             f"⏹ *Встреча завершена* `{active.public_id}`\n"
             f"📝 Реплик: {dto.transcript_count}\n"
             f"✅ Задач извлечено: {dto.proposal_count}",
@@ -491,7 +493,9 @@ async def ingest_callback(
                 return _answer(cq_id, "Нет активной встречи")
             dto = await meeting_response(uow, active)
         return _edit_with_kb(
-            chat_id, msg_id, cq_id,
+            chat_id,
+            msg_id,
+            cq_id,
             f"📊 *Активная встреча*\nID: `{active.public_id}`\n"
             f"Начало: {active.started_at:%H:%M}\n"
             f"Реплик: {dto.transcript_count}\n"
@@ -517,24 +521,34 @@ async def ingest_callback(
     if data == CB_DEMO_RUN:
         async with container.make_uow() as uow:
             meeting = await start_meeting(
-                uow, container.config,
-                telegram_chat_id=chat_id, chat_type="group",
-                chat_title="Demo", external_source="demo",
+                uow,
+                container.config,
+                telegram_chat_id=chat_id,
+                chat_type="group",
+                chat_title="Demo",
+                external_source="demo",
                 metadata={"demo": True},
             )
             await uow.commit()
             for line in _DEMO_LINES:
                 await IngestTranscriptEvent(
-                    uow, container.extractor, container.telegram_gateway,
-                    container.event_publisher, container.config,
-                ).execute(TranscriptEvent(
-                    meeting_id=meeting.public_id,
-                    text=line,
-                    ts=container.config.now(),
-                    source=TranscriptSource.demo,
-                ))
+                    uow,
+                    container.extractor,
+                    container.telegram_gateway,
+                    container.event_publisher,
+                    container.config,
+                ).execute(
+                    TranscriptEvent(
+                        meeting_id=meeting.public_id,
+                        text=line,
+                        ts=container.config.now(),
+                        source=TranscriptSource.demo,
+                    )
+                )
         return _edit_with_kb(
-            chat_id, msg_id, cq_id,
+            chat_id,
+            msg_id,
+            cq_id,
             f"🚀 *Демо запущено!*\nВстреча `{meeting.public_id}`\n\n"
             "Я отправил 3 тестовые реплики как transcript events.\n"
             "Предложения задач появятся выше ☝️",
@@ -545,9 +559,11 @@ async def ingest_callback(
     action, target_id = _parse_callback(data)
 
     if action == CB_EDIT:
-        return ActionsResponse(actions=[
-            AnswerCallbackAction(callback_query_id=cq_id, text=EDIT_STUB_TEXT, show_alert=True)
-        ])
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text=EDIT_STUB_TEXT, show_alert=True)
+            ]
+        )
 
     if target_id is None:
         return _answer(cq_id, "Неизвестное действие")
@@ -595,9 +611,7 @@ async def _try_v2_semantic_message(
             )
 
         chat = await session.scalar(
-            select(m.TelegramChatModel).where(
-                m.TelegramChatModel.telegram_chat_id == event.chat.id
-            )
+            select(m.TelegramChatModel).where(m.TelegramChatModel.telegram_chat_id == event.chat.id)
         )
         if chat is None:
             chat = m.TelegramChatModel(
@@ -940,22 +954,28 @@ async def ingest_command(
                 bound_chat = await uow.chats.get_by_telegram_id(chat_id)
                 if bound_chat is None:
                     raise RuntimeError("chat binding failed")
-                await uow.projects.set_default_chat(
-                    project.id, bound_chat.id
-                )
+                await uow.projects.set_default_chat(project.id, bound_chat.id)
                 await uow.commit()
-            return ActionsResponse(actions=[SendMessageAction(
-                chat_id=chat_id,
-                text=_WELCOME_GROUP,
-                parse_mode="Markdown",
-                reply_markup=_confirmation_mode_kb(),
-            )])
-        return ActionsResponse(actions=[SendMessageAction(
-            chat_id=chat_id,
-            text=_WELCOME_PRIVATE,
-            parse_mode="Markdown",
-            reply_markup=_main_menu_kb(is_group=False),
-        )])
+            return ActionsResponse(
+                actions=[
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=_WELCOME_GROUP,
+                        parse_mode="Markdown",
+                        reply_markup=_confirmation_mode_kb(),
+                    )
+                ]
+            )
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=chat_id,
+                    text=_WELCOME_PRIVATE,
+                    parse_mode="Markdown",
+                    reply_markup=_main_menu_kb(is_group=False),
+                )
+            ]
+        )
 
     # ── Материалы по задаче: /howto, /material, /help <тема|GC-id> ───────
     if command in ("howto", "material", "materials"):
@@ -969,12 +989,16 @@ async def ingest_command(
         if event.args:
             async with container.session_factory() as session:
                 return _text(chat_id, await materials_for_arg(session, " ".join(event.args)))
-        return ActionsResponse(actions=[SendMessageAction(
-            chat_id=chat_id,
-            text=_HELP_TEXT,
-            parse_mode="MarkdownV2",
-            reply_markup=_back_kb(),
-        )])
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=chat_id,
+                    text=_HELP_TEXT,
+                    parse_mode="MarkdownV2",
+                    reply_markup=_back_kb(),
+                )
+            ]
+        )
 
     # ── Визуальное меню настроек команды ─────────────────────────────────
     if command == "settings":
@@ -1004,6 +1028,7 @@ async def ingest_command(
         jira_url, email, token, project_key = args[0], args[1], args[2], args[3]
         # Store in env (runtime — in-memory for demo; persistent via .env in prod)
         import os
+
         os.environ["JIRA_URL"] = jira_url
         os.environ["JIRA_EMAIL"] = email
         os.environ["JIRA_API_TOKEN"] = token
@@ -1039,10 +1064,15 @@ async def ingest_command(
         async with container.make_uow() as uow:
             tasks = await ListTasks(uow, container.config).list_active()
             from brain_api.application.rendering import render_task_list
-            return ActionsResponse(actions=[SendMessageAction(
-                chat_id=chat_id,
-                text=render_task_list(tasks, container.config.timezone),
-            )])
+
+            return ActionsResponse(
+                actions=[
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=render_task_list(tasks, container.config.timezone),
+                    )
+                ]
+            )
 
     # ── Task status commands ──────────────────────────────────────────────
     _STATUS_COMMANDS = {"start_task", "block", "done"}
@@ -1056,9 +1086,12 @@ async def ingest_command(
     if command == "meeting_start":
         async with container.make_uow() as uow:
             meeting = await start_meeting(
-                uow, container.config,
-                telegram_chat_id=chat_id, chat_type=event.chat.type,
-                chat_title=event.chat.title, external_source="telegram",
+                uow,
+                container.config,
+                telegram_chat_id=chat_id,
+                chat_type=event.chat.type,
+                chat_title=event.chat.title,
+                external_source="telegram",
             )
             await uow.commit()
         return _md(chat_id, f"▶️ *Встреча начата*: `{meeting.public_id}`", _meetings_kb())
@@ -1071,10 +1104,12 @@ async def ingest_command(
             active = await stop_meeting(uow, container.config, active)
             await uow.commit()
             dto = await meeting_response(uow, active)
-        return _md(chat_id,
+        return _md(
+            chat_id,
             f"⏹ *Встреча завершена* `{active.public_id}`\n"
             f"Реплик: {dto.transcript_count} | Задач: {dto.proposal_count}",
-            _meetings_kb())
+            _meetings_kb(),
+        )
 
     if command == "meeting_status":
         async with container.make_uow() as uow:
@@ -1082,32 +1117,45 @@ async def ingest_command(
             if active is None:
                 return _text(chat_id, "Нет активной встречи.")
             dto = await meeting_response(uow, active)
-        return _md(chat_id,
+        return _md(
+            chat_id,
             f"📊 *Встреча* `{active.public_id}`\nСтарт: {active.started_at:%H:%M}\n"
             f"Реплик: {dto.transcript_count} | Задач: {dto.proposal_count}",
-            _meetings_kb())
+            _meetings_kb(),
+        )
 
     # ── Demo commands ─────────────────────────────────────────────────────
     if command == "demo_start":
         async with container.make_uow() as uow:
             meeting = await start_meeting(
-                uow, container.config,
-                telegram_chat_id=chat_id, chat_type=event.chat.type,
-                chat_title=event.chat.title, external_source="demo",
+                uow,
+                container.config,
+                telegram_chat_id=chat_id,
+                chat_type=event.chat.type,
+                chat_title=event.chat.title,
+                external_source="demo",
                 metadata={"demo": True},
             )
             await uow.commit()
             for line in _DEMO_LINES:
                 await IngestTranscriptEvent(
-                    uow, container.extractor, container.telegram_gateway,
-                    container.event_publisher, container.config,
-                ).execute(TranscriptEvent(
-                    meeting_id=meeting.public_id, text=line,
-                    ts=container.config.now(), source=TranscriptSource.demo,
-                ))
-        return _text(chat_id,
-            f"🚀 Демо запущено. Встреча {meeting.public_id}. "
-            "Предложения задач появятся выше.")
+                    uow,
+                    container.extractor,
+                    container.telegram_gateway,
+                    container.event_publisher,
+                    container.config,
+                ).execute(
+                    TranscriptEvent(
+                        meeting_id=meeting.public_id,
+                        text=line,
+                        ts=container.config.now(),
+                        source=TranscriptSource.demo,
+                    )
+                )
+        return _text(
+            chat_id,
+            f"🚀 Демо запущено. Встреча {meeting.public_id}. Предложения задач появятся выше.",
+        )
 
     if command == "demo_reset":
         if container.settings.app_env != "dev":
@@ -1127,19 +1175,22 @@ async def ingest_command(
             bound_chat = await uow.chats.get_by_telegram_id(chat_id)
             if bound_chat is None:
                 raise RuntimeError("chat binding failed")
-            await uow.projects.set_default_chat(
-                project.id, bound_chat.id
-            )
+            await uow.projects.set_default_chat(project.id, bound_chat.id)
             await uow.commit()
         return _text(chat_id, f"✅ Чат привязан к workspace: {project.name}")
 
-    return ActionsResponse(actions=[SendMessageAction(
-        chat_id=chat_id,
-        text=f"Неизвестная команда /{command}. Нажми /start для меню.",
-    )])
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=chat_id,
+                text=f"Неизвестная команда /{command}. Нажми /start для меню.",
+            )
+        ]
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _parse_callback(data: str) -> tuple[str, UUID | None]:
     if ":" not in data:
@@ -1163,9 +1214,16 @@ def _telegram_display_name(payload: TelegramLinkRequest) -> str:
 
 
 def _md(chat_id: int, text: str, kb: dict | None = None) -> ActionsResponse:
-    return ActionsResponse(actions=[SendMessageAction(
-        chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=kb,
-    )])
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="Markdown",
+                reply_markup=kb,
+            )
+        ]
+    )
 
 
 def _answer(cq_id: str, text: str) -> ActionsResponse:
@@ -1174,29 +1232,36 @@ def _answer(cq_id: str, text: str) -> ActionsResponse:
 
 def _edit_with_kb(chat_id: int, msg_id: int, cq_id: str, text: str, kb: dict) -> ActionsResponse:
     from grey_cardinal_contracts import EditMessageAction
-    return ActionsResponse(actions=[
-        AnswerCallbackAction(callback_query_id=cq_id, text=""),
-        EditMessageAction(
-            chat_id=chat_id,
-            message_id=msg_id,
-            text=text,
-            reply_markup=kb,
-            parse_mode="Markdown",
-        ),
-    ])
+
+    return ActionsResponse(
+        actions=[
+            AnswerCallbackAction(callback_query_id=cq_id, text=""),
+            EditMessageAction(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=kb,
+                parse_mode="Markdown",
+            ),
+        ]
+    )
 
 
 def _answer_and_edit(
     cq_id: str, chat_id: int, msg_id: int, result: ActionsResponse
 ) -> ActionsResponse:
-    return ActionsResponse(actions=[
-        AnswerCallbackAction(callback_query_id=cq_id, text=""),
-        *result.actions,
-    ])
+    return ActionsResponse(
+        actions=[
+            AnswerCallbackAction(callback_query_id=cq_id, text=""),
+            *result.actions,
+        ]
+    )
 
 
 def _answer_and_add(cq_id: str, result: ActionsResponse) -> ActionsResponse:
-    return ActionsResponse(actions=[
-        AnswerCallbackAction(callback_query_id=cq_id, text=""),
-        *result.actions,
-    ])
+    return ActionsResponse(
+        actions=[
+            AnswerCallbackAction(callback_query_id=cq_id, text=""),
+            *result.actions,
+        ]
+    )

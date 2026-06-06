@@ -15,6 +15,7 @@ The api_key is never logged.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -147,7 +148,9 @@ class YouGileClient:
         )
         return data.get("content", []) if isinstance(data, dict) else data
 
-    async def auth_keys_get(self, login: str, password: str, company_id: str) -> list[dict[str, Any]]:
+    async def auth_keys_get(
+        self, login: str, password: str, company_id: str
+    ) -> list[dict[str, Any]]:
         return await self._request(
             "POST",
             "/auth/keys/get",
@@ -171,7 +174,9 @@ class YouGileClient:
     async def get_project(self, project_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/projects/{project_id}")
 
-    async def create_project(self, title: str, users: dict[str, str] | None = None) -> dict[str, Any]:
+    async def create_project(
+        self, title: str, users: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         body: dict[str, Any] = {"title": title}
         if users:
             body["users"] = users
@@ -182,7 +187,9 @@ class YouGileClient:
         return await self._paginate("/boards", params)
 
     async def create_board(self, title: str, project_id: str) -> dict[str, Any]:
-        return await self._request("POST", "/boards", json={"title": title, "projectId": project_id})
+        return await self._request(
+            "POST", "/boards", json={"title": title, "projectId": project_id}
+        )
 
     async def list_columns(self, board_id: str | None = None) -> list[dict[str, Any]]:
         params = {"boardId": board_id} if board_id else None
@@ -237,11 +244,31 @@ class YouGileClient:
         data = await self._request("GET", "/webhooks")
         return data if isinstance(data, list) else data.get("content", [])
 
-    async def create_webhook(self, url: str, event: str) -> dict[str, Any]:
-        return await self._request("POST", "/webhooks", json={"url": url, "event": event})
+    async def create_webhook(
+        self,
+        url: str,
+        event: str,
+        filters: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/webhooks",
+            json={"url": url, "event": event, "filters": filters or []},
+        )
 
     async def disable_webhook(self, webhook_id: str) -> dict[str, Any]:
         return await self._request("PUT", f"/webhooks/{webhook_id}", json={"disabled": True})
+
+    async def create_chat_message(self, task_id: str, text: str) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/chats/{task_id}/messages",
+            json={
+                "text": text,
+                "textHtml": f"<p>{html.escape(text)}</p>",
+                "label": "Grey Cardinal",
+            },
+        )
 
 
 def _retry_after(resp: httpx.Response) -> float:

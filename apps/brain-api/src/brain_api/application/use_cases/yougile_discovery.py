@@ -25,7 +25,11 @@ from brain_api.integrations.yougile import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_COLUMNS = (("todo", "К выполнению", 7), ("in_progress", "В работе", 3), ("done", "Готово", 5))
+_DEFAULT_COLUMNS = (
+    ("todo", "К выполнению", 7),
+    ("in_progress", "В работе", 3),
+    ("done", "Готово", 5),
+)
 
 
 def make_client(api_key: str, base_url: str) -> YouGileClient:
@@ -87,7 +91,12 @@ async def discover_yougile_workspace(
                         stats["tasks"] += 1
             if boards and not config.get("default_board_id"):
                 config["default_board_id"] = str(boards[0]["id"])
-            _ensure_default_columns(config, await yc.list_columns(board_id=config.get("default_board_id")) if config.get("default_board_id") else [])
+            _ensure_default_columns(
+                config,
+                await yc.list_columns(board_id=config.get("default_board_id"))
+                if config.get("default_board_id")
+                else [],
+            )
 
         users = await yc.list_users()
         await _map_users(session, repo, team_id, users)

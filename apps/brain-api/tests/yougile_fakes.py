@@ -24,7 +24,13 @@ class FakeYouGile:
         self._users = users or []
         self._companies = companies or [{"id": "co1", "name": "Acme"}]
         self._keys = keys if keys is not None else [{"key": "existing-key"}]
-        self.created: dict[str, list] = {"project": [], "board": [], "column": [], "task": [], "webhook": []}
+        self.created: dict[str, list] = {
+            "project": [],
+            "board": [],
+            "column": [],
+            "task": [],
+            "webhook": [],
+        }
         self.rate_limit_remaining = 50
 
     # auth
@@ -54,25 +60,30 @@ class FakeYouGile:
         return self._users
 
     async def create_project(self, title, users=None):  # noqa: ANN001
-        p = {"id": f"p-{len(self.created['project'])+1}", "title": title}
+        p = {"id": f"p-{len(self.created['project']) + 1}", "title": title}
         self._projects.append(p)
         self.created["project"].append(p)
         return p
 
     async def create_board(self, title, project_id):  # noqa: ANN001
-        b = {"id": f"b-{len(self.created['board'])+1}", "title": title, "projectId": project_id}
+        b = {"id": f"b-{len(self.created['board']) + 1}", "title": title, "projectId": project_id}
         self._boards.append(b)
         self.created["board"].append(b)
         return b
 
     async def create_column(self, title, board_id, color=1):  # noqa: ANN001
-        c = {"id": f"c-{len(self.created['column'])+1}", "title": title, "boardId": board_id}
+        c = {"id": f"c-{len(self.created['column']) + 1}", "title": title, "boardId": board_id}
         self._columns.append(c)
         self.created["column"].append(c)
         return c
 
     async def create_task(self, title, column_id, **kw):  # noqa: ANN001
-        t = {"id": f"t-{len(self.created['task'])+1}", "title": title, "columnId": column_id, **kw}
+        t = {
+            "id": f"t-{len(self.created['task']) + 1}",
+            "title": title,
+            "columnId": column_id,
+            **kw,
+        }
         self._tasks.setdefault(column_id, []).append(t)
         self.created["task"].append(t)
         return t
@@ -81,7 +92,7 @@ class FakeYouGile:
         return {"id": task_id, **fields}
 
     async def create_webhook(self, url, event):  # noqa: ANN001
-        wh = {"id": f"wh-{len(self.created['webhook'])+1}", "url": url, "event": event}
+        wh = {"id": f"wh-{len(self.created['webhook']) + 1}", "url": url, "event": event}
         self.created["webhook"].append(wh)
         return wh
 
