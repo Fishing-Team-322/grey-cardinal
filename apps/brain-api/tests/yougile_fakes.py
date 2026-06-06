@@ -96,5 +96,8 @@ class FakeYouGile:
         self.created["webhook"].append(wh)
         return wh
 
+    async def list_webhooks(self):
+        return list(self.created["webhook"])
+
     async def disable_webhook(self, webhook_id):  # noqa: ANN001
         return {"id": webhook_id, "disabled": True}

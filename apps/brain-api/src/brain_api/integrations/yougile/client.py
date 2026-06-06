@@ -242,7 +242,13 @@ class YouGileClient:
     # ── webhooks (unsigned; disable via PUT, no DELETE) ──────────────────────────
     async def list_webhooks(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/webhooks")
-        return data if isinstance(data, list) else data.get("content", [])
+        if isinstance(data, list):
+            return data
+        if not isinstance(data, dict):
+            return []
+        if isinstance(data.get("content"), list):
+            return data["content"]
+        return [data] if data.get("id") else []
 
     async def create_webhook(
         self,

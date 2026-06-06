@@ -197,9 +197,28 @@ async def _subscribe_webhooks(
     api_key: str, api_base: str, public_base: str, team_id: UUID, secret: str
 ) -> list[dict]:
     client = YouGileClient(api_key, base_url=api_base)
-    url = f"{public_base}/api/integrations/yougile/webhook/{team_id}?secret={secret}"
+    root_url = f"{public_base}/api/integrations/yougile/webhook/{team_id}"
+    try:
+        existing = await client.list_webhooks()
+    except YouGileError:
+        existing = []
     subs: list[dict] = []
     for event in WEBHOOK_EVENTS:
+        url = f"{root_url}?secret={secret}&event={event}"
+        current = next(
+            (
+                webhook
+                for webhook in existing
+                if webhook.get("url") == url
+                and webhook.get("event") == event
+                and not webhook.get("disabled")
+                and not webhook.get("deleted")
+            ),
+            None,
+        )
+        if current is not None:
+            subs.append({"event": event, "id": current.get("id")})
+            continue
         try:
             wh = await client.create_webhook(url, event)
             subs.append({"event": event, "id": wh.get("id")})

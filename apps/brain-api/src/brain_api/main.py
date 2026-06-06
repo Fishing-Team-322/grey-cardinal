@@ -21,6 +21,7 @@ from brain_api.api.routes import (
     v2_tenants,
     websocket,
     yougile,
+    yougile_webhooks,
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(v2_tenants.router)
     app.include_router(websocket.router)
     app.include_router(yougile.router)
+    app.include_router(yougile_webhooks.router)
     return app
 
 
