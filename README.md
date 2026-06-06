@@ -1,67 +1,162 @@
-# Grey Cardinal
+<div align="center">
 
-AI meeting agent: records audio on the desktop, processes it on the backend, extracts tasks.
+<img src="./docs/assets/misa-amane-roses.gif" alt="Misa Amane roses anime vibe" width="680" />
 
-## Architecture
+<br/>
 
+<img src="./docs/assets/giphy.gif" alt="Grey Cardinal anime gif" width="520" />
+
+# 🩸 Grey Cardinal 🖤
+
+### AI meeting agent with a dark anime soul
+
+<p>
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-111111?style=for-the-badge&logo=python&logoColor=ff003c">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-Backend-111111?style=for-the-badge&logo=fastapi&logoColor=ff003c">
+  <img alt="React" src="https://img.shields.io/badge/React-Dashboard-111111?style=for-the-badge&logo=react&logoColor=ff003c">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Storage-111111?style=for-the-badge&logo=postgresql&logoColor=ff003c">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Ready-111111?style=for-the-badge&logo=docker&logoColor=ff003c">
+</p>
+
+> **Grey Cardinal** records meeting audio, processes conversations, extracts tasks, and helps turn chaotic meetings into a clean task board.
+
+</div>
+
+---
+
+## ✦ About
+
+**Grey Cardinal** is an AI meeting assistant built for capturing audio from meetings, processing it through a backend pipeline, and turning conversations into structured tasks.
+
+It can work with:
+
+- 🖥️ **Desktop Agent** — Windows C++ app for microphone / loopback recording
+- 🧠 **Brain API** — FastAPI backend for audio upload, meetings, tasks and integrations
+- 🎧 **Audio Worker** — processing layer for uploaded audio
+- 📋 **Task Board** — local board with `todo`, `in_progress`, and `done`
+- 🤖 **Telegram Bot** — task management through Telegram
+- 🌐 **React Dashboard** — frontend UI for meetings and tasks
+- 🔗 **YouGile Integration** — optional real task sync
+- 📞 **Telemost Bot Mode** — mock/session-based meeting bot flow with a hook for real Playwright implementation
+
+---
+
+## 🖤 Architecture
+
+```txt
+Desktop Agent / Telemost Bot
+        │
+        │ records audio
+        ▼
+POST /api/audio/upload
+        │
+        ▼
+Brain API ───────────────► PostgreSQL
+ FastAPI                    meeting + task storage
+        │
+        ├──► task proposal pipeline
+        ├──► local board
+        ├──► YouGile sync
+        └──► dashboard events
+
+React Dashboard
+        ▲
+        ├── GET /api/meetings
+        ├── GET /api/tasks
+        └── WebSocket /ws/events
 ```
-Desktop Agent (Windows C++)
-  → records mic/loopback audio
-  → POST /api/audio/upload  →  Brain API (FastAPI + PostgreSQL)
-                                  → stores audio file
-                                  → queues for processing
-                                  → extracts tasks (LLM or heuristic)
-Frontend Dashboard (React)
-  ← GET /api/meetings
-  ← GET /api/meetings/{id}
-  ← WebSocket /ws/events (live task events)
-```
 
-## Services
+---
+
+## 🩸 Services
 
 | Service | Port | Description |
-|---------|------|-------------|
-| brain-api | 8000 | Main backend (FastAPI + PostgreSQL) |
-| telegram-bot | 8010 | Telegram bot for task management |
-| audio-worker | 8020 | Audio processing worker |
-| frontend | 5173 | React dashboard |
+|---|---:|---|
+| `brain-api` | `8000` | Main FastAPI backend |
+| `telegram-bot` | `8010` | Telegram task bot |
+| `audio-worker` | `8020` | Audio processing worker |
+| `frontend` | `5173` | React dashboard |
+| `postgres` | `5432` | Database |
 
-## Quick start (Docker)
+---
+
+## 🚀 Quick Start
 
 ```bash
 cp .env.example .env
-# Edit .env — set INTERNAL_API_TOKEN, optionally TELEGRAM_BOT_TOKEN etc.
 docker compose up --build
 ```
 
-Open http://localhost:5173 for the dashboard.
+Open the dashboard:
 
-## Run backend only (for desktop agent demo)
-
-```bash
-docker compose up brain-api postgres --build
-# backend available at http://localhost:8000
+```txt
+http://localhost:5173
 ```
 
-## Public API endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Health check |
-| POST | `/api/audio/upload` | Upload WAV from desktop agent |
-| GET | `/api/meetings` | List all meetings |
-| GET | `/api/meetings/{id}` | Meeting detail with audios |
-| GET | `/api/meetings/{id}/status` | Meeting status |
-| GET | `/api/meetings/{id}/tasks` | Tasks for meeting |
-
-### Health check
+Backend health check:
 
 ```bash
 curl http://localhost:8000/api/health
-# {"ok":true,"service":"backend","status":"running"}
 ```
 
-### Upload audio (curl example)
+Expected response:
+
+```json
+{
+  "ok": true,
+  "service": "backend",
+  "status": "running"
+}
+```
+
+---
+
+## 🧠 Brain Pipeline
+
+Grey Cardinal can turn messages or transcripts into task proposals.
+
+```txt
+message / transcript
+        ↓
+rule-based extractor
+        ↓
+pending task proposal
+        ↓
+explicit confirmation
+        ↓
+real task on board
+```
+
+No fake tasks.  
+No fake transcription.  
+No silent integration errors.
+
+Grey Cardinal keeps the local board as the source of truth and exposes real status for every step of the pipeline.
+
+---
+
+## 📡 Public API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | Health check |
+| `POST` | `/api/audio/upload` | Upload WAV audio |
+| `GET` | `/api/meetings` | List meetings |
+| `GET` | `/api/meetings/{id}` | Meeting details |
+| `GET` | `/api/meetings/{id}/status` | Meeting status |
+| `GET` | `/api/meetings/{id}/tasks` | Meeting tasks |
+| `POST` | `/api/chat/messages` | Create task proposal from chat |
+| `GET` | `/api/task-proposals` | List task proposals |
+| `POST` | `/api/task-proposals/{id}/confirm` | Confirm proposal into task |
+| `POST` | `/api/task-proposals/{id}/reject` | Reject proposal |
+| `GET` | `/api/tasks` | List tasks |
+| `GET` | `/api/board` | Get board columns |
+| `POST` | `/api/tasks/{id}/move` | Move task |
+| `GET` | `/api/digest/evening` | Evening digest |
+
+---
+
+## 🎙️ Upload Audio Example
 
 ```bash
 curl -X POST http://localhost:8000/api/audio/upload \
@@ -73,62 +168,97 @@ curl -X POST http://localhost:8000/api/audio/upload \
   -F "ended_at=2026-06-03T10:05:00Z"
 ```
 
-Response:
+Example response:
+
 ```json
-{"ok":true,"audio_id":"audio_a1b2c3d4e5f6","meeting_id":"my-meeting-123","status":"uploaded","message":"Audio uploaded successfully"}
+{
+  "ok": true,
+  "audio_id": "audio_a1b2c3d4e5f6",
+  "meeting_id": "my-meeting-123",
+  "status": "uploaded",
+  "message": "Audio uploaded successfully"
+}
 ```
 
-### List meetings
+---
+
+## 🖥️ Desktop Agent
+
+The Windows desktop agent captures microphone / loopback audio and uploads it to the backend.
+
+### Build
 
 ```bash
-curl http://localhost:8000/api/meetings
+cd native/desktop-agent
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
 ```
 
-## Brain pipeline (chat → proposal → board)
-
-Autonomous demo pipeline (no PostgreSQL, no LLM required). A message is turned
-into a **pending proposal** by a real rule-based Russian extractor; a task is
-created only after explicit confirmation. Nothing is fabricated — no fake tasks,
-no fake transcription. See **[DEMO.md](DEMO.md)** for the full curl walkthrough.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/chat/messages` | Ingest message → task proposal (or `has_task=false`) |
-| GET | `/api/task-proposals` | List proposals (optional `?status=pending`) |
-| POST | `/api/task-proposals/{id}/confirm` | Confirm → create task in board `todo` |
-| POST | `/api/task-proposals/{id}/reject` | Reject → no task |
-| GET | `/api/tasks` | List created tasks |
-| GET | `/api/board` | Board columns: `todo` / `in_progress` / `done` |
-| POST | `/api/tasks/{id}/move` | Move task between statuses |
-| GET | `/api/digest/evening` | Evening digest from real proposals/tasks |
-| GET | `/api/meetings/{id}/transcript` | Transcript, or honest `unavailable` if no STT |
-| POST | `/api/meetings/{id}/transcript` | Manual/demo transcript → same extractor → proposal |
+### Run
 
 ```bash
-curl -X POST http://localhost:8000/api/chat/messages \
+./build/Release/grey-cardinal-agent.exe \
+  --backend http://localhost:8000 \
+  --agent-id agent-001
+```
+
+Record for 60 seconds:
+
+```bash
+./build/Release/grey-cardinal-agent.exe --duration-sec 60
+```
+
+List devices:
+
+```bash
+./build/Release/grey-cardinal-agent.exe --list-devices
+```
+
+Dry run:
+
+```bash
+./build/Release/grey-cardinal-agent.exe --duration-sec 10 --dry-run
+```
+
+---
+
+## 📞 Telemost Bot Mode
+
+Grey Cardinal supports two audio sources:
+
+| Source | Description |
+|---|---|
+| `desktop_agent` | Local desktop recorder |
+| `telemost_bot` | Telemost bot session flow |
+
+Start a Telemost bot session:
+
+```bash
+curl -X POST http://localhost:8000/api/telemost/join \
   -H "Content-Type: application/json" \
-  -d '{"author":"Денис","text":"Нужно оплатить сервер до четверга, ответственный Иван"}'
+  -d '{"meeting_url":"https://telemost.yandex.ru/j/demo","meeting_id":"demo-telemost"}'
 ```
 
-> **Speech-to-text:** no STT provider is configured, so audio is not auto-transcribed.
-> `GET /api/meetings/{id}/transcript` returns `transcription_status: "unavailable"`
-> rather than inventing a transcript. Use the manual transcript endpoint for the demo.
+Check status:
 
-## YouGile board integration
+```bash
+curl http://localhost:8000/api/telemost/{bot_session_id}/status
+```
 
-When a proposal is confirmed, the task lands on the **local board** and is also
-synced to **YouGile** (REST API v2) when enabled. The two modes:
+Leave meeting:
 
-- **Local board mode** (default, `YOUGILE_ENABLED=false`): tasks live on the local
-  board only; the integration honestly reports `status=disabled`. Nothing is faked.
-- **Real YouGile mode** (`YOUGILE_ENABLED=true` + credentials): confirmed tasks are
-  created in the YouGile `TODO` column; moves are mirrored to the matching column.
+```bash
+curl -X POST http://localhost:8000/api/telemost/{bot_session_id}/leave
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/integrations/yougile/status` | `disabled` / `connected` / `error` + config |
-| GET | `/api/integrations/yougile/columns` | Configured column IDs (+ verified against API) |
-| POST | `/api/tasks/{id}/sync-yougile` | Retry create/move sync after an error |
+Current mode is mock/session-based.  
+A real Playwright browser joiner can be plugged in later through the prepared worker hook.
+
+---
+
+## 🔗 YouGile Integration
+
+Grey Cardinal can sync confirmed tasks to YouGile when enabled.
 
 ```env
 YOUGILE_ENABLED=true
@@ -137,174 +267,44 @@ YOUGILE_RATE_LIMIT_PER_MINUTE=50
 YOUGILE_DISCOVERY_SCHEDULE_HOURS=6
 ```
 
+Check integration status:
+
 ```bash
 curl http://localhost:8000/api/integrations/yougile/status
-# disabled: {"ok":true,"enabled":false,"configured":false,"status":"disabled","reason":"..."}
-# enabled:  {"ok":true,"enabled":true,"configured":true,"status":"connected","board_id":"..."}
 ```
 
-Confirmed tasks expose `yougile_status` (`disabled|pending|synced|error`),
-`yougile_task_id` and `yougile_error`. **Honesty:** an invalid key yields
-`status=error` with the real YouGile HTTP error — never a fake `synced`. The local
-board stays the source of truth; a failed YouGile move is recorded as `error` and
-is retryable via `sync-yougile` rather than rolled back.
+| Mode | Description |
+|---|---|
+| Local board | Default mode, tasks stay inside Grey Cardinal |
+| Real YouGile | Confirmed tasks sync to configured YouGile columns |
 
-## Telemost bot mode
+---
 
-Two audio source modes are supported. Backend treats both identically — only the `source` field differs.
-
-```
-1. Desktop agent mode:
-   local C++ app records mic/loopback audio and uploads it.
-   source = "desktop_agent"
-
-2. Telemost bot mode:
-   backend creates a bot session for a Telemost meeting URL.
-   Bot joins meeting → captures audio → POST /api/audio/upload with source=telemost_bot.
-   Current implementation: mock/session-based (no real browser).
-   Real Playwright joiner is hook-ready in telemost_worker/mock_worker.py.
-   source = "telemost_bot"
-```
-
-> **Note:** Telemost bot worker is demo/session-based.
-> Real browser joiner hook is prepared but not enabled by default (`TELEMOST_WORKER_MODE=mock`).
-
-### Telemost bot endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/telemost/join` | Start bot session, creates meeting immediately |
-| GET | `/api/telemost/{bot_session_id}/status` | Get session status |
-| POST | `/api/telemost/{bot_session_id}/leave` | Stop bot session |
-
-### Bot session statuses
-
-`created` → `joining` → `joined` → `recording` → `uploading` → `uploaded` → `left` | `error`
-
-### Curl smoke tests
-
-```bash
-# Health
-curl http://localhost:8000/api/health
-
-# Join Telemost meeting
-curl -X POST http://localhost:8000/api/telemost/join \
-  -H "Content-Type: application/json" \
-  -d '{"meeting_url":"https://telemost.yandex.ru/j/demo","meeting_id":"demo-telemost"}'
-
-# Check bot status  (replace bot_session_id with value from join response)
-curl http://localhost:8000/api/telemost/bot_abc123def456/status
-
-# Upload audio as Telemost bot
-curl -X POST http://localhost:8000/api/audio/upload \
-  -F "audio=@rec.wav" \
-  -F "agent_id=telemost_bot" \
-  -F "meeting_id=demo-telemost" \
-  -F "source=telemost_bot" \
-  -F "started_at=2026-06-04T12:00:00Z" \
-  -F "ended_at=2026-06-04T12:01:00Z"
-
-# List meetings (both sources appear here)
-curl http://localhost:8000/api/meetings
-
-# Leave meeting
-curl -X POST http://localhost:8000/api/telemost/bot_abc123def456/leave
-```
-
-Allowed `source` values: `desktop_agent`, `telemost_bot`. Unknown values return 400.
-
-### Environment variables for Telemost bot
-
-```env
-TELEMOST_WORKER_MODE=mock         # mock (default) | playwright
-TELEMOST_BOT_NAME="Grey Cardinal Bot"
-TELEMOST_JOIN_TIMEOUT_SEC=60
-TELEMOST_MAX_MEETING_MINUTES=120
-```
-
-### Real Telemost bot — implementation plan
-
-When ready to plug in a real browser joiner, implement `PlaywrightTelemostBotWorker` in
-`apps/brain-api/src/brain_api/telemost_worker/playwright_worker.py` and set `TELEMOST_WORKER_MODE=playwright`.
-
-Steps the real worker must perform:
-
-```
-1. pip install 'brain-api[telemost]'  # includes playwright
-2. playwright install chromium
-3. Launch Chromium via async_playwright()
-4. Navigate to meeting_url
-5. Handle "Continue in browser" prompt if shown
-6. Set participant name to TELEMOST_BOT_NAME
-7. Mute camera, grant microphone permissions
-8. Join the meeting
-9. Start recording tab audio (via MediaRecorder or audio sink)
-10. On stop_session(): finalize WAV file
-11. POST /api/audio/upload:
-      audio      = <wav file>
-      agent_id   = telemost_bot
-      meeting_id = <from session>
-      source     = telemost_bot
-      started_at / ended_at
-12. Update bot session status to "uploaded"
-```
-
-The hook point is `MockTelemostBotWorker.start_session()` in `telemost_worker/mock_worker.py`
-(see comments in the file). The rest of the pipeline (storage, status, frontend) is already wired.
-
-## Desktop Agent (Windows)
-
-The desktop agent captures microphone audio and uploads it to the backend. It does **not** do any AI processing.
-
-### Build
-
-```powershell
-cd native\desktop-agent
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
-### Configure
-
-Copy `native/desktop-agent/config.example.toml` to  
-`%LOCALAPPDATA%\GreyCardinal\Agent\config.toml` and set `backend_url`.
-
-### Run
-
-```powershell
-# Record until Ctrl+C, then upload
-.\build\Release\grey-cardinal-agent.exe --backend http://localhost:8000 --agent-id agent-001
-
-# Record for 60 seconds
-.\build\Release\grey-cardinal-agent.exe --duration-sec 60
-
-# List audio devices
-.\build\Release\grey-cardinal-agent.exe --list-devices
-
-# Test without upload
-.\build\Release\grey-cardinal-agent.exe --duration-sec 10 --dry-run
-```
-
-Status output:
-```
-[recording]
-[uploading]
-[uploaded: audio_id=audio_abc123]
-```
-
-## Frontend Dashboard
+## 🌑 Frontend Dashboard
 
 ```bash
 cd apps/frontend
 npm install
-npm run dev   # http://localhost:5173
+npm run dev
 ```
 
-Set `VITE_API_BASE_URL=http://localhost:8000` in `.env` if backend is not on localhost.
+Default dashboard URL:
 
-## Tests
+```txt
+http://localhost:5173
+```
 
-### Backend API tests (no PostgreSQL required)
+Set backend URL if needed:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+---
+
+## 🧪 Tests
+
+### Backend API tests
 
 ```bash
 cd apps/brain-api
@@ -313,7 +313,7 @@ pip install python-multipart
 pytest tests/test_public_api.py tests/test_telemost.py -v
 ```
 
-### All backend tests (requires PostgreSQL via Docker)
+### Full backend tests with PostgreSQL
 
 ```bash
 docker compose up postgres -d
@@ -322,30 +322,80 @@ pytest apps/brain-api/tests/ -v
 
 ### Desktop agent tests
 
-```powershell
-cd native\desktop-agent
+```bash
+cd native/desktop-agent
 cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-## Audio file storage
+---
 
-Uploaded audio files are stored at:
+## 🗂️ Project Structure
+
+```txt
+grey-cardinal/
+├── apps/
+│   ├── brain-api/
+│   └── frontend/
+├── native/
+│   └── desktop-agent/
+├── packages/
+│   └── contracts/
+├── scripts/
+├── docs/
+├── docker-compose.yml
+├── docker-compose.prod.yml
+├── Makefile
+└── README.md
 ```
-{UPLOADS_DIR}/{meeting_id}/{audio_id}.wav
+
+---
+
+## 🩸 Environment
+
+Start from the example file:
+
+```bash
+cp .env.example .env
 ```
 
-Default `UPLOADS_DIR`: `/tmp/gc-uploads` (override with env var `UPLOADS_DIR`).
+Common variables:
 
-## Environment variables
+```env
+INTERNAL_API_TOKEN=
+TELEGRAM_BOT_TOKEN=
+VITE_API_BASE_URL=http://localhost:8000
 
-Key variables (see `.env.example` for full list):
+TELEMOST_WORKER_MODE=mock
+TELEMOST_BOT_NAME="Grey Cardinal Bot"
+TELEMOST_JOIN_TIMEOUT_SEC=60
+TELEMOST_MAX_MEETING_MINUTES=120
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INTERNAL_API_TOKEN` | `dev-internal-token` | Shared secret for internal APIs |
-| `DATABASE_URL` | PostgreSQL URL | Backend DB |
-| `UPLOADS_DIR` | `/tmp/gc-uploads` | Audio file storage |
-| `LLM_API_KEY` | — | OpenAI-compatible API key for task extraction |
-| `BOARD_PROVIDER` | `mock` | Task board: `mock` or `yougile` |
+YOUGILE_ENABLED=false
+YOUGILE_API_BASE_URL=https://yougile.com/api-v2
+```
+
+---
+
+## 🖤 Philosophy
+
+Grey Cardinal is built around honesty.
+
+It should not invent transcripts.  
+It should not fake synced tasks.  
+It should not silently hide integration errors.  
+
+Instead, it keeps the local board as the source of truth and exposes real status for every step of the pipeline.
+
+---
+
+<div align="center">
+
+### 🩸 Grey Cardinal
+
+**record → understand → propose → confirm → execute**
+
+<sub>dark meetings deserve sharp memory.</sub>
+
+</div>
