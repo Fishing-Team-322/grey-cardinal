@@ -93,7 +93,8 @@ class SemanticMessageParser:
         if llm_result.get("kind") not in ("noise", "unknown", "question"):
             return llm_result
         heur = self._heuristic(payload)
-        if heur["kind"] in ("task_candidate", "meeting_candidate") and heur["confidence"] >= 0.6:
+        useful = ("task_candidate", "meeting_candidate", "status_update")
+        if heur["kind"] in useful and heur["confidence"] >= 0.6:
             logger.info(
                 "LLM=%s overridden by heuristic=%s (team_id=%s)",
                 llm_result.get("kind"), heur["kind"], payload.team_id,
