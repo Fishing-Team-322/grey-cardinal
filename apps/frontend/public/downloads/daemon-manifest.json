@@ -11,8 +11,8 @@
       "status": "available",
       "status_label": "ready",
       "size": "33 MB",
-      "size_bytes": 34388443,
-      "sha256": "FE8B4C16FE2272B79D9632F64878404E4A88B3B9D00F5D8B35DD0D7B563EDF9A",
+      "size_bytes": 34386866,
+      "sha256": "63861ABB6EEFC6A79C4E027C079E2EDC77B1054767B3A092CA88E7D82BFD59B3",
       "capture": "Микрофон (WASAPI), трей-агент",
       "support": "Windows x64"
     },
