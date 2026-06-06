@@ -24,7 +24,7 @@ Frontend Dashboard (React)
 | brain-api | 8000 | Main backend (FastAPI + PostgreSQL) |
 | telegram-bot | 8010 | Telegram bot for task management |
 | audio-worker | 8020 | Audio processing worker |
-| frontend-dashboard | 5173 | React dashboard |
+| frontend | 5173 | React dashboard |
 
 ## Quick start (Docker)
 
@@ -132,13 +132,9 @@ synced to **YouGile** (REST API v2) when enabled. The two modes:
 
 ```env
 YOUGILE_ENABLED=true
-YOUGILE_API_BASE_URL=https://ru.yougile.com    # auth: Authorization: Bearer <key>
-YOUGILE_API_KEY=<key>
-YOUGILE_BOARD_ID=<board id>
-YOUGILE_COLUMN_TODO_ID=<todo column id>
-YOUGILE_COLUMN_IN_PROGRESS_ID=<in-progress column id>
-YOUGILE_COLUMN_DONE_ID=<done column id>
-YOUGILE_USER_MAP={"Иван":"user_id_1"}          # optional assignee → user id
+YOUGILE_API_BASE_URL=https://yougile.com/api-v2
+YOUGILE_RATE_LIMIT_PER_MINUTE=50
+YOUGILE_DISCOVERY_SCHEDULE_HOURS=6
 ```
 
 ```bash
@@ -299,7 +295,7 @@ Status output:
 ## Frontend Dashboard
 
 ```bash
-cd apps/frontend-dashboard
+cd apps/frontend
 npm install
 npm run dev   # http://localhost:5173
 ```

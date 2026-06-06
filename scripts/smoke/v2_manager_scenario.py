@@ -30,17 +30,12 @@ def main() -> None:
     llm_health = manager.request("GET", f"/api/teams/{team['id']}/llm/health")
     assert llm_health["status"] in {"ok", "error"}
 
-    manager.request(
-        "POST",
-        f"/api/teams/{team['id']}/board",
-        json={
-            "provider": "yougile",
-            "credentials": {"api_key": "smoke-key"},
-            "config": {"project_id": "smoke", "board_id": "smoke", "column_todo_id": "todo"},
-        },
+    board_status = manager.request(
+        "GET",
+        f"/api/teams/{team['id']}/integrations/yougile/status",
     )
-    board_status = manager.request("GET", f"/api/teams/{team['id']}/board/status")
-    assert board_status["configured"] is True
+    assert board_status["connected"] is False
+    assert board_status["reconnect_required"] is False
 
     bind = manager.request("POST", f"/api/teams/{team['id']}/telegram/bind-code")
     manager.internal(

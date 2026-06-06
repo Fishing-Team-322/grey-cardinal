@@ -1,37 +1,33 @@
-"""YouGile board integration (REST API v2).
+"""YouGile board integration (REST API v2), per-team / multi-tenant.
 
-Real integration when YOUGILE_ENABLED=true and credentials are present;
-honest "disabled" fallback otherwise — the local board keeps working.
+Thin HTTP client (client.py) + rate limiter (ratelimit.py) + mapping repo
+(mappings.py). Business logic lives in the board adapter and discovery use-cases.
 """
 
-from brain_api.integrations.yougile.client import YouGileClient
+from brain_api.integrations.yougile.client import DEFAULT_BASE_URL, YouGileClient
 from brain_api.integrations.yougile.exceptions import (
+    YouGileAuthError,
     YouGileConfigError,
     YouGileError,
     YouGileHTTPError,
+    YouGileNotFound,
+    YouGilePermissionError,
+    YouGileServerError,
 )
-from brain_api.integrations.yougile.models import (
-    SyncResult,
-    YouGileConfig,
-    YouGileHealth,
-)
-from brain_api.integrations.yougile.service import (
-    YouGileBoardService,
-    get_yougile_service,
-    reset_yougile_service,
-    set_yougile_service,
-)
+from brain_api.integrations.yougile.mappings import YouGileMappingRepo
+from brain_api.integrations.yougile.ratelimit import TokenBucket, bucket_for
 
 __all__ = [
     "YouGileClient",
+    "DEFAULT_BASE_URL",
     "YouGileError",
     "YouGileConfigError",
     "YouGileHTTPError",
-    "YouGileConfig",
-    "YouGileHealth",
-    "SyncResult",
-    "YouGileBoardService",
-    "get_yougile_service",
-    "set_yougile_service",
-    "reset_yougile_service",
+    "YouGileAuthError",
+    "YouGilePermissionError",
+    "YouGileNotFound",
+    "YouGileServerError",
+    "YouGileMappingRepo",
+    "TokenBucket",
+    "bucket_for",
 ]

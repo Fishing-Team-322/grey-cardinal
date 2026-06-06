@@ -17,14 +17,15 @@ from brain_api.api.routes import (
     internal_audio,
     internal_telegram,
     meetings,
-    session,
     tasks,
     v2_tenants,
     websocket,
+    yougile,
+    yougile_board,
+    yougile_webhooks,
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
-from brain_api.demo import routes as demo_routes
 from brain_api.infrastructure.logging.setup import setup_logging
 from brain_api.infrastructure.scheduler.jobs import register_jobs
 from brain_api.infrastructure.scheduler.runner import AsyncScheduler
@@ -68,14 +69,9 @@ def create_app() -> FastAPI:
         ],
     )
     app.include_router(health.router)
-    app.include_router(session.router)
     app.include_router(accounts.router)
-    # organizations.router (старая Organization/OrganizationMember модель) намеренно
-    # НЕ подключается: v2 использует единую Company/Team модель (v2_tenants.router).
-    # Файл routes/organizations.py оставлен как legacy и в production app не маунтится.
     app.include_router(agents.router)
     app.include_router(daemon.router)
-    app.include_router(demo_routes.router)
     app.include_router(debug.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
@@ -83,6 +79,10 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router)
     app.include_router(v2_tenants.router)
     app.include_router(websocket.router)
+    app.include_router(yougile.router)
+    app.include_router(yougile_board.router)
+    app.include_router(yougile_board.sync_router)
+    app.include_router(yougile_webhooks.router)
     return app
 
 
