@@ -10,12 +10,16 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
 import re
 import secrets
 import string
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from urllib.parse import parse_qsl
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -353,6 +357,58 @@ async def _unique_telegram_link_code(session: AsyncSession) -> str:
 
 
 # ── Cookie helper ─────────────────────────────────────────────────────────────
+
+class TelegramWebAppAuthRequest(BaseModel):
+    init_data: str
+
+
+def _validate_webapp_init_data(init_data: str, bot_token: str) -> dict | None:
+    """Проверка подписи Telegram Mini App initData (HMAC-SHA256). None — невалидно."""
+    if not init_data or not bot_token:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+    except Exception:  # noqa: BLE001
+        return None
+    received = pairs.pop("hash", None)
+    if not received:
+        return None
+    data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
+    secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    calc = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(calc, received):
+        return None
+    return pairs
+
+
+@router.post("/telegram-webapp", response_model=UserResponse)
+async def telegram_webapp_auth(
+    body: TelegramWebAppAuthRequest,
+    response: Response,
+    session: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Авто-вход из Telegram Mini App: валидируем initData → находим юзера по
+    привязанному telegram_user_id → ставим сессию (кабинет открывается залогиненным)."""
+    settings = get_settings()
+    pairs = _validate_webapp_init_data(body.init_data, settings.telegram_bot_token)
+    if pairs is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Telegram WebApp signature")
+    user_raw = pairs.get("user")
+    if not user_raw:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "No user in init data")
+    try:
+        tg_id = int(json.loads(user_raw).get("id"))
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bad user payload") from exc
+    user = await session.scalar(select(UserModel).where(UserModel.telegram_user_id == tg_id))
+    if user is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Telegram не привязан к аккаунту. Привяжите его в кабинете (Профиль).",
+        )
+    _set_session_cookie(response, user.id, settings)
+    return UserResponse.model_validate(user)
+
 
 def _set_session_cookie(response: Response, user_id: UUID, settings) -> None:
     token = create_access_token(

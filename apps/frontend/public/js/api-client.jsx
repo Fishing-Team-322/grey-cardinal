@@ -43,6 +43,8 @@ const GCApi = {
   logout: () => gcFetch('/api/auth/logout', { method: 'POST' }),
   authMe: () => gcFetch('/api/auth/me'),
   me: () => gcFetch('/api/me'),
+  telegramWebappAuth: (initData) =>
+    gcFetch('/api/auth/telegram-webapp', { method: 'POST', body: { init_data: initData } }),
 
   // ── Companies / teams / invites ──────────────────────────────────────────
   createCompany: (body) => gcFetch('/api/companies', { method: 'POST', body }),

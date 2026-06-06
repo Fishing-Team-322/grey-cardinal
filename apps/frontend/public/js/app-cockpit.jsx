@@ -340,9 +340,23 @@ const NavItem = ({ active, onClick, children }) => (
 const AppDashboardPage = ({ go }) => {
   const me = useAsync(() => GCApi.me(), []);
   const [view, setView] = React.useState({ kind:'home' });
+  const triedTg = React.useRef(false);
 
   React.useEffect(() => {
-    if (me.error && me.error.status === 401) go('/login');
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) { try { tg.ready(); tg.expand(); } catch (_) {} }
+  }, []);
+
+  React.useEffect(() => {
+    if (!(me.error && me.error.status === 401)) return;
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.initData && !triedTg.current) {
+      // Открыто как Telegram Mini App — авто-вход по подписи initData.
+      triedTg.current = true;
+      GCApi.telegramWebappAuth(tg.initData).then(() => me.reload()).catch(() => go('/login'));
+    } else {
+      go('/login');
+    }
   }, [me.error]);
 
   if (me.loading) return <div style={{ padding:40 }} className="gc-mute">Загрузка…</div>;

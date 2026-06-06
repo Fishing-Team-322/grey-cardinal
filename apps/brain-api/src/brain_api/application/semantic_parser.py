@@ -58,8 +58,8 @@ class SemanticMessageParser:
         last_error: Exception | None = None
         for attempt in range(max_retries + 1):
             try:
-                result = await provider.complete_json(prompt, "semantic_message_v2")
-                return self._validate(result)
+                result = self._validate(await provider.complete_json(prompt, "semantic_message_v2"))
+                return self._merge_with_heuristic(payload, result)
             except Exception as exc:  # noqa: BLE001 — сеть/JSON/валидация => retry/fallback
                 last_error = exc
                 logger.warning(
@@ -84,6 +84,22 @@ class SemanticMessageParser:
             now=payload.now,
             timezone=payload.team_timezone,
         )
+
+    def _merge_with_heuristic(self, payload: SemanticMessageInput, llm_result: dict) -> dict:
+        """Маленькие локальные LLM часто помечают явные задачи/созвоны как noise.
+        Если LLM сказал noise/unknown/question, а эвристика уверенно видит
+        задачу или созвон — берём эвристику (так «Эй Саня, надо собрать…» не теряется).
+        """
+        if llm_result.get("kind") not in ("noise", "unknown", "question"):
+            return llm_result
+        heur = self._heuristic(payload)
+        if heur["kind"] in ("task_candidate", "meeting_candidate") and heur["confidence"] >= 0.6:
+            logger.info(
+                "LLM=%s overridden by heuristic=%s (team_id=%s)",
+                llm_result.get("kind"), heur["kind"], payload.team_id,
+            )
+            return heur
+        return llm_result
 
     def _build_prompt(self, payload: SemanticMessageInput) -> str:
         return (

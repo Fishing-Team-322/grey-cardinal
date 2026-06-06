@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import re
 import urllib.parse
 from uuid import UUID
@@ -36,17 +37,19 @@ def clean_topic(text: str) -> str:
 
 
 def build_materials(topic: str) -> str:
+    """HTML-сообщение с кликабельными ссылками, замаскированными под текст."""
     q = topic.strip()
     enc = urllib.parse.quote_plus(q)
+    safe = _html.escape(q)
     return (
-        "🔎 Материалы по задаче\n\n"
-        f"«{q}»\n\n"
-        f"▶️ YouTube: https://www.youtube.com/results?search_query={enc}\n"
-        f"📚 Хабр: https://habr.com/ru/search/?q={enc}\n"
-        f"💬 StackOverflow: https://stackoverflow.com/search?q={enc}\n"
-        f"📰 dev.to: https://dev.to/search?q={enc}\n"
-        f"🔍 Google: https://www.google.com/search?q={enc}\n\n"
-        "Открой ссылки — там видео и статьи по теме."
+        "🔎 <b>Материалы по задаче</b>\n\n"
+        f"«{safe}»\n\n"
+        f'▶️ <a href="https://www.youtube.com/results?search_query={enc}">YouTube — видео</a>\n'
+        f'📚 <a href="https://habr.com/ru/search/?q={enc}">Хабр — статьи</a>\n'
+        f'💬 <a href="https://stackoverflow.com/search?q={enc}">StackOverflow</a>\n'
+        f'📰 <a href="https://dev.to/search?q={enc}">dev.to</a>\n'
+        f'🔍 <a href="https://www.google.com/search?q={enc}">Google</a>\n\n'
+        "Жми ссылки — там видео и статьи по теме."
     )
 
 
@@ -85,7 +88,9 @@ async def handle_help_callback(session, data: str, event) -> ActionsResponse:
         )
     return ActionsResponse(actions=[
         AnswerCallbackAction(callback_query_id=cq, text="Материалы ниже"),
-        SendMessageAction(chat_id=event.message.chat_id, text=build_materials(task.title)),
+        SendMessageAction(
+            chat_id=event.message.chat_id, text=build_materials(task.title), parse_mode="HTML"
+        ),
     ])
 
 

@@ -190,11 +190,21 @@ def _detect_status(lowered: str) -> str | None:
     return None
 
 
+# Имя — всегда с заглавной (без IGNORECASE, иначе ловит «привет всем»).
+_EY_NAME_RE = re.compile(r"^\s*(?:[Ээ]й|[Сс]лушай|[Хх]ей)[\s,]+([А-ЯЁ][а-яё]{2,})")
+_NAME_TEBE_RE = re.compile(r"\b([А-ЯЁ][а-яё]{2,})\s*,?\s+(?:тебе|тебя)\b")
+
+
 def _detect_task(
     raw: str, lowered: str, now: datetime, known_users: list
 ) -> dict | None:
     username = _USERNAME_RE.search(raw)
     assignee = _extract_assignee(raw, lowered, username, known_users)
+    # Доп. паттерны исполнителя: «Эй Саня …», «Саня тебе надо …».
+    if assignee is None:
+        m = _EY_NAME_RE.match(raw) or _NAME_TEBE_RE.search(raw)
+        if m:
+            assignee = m.group(1)
     has_verb = has_action_verb(raw)
     if not has_verb and assignee is None:
         return None
