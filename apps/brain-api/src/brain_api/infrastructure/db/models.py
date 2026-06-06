@@ -83,6 +83,26 @@ class TelegramLinkCodeModel(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class DeviceLinkCodeModel(Base):
+    """One-time, time-limited code that pairs a desktop/tray agent to a user.
+
+    Mirrors TelegramLinkCodeModel: the user generates a code in their cabinet,
+    types it into the agent, and the agent exchanges it (POST /api/agents/register)
+    for a ClientSession token bound to that user. Replaces the demo AgentsStore.
+    """
+
+    __tablename__ = "device_link_codes"
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    code: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DeviceModel(TimestampMixin, Base):
     __tablename__ = "devices"
 

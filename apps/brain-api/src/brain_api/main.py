@@ -23,7 +23,6 @@ from brain_api.api.routes import (
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
-from brain_api.demo import routes as demo_routes
 from brain_api.infrastructure.logging.setup import setup_logging
 from brain_api.infrastructure.scheduler.jobs import register_jobs
 from brain_api.infrastructure.scheduler.runner import AsyncScheduler
@@ -70,7 +69,6 @@ def create_app() -> FastAPI:
     app.include_router(accounts.router)
     app.include_router(agents.router)
     app.include_router(daemon.router)
-    app.include_router(demo_routes.router)
     app.include_router(debug.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
