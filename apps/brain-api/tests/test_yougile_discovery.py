@@ -90,3 +90,41 @@ async def test_discovery_bootstraps_empty_account(session_factory):
         cfg = team2.board_config
         assert cfg["default_board_id"]
         assert set(cfg["default_column_ids"]) == {"todo", "in_progress", "done"}
+
+
+@pytest.mark.asyncio
+async def test_discovery_mirrors_all_projects_when_primary_is_not_selected(session_factory):
+    async with session_factory() as session:
+        team = await _seed_connected_team(session)
+    fake = FakeYouGile(
+        projects=[
+            {"id": "p1", "title": "One"},
+            {"id": "p2", "title": "Two"},
+        ],
+        boards=[
+            {"id": "b1", "title": "Board 1", "projectId": "p1"},
+            {"id": "b2", "title": "Board 2", "projectId": "p2"},
+        ],
+        columns=[
+            {"id": "c1", "title": "Todo", "boardId": "b1"},
+            {"id": "c2", "title": "Done", "boardId": "b2"},
+        ],
+        tasks={
+            "c1": [{"id": "t1", "title": "Task 1", "columnId": "c1"}],
+            "c2": [{"id": "t2", "title": "Task 2", "columnId": "c2"}],
+        },
+        users=[],
+    )
+
+    result = await discover_yougile_workspace(
+        session_factory,
+        team_id=team.id,
+        api_base_url="x",
+        cipher=CIPHER,
+        client=fake,
+    )
+
+    assert result["ok"] is True
+    assert result["primary_project_id"] is None
+    assert result["stats"]["boards"] == 2
+    assert result["stats"]["tasks"] == 2

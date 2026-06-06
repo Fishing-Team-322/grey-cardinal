@@ -166,6 +166,7 @@ async def yougile_connect(
             "yougile_company_name": company["name"],
             "synced_at": None,
             "webhook_secret": webhook_secret,
+            "integration_status": "connected",
         }
     )
 
@@ -243,7 +244,12 @@ async def yougile_status(
     config = dict(team.board_config or {})
     connected = bool(team.board_provider == "yougile" and team.board_credentials_encrypted)
     if not connected:
-        return {"connected": False}
+        integration_status = config.get("integration_status")
+        return {
+            "connected": False,
+            "error": integration_status if integration_status == "auth_error" else None,
+            "reconnect_required": integration_status == "auth_error",
+        }
 
     stats = {}
     for entity in ("project", "board", "column", "task"):

@@ -77,9 +77,13 @@ async def discover_yougile_workspace(
         if primary_id:
             config["yougile_project_id"] = primary_id
             config["yougile_project_name"] = _title_of(projects, primary_id)
-            boards = await yc.list_boards(project_id=primary_id)
+        all_boards: list[dict[str, Any]] = []
+        for project in projects:
+            project_id = str(project["id"])
+            boards = await yc.list_boards(project_id=project_id)
             for b in boards:
                 await repo.upsert("board", str(b["id"]), payload=b)
+                all_boards.append(b)
                 stats["boards"] += 1
                 columns = await yc.list_columns(board_id=str(b["id"]))
                 for col in columns:
@@ -89,13 +93,16 @@ async def discover_yougile_workspace(
                     for t in tasks:
                         await repo.upsert("task", str(t["id"]), payload=t)
                         stats["tasks"] += 1
-            if boards and not config.get("default_board_id"):
-                config["default_board_id"] = str(boards[0]["id"])
+
+        primary_boards = [
+            board for board in all_boards if str(board.get("projectId")) == str(primary_id)
+        ]
+        if primary_boards and not config.get("default_board_id"):
+            config["default_board_id"] = str(primary_boards[0]["id"])
+        if config.get("default_board_id"):
             _ensure_default_columns(
                 config,
-                await yc.list_columns(board_id=config.get("default_board_id"))
-                if config.get("default_board_id")
-                else [],
+                await yc.list_columns(board_id=config["default_board_id"]),
             )
 
         users = await yc.list_users()
