@@ -84,6 +84,10 @@ class ConnectRequest(BaseModel):
     company_id: str
 
 
+class PrimaryProjectRequest(BaseModel):
+    project_id: str
+
+
 # ── POST /login ───────────────────────────────────────────────────────────────
 @router.post("/login")
 async def yougile_login(
@@ -288,6 +292,106 @@ async def yougile_status(
 
 
 # ── DELETE (disconnect) ─────────────────────────────────────────────────────────
+@router.put("/primary-project")
+async def set_primary_project(
+    team_id: UUID,
+    body: PrimaryProjectRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    team = await _require_manager(team_id, current_user.id, session)
+    project = await session.scalar(
+        select(m.YouGileMappingModel).where(
+            m.YouGileMappingModel.team_id == team_id,
+            m.YouGileMappingModel.entity_type == "project",
+            m.YouGileMappingModel.yougile_id == body.project_id,
+        )
+    )
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "YouGile project not found")
+
+    boards = (
+        (
+            await session.execute(
+                select(m.YouGileMappingModel).where(
+                    m.YouGileMappingModel.team_id == team_id,
+                    m.YouGileMappingModel.entity_type == "board",
+                ).order_by(
+                    m.YouGileMappingModel.last_synced_at,
+                    m.YouGileMappingModel.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    primary_boards = [
+        row for row in boards if str((row.payload or {}).get("projectId") or "") == body.project_id
+    ]
+    config = dict(team.board_config or {})
+    config["yougile_project_id"] = body.project_id
+    config["yougile_project_name"] = (project.payload or {}).get("title") or (
+        project.payload or {}
+    ).get("name")
+    config["default_board_id"] = primary_boards[0].yougile_id if primary_boards else None
+    config["default_column_ids"] = await _default_columns_for_board(
+        session,
+        team_id,
+        config["default_board_id"],
+    )
+    team.board_config = config
+    session.add(team)
+    await session.commit()
+    return {
+        "primary_project": {
+            "id": body.project_id,
+            "name": config["yougile_project_name"],
+        },
+        "default_board_id": config["default_board_id"],
+        "default_column_ids": config["default_column_ids"],
+    }
+
+
+async def _default_columns_for_board(
+    session: AsyncSession,
+    team_id: UUID,
+    board_id: str | None,
+) -> dict[str, str]:
+    if not board_id:
+        return {}
+    columns = (
+        (
+            await session.execute(
+                select(m.YouGileMappingModel).where(
+                    m.YouGileMappingModel.team_id == team_id,
+                    m.YouGileMappingModel.entity_type == "column",
+                ).order_by(
+                    m.YouGileMappingModel.last_synced_at,
+                    m.YouGileMappingModel.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    columns = [row for row in columns if str((row.payload or {}).get("boardId") or "") == board_id]
+    aliases = {
+        "todo": {"к выполнению", "todo", "to do", "backlog"},
+        "in_progress": {"в работе", "in progress", "doing"},
+        "done": {"готово", "done", "completed"},
+    }
+    result: dict[str, str] = {}
+    for row in columns:
+        title = str((row.payload or {}).get("title") or "").strip().lower()
+        for status_key, names in aliases.items():
+            if title in names:
+                result[status_key] = row.yougile_id
+    if len(result) < 3 and len(columns) >= 3:
+        for status_key, row in zip(("todo", "in_progress", "done"), columns, strict=False):
+            result.setdefault(status_key, row.yougile_id)
+    return result
+
+
 @router.delete("", status_code=status.HTTP_200_OK)
 async def yougile_disconnect(
     team_id: UUID,

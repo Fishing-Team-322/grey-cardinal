@@ -225,32 +225,107 @@ const TeamTelegram = ({ teamId, isManager }) => {
 };
 
 const TeamBoard = ({ teamId, isManager }) => {
-  const st = useAsync(() => GCApi.boardStatus(teamId), [teamId]);
-  const [f, setF] = React.useState({ api_key:'', project_id:'', board_id:'', column_todo_id:'', column_in_progress_id:'', column_done_id:'' });
+  const st = useAsync(() => GCApi.yougileStatus(teamId), [teamId]);
+  const projects = useAsync(
+    () => st.data && st.data.connected ? GCApi.yougileProjects(teamId) : Promise.resolve([]),
+    [teamId, st.data && st.data.connected, st.data && st.data.last_synced_at]
+  );
+  const [login, setLogin] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [onboarding, setOnboarding] = React.useState(null);
+  const [companyId, setCompanyId] = React.useState('');
+  const [projectId, setProjectId] = React.useState('');
   const [msg, setMsg] = React.useState('');
-  const upd = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
-  const save = async () => {
-    setMsg('');
+  const [busy, setBusy] = React.useState(false);
+  const startLogin = async () => {
+    setBusy(true); setMsg('');
     try {
-      await GCApi.setBoard(teamId, { provider:'yougile', credentials:{ api_key:f.api_key }, config:{
-        project_id:f.project_id, board_id:f.board_id, column_todo_id:f.column_todo_id,
-        column_in_progress_id:f.column_in_progress_id, column_done_id:f.column_done_id,
-      }});
-      setMsg('Сохранено'); st.reload();
+      const result = await GCApi.yougileLogin(teamId, { login, password });
+      setOnboarding(result);
+      setCompanyId(result.companies.length === 1 ? result.companies[0].id : '');
+      setPassword('');
     } catch (ex) { setMsg(ex.message); }
+    finally { setBusy(false); }
   };
+  const connect = async () => {
+    setBusy(true); setMsg('');
+    try {
+      await GCApi.yougileConnect(teamId, {
+        onboarding_token:onboarding.onboarding_token,
+        company_id:companyId,
+      });
+      setOnboarding(null); setMsg('Синхронизация запущена'); st.reload();
+    } catch (ex) { setMsg(ex.message); }
+    finally { setBusy(false); }
+  };
+  const refresh = async () => {
+    setBusy(true); setMsg('');
+    try { await GCApi.yougileSync(teamId); setMsg('Синхронизация запущена'); }
+    catch (ex) { setMsg(ex.message); }
+    finally { setBusy(false); }
+  };
+  const choosePrimary = async () => {
+    setBusy(true); setMsg('');
+    try { await GCApi.yougileSetPrimary(teamId, projectId); setMsg('Основной проект выбран'); st.reload(); }
+    catch (ex) { setMsg(ex.message); }
+    finally { setBusy(false); }
+  };
+  const disconnect = async () => {
+    setBusy(true); setMsg('');
+    try { await GCApi.yougileDisconnect(teamId); setOnboarding(null); st.reload(); }
+    catch (ex) { setMsg(ex.message); }
+    finally { setBusy(false); }
+  };
+  const connected = st.data && st.data.connected;
   return (
     <div style={card}>
       <h3>YouGile</h3>
-      {st.loading ? null : <Notice kind={st.data.configured?'ok':'warn'}>{st.data.configured ? 'Настроено' : (st.data.error || 'Не настроено')}</Notice>}
-      {isManager && <>
-        {[['api_key','API ключ'], ['project_id','Project ID'], ['board_id','Board ID'], ['column_todo_id','Колонка TODO'], ['column_in_progress_id','Колонка In Progress'], ['column_done_id','Колонка Done']].map(([k,label]) => (
-          <div key={k}><label style={lbl}>{label}</label><TextInput value={f[k]} onChange={upd(k)} placeholder={label}/></div>
-        ))}
-        {msg && <Notice kind={msg==='Сохранено'?'ok':'err'}>{msg}</Notice>}
-        <div style={{ marginTop:12 }}><button className="gc-btn gc-btn--primary gc-btn--sm" onClick={save}>Сохранить доску</button></div>
-        <p className="gc-mute" style={{ fontSize:12 }}>Ключ не показывается после сохранения.</p>
+      {!st.loading && <Notice kind={connected?'ok':'warn'}>
+        {connected
+          ? `Подключено: ${st.data.company && st.data.company.name || 'YouGile'}`
+          : st.data && st.data.reconnect_required ? 'Нужно переподключить YouGile' : 'Не подключено'}
+      </Notice>}
+      {connected && <>
+        <div className="gc-mute" style={{ fontSize:13 }}>
+          Последняя синхронизация: {st.data.last_synced_at ? gcFormatDateTime(st.data.last_synced_at) : 'в процессе'}
+        </div>
+        {st.data.primary_project && <div className="gc-mute" style={{ fontSize:13 }}>
+          Основной проект: {st.data.primary_project.name}
+        </div>}
+        {isManager && projects.data && projects.data.length > 0 && <>
+          <label style={lbl}>Основной проект</label>
+          <select className="gc-input" value={projectId || (st.data.primary_project && st.data.primary_project.id) || ''} onChange={(e) => setProjectId(e.target.value)}>
+            <option value="">Выберите проект</option>
+            {projects.data.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+        </>}
+        {isManager && <div style={{ ...row, marginTop:12 }}>
+          {projects.data && projects.data.length > 0 && <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={choosePrimary} disabled={busy || !projectId}>Выбрать</button>}
+          <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={refresh} disabled={busy}>Обновить</button>
+          <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={disconnect} disabled={busy}>Отключить</button>
+        </div>}
       </>}
+      {isManager && !connected && !onboarding && <>
+        <label style={lbl}>Email YouGile</label>
+        <TextInput value={login} onChange={setLogin} autoComplete="username"/>
+        <label style={lbl}>Пароль YouGile</label>
+        <TextInput value={password} onChange={setPassword} type="password" autoComplete="current-password"/>
+        <div style={{ marginTop:12 }}>
+          <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={startLogin} disabled={busy || !login || !password}>Продолжить</button>
+        </div>
+      </>}
+      {isManager && !connected && onboarding && <>
+        <label style={lbl}>Компания YouGile</label>
+        <select className="gc-input" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+          <option value="">Выберите компанию</option>
+          {onboarding.companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+        </select>
+        <div style={{ ...row, marginTop:12 }}>
+          <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={connect} disabled={busy || !companyId}>Подключить</button>
+          <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => setOnboarding(null)} disabled={busy}>Назад</button>
+        </div>
+      </>}
+      {msg && <Notice kind={msg.includes('запущена') || msg.includes('выбран')?'ok':'err'}>{msg}</Notice>}
     </div>
   );
 };

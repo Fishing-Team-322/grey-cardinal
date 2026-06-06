@@ -26,7 +26,7 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://grey:grey@postgres:5432/grey_cardinal}
       TELEGRAM_BOT_BASE_URL: ${TELEGRAM_BOT_BASE_URL:-http://telegram-bot:8010}
-      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_PROVIDER: ${LLM_PROVIDER:-disabled}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
@@ -110,7 +110,7 @@ services:
 
   frontend-dashboard:
     build:
-      context: apps/frontend-dashboard
+      context: apps/frontend
       dockerfile: Dockerfile
     profiles: ["full"]
     ports:
@@ -124,7 +124,7 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./apps/frontend-dashboard/Caddyfile.proxy:/etc/caddy/Caddyfile:ro
+      - ./apps/frontend/Caddyfile.proxy:/etc/caddy/Caddyfile:ro
     depends_on:
       - frontend-dashboard
       - brain-api

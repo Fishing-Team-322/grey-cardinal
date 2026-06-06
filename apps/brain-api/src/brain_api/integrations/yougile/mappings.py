@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.infrastructure.db import models as m
@@ -112,5 +112,20 @@ class YouGileMappingRepo:
                 local_id=local_id,
                 payload=payload,
                 error=error,
+                created_at=datetime.now(UTC),
             )
+        )
+
+    async def prune_logs(self, keep: int = 10_000) -> None:
+        stale_ids = (
+            select(m.YouGileSyncLogModel.id)
+            .where(m.YouGileSyncLogModel.team_id == self._team_id)
+            .order_by(
+                m.YouGileSyncLogModel.created_at.desc(),
+                m.YouGileSyncLogModel.id.desc(),
+            )
+            .offset(keep)
+        )
+        await self._session.execute(
+            delete(m.YouGileSyncLogModel).where(m.YouGileSyncLogModel.id.in_(stale_ids))
         )

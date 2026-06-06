@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import secrets
 import string
 import time
@@ -75,12 +74,6 @@ class InviteCreateRequest(BaseModel):
     role: str = "employee"
     expires_hours: int = 72
     max_uses: int = 1
-
-
-class BoardConfigRequest(BaseModel):
-    provider: str = "yougile"
-    credentials: dict
-    config: dict = Field(default_factory=dict)
 
 
 class LLMSettingsRequest(BaseModel):
@@ -674,66 +667,6 @@ async def close_team_sync(
         or 0
     )
     return {"session": _sync_payload(row), "summary": {"reports_count": reports_count}}
-
-
-@router.post("/api/teams/{team_id}/board")
-async def set_team_board(
-    team_id: UUID,
-    body: BoardConfigRequest,
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_db),
-) -> dict:
-    if body.provider != "yougile":
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Only YouGile is supported in v2")
-    ctx = await build_tenant_context(current_user.id, session)
-    require_team_role(ctx, team_id, "manager")
-    team = await session.get(m.TeamModel, team_id)
-    if team is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
-    cipher = SecretCipher(get_settings().board_creds_encryption_key or "dev-key")
-    team.board_provider = body.provider
-    team.board_credentials_encrypted = cipher.encrypt_text(json.dumps(body.credentials))
-    team.board_config = body.config
-    session.add(team)
-    await session.commit()
-    return {"status": "configured", "provider": body.provider}
-
-
-@router.delete("/api/teams/{team_id}/board", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_team_board(
-    team_id: UUID,
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_db),
-) -> None:
-    ctx = await build_tenant_context(current_user.id, session)
-    require_team_role(ctx, team_id, "manager")
-    team = await session.get(m.TeamModel, team_id)
-    if team is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
-    team.board_credentials_encrypted = None
-    team.board_config = None
-    session.add(team)
-    await session.commit()
-
-
-@router.get("/api/teams/{team_id}/board/status")
-async def team_board_status(
-    team_id: UUID,
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_db),
-) -> dict:
-    ctx = await build_tenant_context(current_user.id, session)
-    require_team_member(ctx, team_id)
-    team = await session.get(m.TeamModel, team_id)
-    if team is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
-    configured = bool(team.board_credentials_encrypted and team.board_config)
-    return {
-        "provider": team.board_provider,
-        "configured": configured,
-        "status": "ok" if configured else "failed",
-        "error": None if configured else "YouGile credentials are not configured for this team",
-    }
 
 
 @router.post("/api/users/me/telegram/link", response_model=TelegramLinkStartResponse)

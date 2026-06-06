@@ -112,6 +112,7 @@ async def discover_yougile_workspace(
         config["synced_at"] = datetime.now(UTC).isoformat()
         team.board_config = config
         repo.log(direction="inbound", event="discover", payload=stats)
+        await repo.prune_logs()
         await session.commit()
         return {"ok": True, "stats": stats, "primary_project_id": primary_id}
 

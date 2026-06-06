@@ -55,3 +55,31 @@ async def test_sync_log_records_event(session_factory):
         assert len(logs) == 1
         assert logs[0].direction == "outbound"
         assert logs[0].event == "task-pushed"
+
+
+@pytest.mark.asyncio
+async def test_sync_log_pruning_keeps_newest_entries(session_factory):
+    async with session_factory() as session:
+        team = await _seed_team(session)
+        repo = YouGileMappingRepo(session, team.id)
+        for index in range(5):
+            repo.log(direction="inbound", event=f"event-{index}")
+            await session.flush()
+        await repo.prune_logs(keep=3)
+        await session.commit()
+
+    from sqlalchemy import select
+    async with session_factory() as session:
+        events = (
+            (
+                await session.execute(
+                    select(m.YouGileSyncLogModel.event).order_by(
+                        m.YouGileSyncLogModel.created_at,
+                        m.YouGileSyncLogModel.id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert events == ["event-2", "event-3", "event-4"]

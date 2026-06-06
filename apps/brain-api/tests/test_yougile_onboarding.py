@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -100,3 +101,59 @@ def test_connect_with_expired_token_rejected(client: TestClient, manager_and_tea
     base = f"/api/teams/{team_id}/integrations/yougile"
     r = client.post(f"{base}/connect", json={"onboarding_token": "nope", "company_id": "co1"})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_manager_can_select_primary_project(session_factory, manager_and_team):
+    user_id, team_id = manager_and_team
+    async with session_factory() as session:
+        mappings = [
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="project",
+                yougile_id="project-1",
+                payload={"title": "Project"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="board",
+                yougile_id="board-1",
+                payload={"title": "Board", "projectId": "project-1"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="column",
+                yougile_id="todo",
+                payload={"title": "К выполнению", "boardId": "board-1"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="column",
+                yougile_id="progress",
+                payload={"title": "В работе", "boardId": "board-1"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="column",
+                yougile_id="done",
+                payload={"title": "Готово", "boardId": "board-1"},
+            ),
+        ]
+        for mapping in mappings:
+            mapping.last_synced_at = datetime.now(UTC)
+        session.add_all(mappings)
+        user = await session.get(m.UserModel, user_id)
+        await session.commit()
+        result = await yg_routes.set_primary_project(
+            team_id,
+            yg_routes.PrimaryProjectRequest(project_id="project-1"),
+            user,
+            session,
+        )
+
+    assert result["default_board_id"] == "board-1"
+    assert result["default_column_ids"] == {
+        "todo": "todo",
+        "in_progress": "progress",
+        "done": "done",
+    }

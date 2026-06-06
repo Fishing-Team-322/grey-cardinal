@@ -26,7 +26,10 @@ const gcFetch = async (path, options = {}) => {
   try { data = text ? JSON.parse(text) : null; } catch (_) { data = { detail: text }; }
   if (!response.ok) {
     const detail = data && (data.detail || data.message);
-    const err = new Error(detail || `${response.status} ${response.statusText}`);
+    const message = detail && typeof detail === 'object'
+      ? (detail.error || JSON.stringify(detail))
+      : detail;
+    const err = new Error(message || `${response.status} ${response.statusText}`);
     err.status = response.status;
     throw err;
   }
@@ -73,9 +76,22 @@ const GCApi = {
     gcFetch(`/api/teams/${teamId}/telegram`, { method: 'DELETE' }),
 
   // ── Board (YouGile) ──────────────────────────────────────────────────────
-  setBoard: (teamId, body) => gcFetch(`/api/teams/${teamId}/board`, { method: 'POST', body }),
-  boardStatus: (teamId) => gcFetch(`/api/teams/${teamId}/board/status`),
-  deleteBoard: (teamId) => gcFetch(`/api/teams/${teamId}/board`, { method: 'DELETE' }),
+  yougileLogin: (teamId, body) =>
+    gcFetch(`/api/teams/${teamId}/integrations/yougile/login`, { method: 'POST', body }),
+  yougileConnect: (teamId, body) =>
+    gcFetch(`/api/teams/${teamId}/integrations/yougile/connect`, { method: 'POST', body }),
+  yougileStatus: (teamId) =>
+    gcFetch(`/api/teams/${teamId}/integrations/yougile/status`),
+  yougileDisconnect: (teamId) =>
+    gcFetch(`/api/teams/${teamId}/integrations/yougile`, { method: 'DELETE' }),
+  yougileSync: (teamId) =>
+    gcFetch(`/api/teams/${teamId}/integrations/yougile/sync`, { method: 'POST' }),
+  yougileProjects: (teamId) => gcFetch(`/api/teams/${teamId}/board/projects`),
+  yougileSetPrimary: (teamId, projectId) =>
+    gcFetch(`/api/teams/${teamId}/integrations/yougile/primary-project`, {
+      method: 'PUT',
+      body: { project_id: projectId },
+    }),
 
   // ── LLM settings ─────────────────────────────────────────────────────────
   setLLM: (teamId, body) => gcFetch(`/api/teams/${teamId}/llm-settings`, { method: 'POST', body }),
