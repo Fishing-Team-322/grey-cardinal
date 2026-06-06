@@ -1,19 +1,19 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "backend_url": "https://fishingteam.su",
-  "built_at": "2026-06-04",
+  "built_at": "2026-06-06",
   "platforms": {
     "windows": {
       "label": "Windows",
-      "artifact": "grey-cardinal-daemon-windows-x64.msi",
-      "url": "/downloads/grey-cardinal-daemon-windows-x64.msi",
-      "format": "MSI installer",
+      "artifact": "GreyCardinalAgent.exe",
+      "url": "/downloads/GreyCardinalAgent.exe",
+      "format": "EXE (portable, без установки)",
       "status": "available",
       "status_label": "ready",
-      "size": "136 KB",
-      "size_bytes": 139264,
-      "sha256": "14204F208A389AD51E1DECFC994F8D1CC2919E0D494AA2300FBCDFECB0A70F3B",
-      "capture": "WASAPI microphone / loopback",
+      "size": "33 MB",
+      "size_bytes": 34388443,
+      "sha256": "FE8B4C16FE2272B79D9632F64878404E4A88B3B9D00F5D8B35DD0D7B563EDF9A",
+      "capture": "Микрофон (WASAPI), трей-агент",
       "support": "Windows x64"
     },
     "macos": {

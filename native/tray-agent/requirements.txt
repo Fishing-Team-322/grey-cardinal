@@ -1,2 +1,5 @@
 pystray>=0.19
 Pillow>=10.0
+requests>=2.31
+sounddevice>=0.4
+numpy>=1.24

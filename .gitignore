@@ -63,3 +63,8 @@ native/desktop-agent/build-win/
 apps/frontend-dashboard/public/downloads/*-msi-stage/
 
 apps/desktop-app/
+
+# Daemon binaries (published out-of-band, not committed)
+apps/frontend/public/downloads/*.exe
+apps/frontend/public/downloads/*.msi
+apps/frontend/public/downloads/*.zip
