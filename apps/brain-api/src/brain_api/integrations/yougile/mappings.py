@@ -7,7 +7,7 @@ Postgres (prod) and SQLite (tests).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +23,7 @@ class YouGileMappingRepo:
     def __init__(self, session: AsyncSession, team_id: UUID) -> None:
         self._session = session
         self._team_id = team_id
+        self._last_log_at: datetime | None = None
 
     async def upsert(
         self,
@@ -102,6 +103,10 @@ class YouGileMappingRepo:
         payload: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
+        created_at = datetime.now(UTC)
+        if self._last_log_at is not None and created_at <= self._last_log_at:
+            created_at = self._last_log_at + timedelta(microseconds=1)
+        self._last_log_at = created_at
         self._session.add(
             m.YouGileSyncLogModel(
                 team_id=self._team_id,
@@ -112,7 +117,7 @@ class YouGileMappingRepo:
                 local_id=local_id,
                 payload=payload,
                 error=error,
-                created_at=datetime.now(UTC),
+                created_at=created_at,
             )
         )
 

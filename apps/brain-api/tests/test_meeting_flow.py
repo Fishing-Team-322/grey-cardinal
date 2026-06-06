@@ -12,7 +12,10 @@ from brain_api.application.use_cases.meeting_flow import (
     handle_meeting_callback,
     handle_pending_meeting_time,
 )
-from brain_api.application.use_cases.meeting_reminders import run_meeting_reminders
+from brain_api.application.use_cases.meeting_reminders import (
+    run_meeting_finalize,
+    run_meeting_reminders,
+)
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.telegram_gateway.client import NullTelegramGateway
 from grey_cardinal_contracts import TelegramCallbackEvent, TelegramMessageRef, TelegramSender
@@ -143,10 +146,76 @@ async def test_pending_time_then_confirm(session_factory):
     assert any(c.startswith("mtg_ok:") for c in cbs)
 
 
+@pytest.mark.asyncio
+async def test_finalize_stores_ai_summary_and_awards_xp(session_factory):
+    class Provider:
+        async def complete_json(self, prompt, schema_name):
+            assert schema_name == "meeting_summary"
+            assert "обсудили релиз" in prompt
+            return {
+                "summary": "Команда согласовала план релиза.",
+                "highlights": ["Релиз в пятницу"],
+                "decisions": ["Заморозить scope"],
+                "next_steps": ["Проверить сборку"],
+                "risks": ["Мало времени на QA"],
+            }
+
+    class Factory:
+        async def for_team(self, team_id):
+            return Provider()
+
+    scheduled_at = NOW - timedelta(hours=2)
+    async with session_factory() as session:
+        team, manager, _emp, meeting = await _seed(session, scheduled_at=scheduled_at)
+        meeting.state = "scheduled"
+        meeting.status = "scheduled"
+        session.add(
+            m.TranscriptEventModel(
+                meeting_db_id=meeting.id,
+                meeting_id=meeting.public_id,
+                speaker_name="Boss",
+                text="обсудили релиз",
+                ts=scheduled_at + timedelta(minutes=10),
+                is_final=True,
+                source="audio_worker",
+            )
+        )
+        await session.commit()
+
+    gateway = NullTelegramGateway()
+    finalized = await run_meeting_finalize(
+        session_factory,
+        gateway,
+        now=NOW,
+        llm_provider_factory=Factory(),
+    )
+
+    async with session_factory() as session:
+        refreshed = await session.get(m.MeetingModel, meeting.id)
+        xp = await session.scalar(
+            select_xp(manager.id, "meeting_summary_ready")
+        )
+
+    assert finalized == 1
+    assert refreshed.summary.startswith("AI-саммари")
+    assert "Заморозить scope" in refreshed.summary
+    assert xp is not None
+    assert "Команда согласовала план релиза" in gateway.sent[0][1]
+
+
 def select_rsvp(meeting_id, user_id):
     from sqlalchemy import select
 
     return select(m.MeetingRsvpModel).where(
         m.MeetingRsvpModel.meeting_id == meeting_id,
         m.MeetingRsvpModel.user_id == user_id,
+    )
+
+
+def select_xp(user_id, kind):
+    from sqlalchemy import select
+
+    return select(m.UserXpEventModel).where(
+        m.UserXpEventModel.user_id == user_id,
+        m.UserXpEventModel.kind == kind,
     )

@@ -23,7 +23,6 @@ import logging
 import os
 import sys
 import threading
-import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +44,7 @@ except ImportError:
     requests = None  # type: ignore
 
 try:
-    import numpy as np
+    import numpy as _numpy  # noqa: F401
     import sounddevice as sd
     _AUDIO_OK = True
 except Exception:  # noqa: BLE001
@@ -80,7 +79,7 @@ class Config:
     log_level: str = "INFO"
 
     @classmethod
-    def load(cls) -> "Config":
+    def load(cls) -> Config:
         path = _config_path()
         cfg = cls()
         if path.exists():
@@ -119,7 +118,10 @@ def setup_logging(level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(_log_path(), encoding="utf-8"), logging.StreamHandler(sys.stdout)],
+        handlers=[
+            logging.FileHandler(_log_path(), encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
     )
 
 
@@ -128,14 +130,20 @@ log = logging.getLogger("tray")
 
 # ── Icons ─────────────────────────────────────────────────────────────────────
 
-def _make_icon(color: str, size: int = 64) -> "Image.Image":
+def _make_icon(color: str, size: int = 64) -> Image.Image:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.ellipse([2, 2, size - 2, size - 2], fill=color, outline="#222", width=2)
     cx, cy = size // 2, size // 2
     mw, mh = size // 5, size // 3
     d.rounded_rectangle([cx - mw, cy - mh, cx + mw, cy + mh // 3], radius=mw, fill="white")
-    d.arc([cx - mw - 2, cy - mh // 3, cx + mw + 2, cy + mh // 2], start=180, end=0, fill="white", width=2)
+    d.arc(
+        [cx - mw - 2, cy - mh // 3, cx + mw + 2, cy + mh // 2],
+        start=180,
+        end=0,
+        fill="white",
+        width=2,
+    )
     d.line([cx, cy + mh // 2, cx, cy + mh // 2 + 4], fill="white", width=2)
     return img
 
@@ -163,7 +171,7 @@ class Backend:
             r = requests.get(self._url("/api/daemon/state"),
                              headers={"X-Agent-Token": self.cfg.agent_token}, timeout=6)
             d = r.json()
-            return (d.get("state") in ("armed", "recording")), d.get("meeting_public_id")
+            return d.get("state") == "recording", d.get("meeting_public_id")
         except Exception:  # noqa: BLE001
             return False, None
 
@@ -204,7 +212,7 @@ class TrayApp:
         self._stop = threading.Event()
         self._rec_lock = threading.Lock()
         self._status = "Инициализация…"
-        self._icon: "pystray.Icon | None" = None
+        self._icon: pystray.Icon | None = None
 
     # ── recording ──
     def _record_and_upload(self, meeting_id: str | None = None) -> None:
@@ -263,7 +271,7 @@ class TrayApp:
             with contextlib.suppress(Exception):
                 self._icon.update_menu()
 
-    def _menu(self) -> "pystray.Menu":
+    def _menu(self) -> pystray.Menu:
         paired = "да" if self.cfg.agent_token else "НЕТ — вставьте в config"
         return pystray.Menu(
             pystray.MenuItem(lambda i: self._status, None, enabled=False),

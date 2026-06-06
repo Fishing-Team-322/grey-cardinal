@@ -60,7 +60,11 @@ async def run_meeting_5min_reminders(container: Container) -> None:
 
 
 async def run_meeting_finalize_job(container: Container) -> None:
-    await run_meeting_finalize(container.session_factory, container.telegram_gateway)
+    await run_meeting_finalize(
+        container.session_factory,
+        container.telegram_gateway,
+        llm_provider_factory=container.llm_provider_factory,
+    )
 
 
 async def run_team_digests_job(container: Container) -> None:

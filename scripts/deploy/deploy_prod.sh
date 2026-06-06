@@ -43,4 +43,5 @@ docker image prune -f >/dev/null 2>&1 || true
 echo "Health checks..."
 sleep 6
 curl -fsS https://fishingteam.su/health && echo
+curl -fsS https://fishingteam.su/ready && echo
 echo "Deploy complete"

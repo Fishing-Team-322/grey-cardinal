@@ -23,6 +23,11 @@ from brain_api.api.rbac import (
     require_team_role,
 )
 from brain_api.api.routes.accounts import CurrentUser, get_db
+from brain_api.application.use_cases.member_reports import member_report_payload
+from brain_api.application.use_cases.team_gamification import (
+    gamification_profile_payload,
+    team_leaderboard_payload,
+)
 from brain_api.config import get_settings
 from brain_api.container import Container
 from brain_api.domain.v2.timezones import validate_iana_timezone
@@ -189,6 +194,40 @@ async def me(current_user: CurrentUser, session: AsyncSession = Depends(get_db))
     }
 
 
+@router.get("/api/users/me/gamification")
+async def user_gamification(
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    return await gamification_profile_payload(session, current_user.id)
+
+
+@router.get("/api/teams/{team_id}/leaderboard")
+async def team_leaderboard(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_member(ctx, team_id)
+    return await team_leaderboard_payload(session, team_id)
+
+
+@router.get("/api/teams/{team_id}/members/{user_id}/report")
+async def team_member_report(
+    team_id: UUID,
+    user_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    report = await member_report_payload(session, team_id=team_id, user_id=user_id)
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team member not found")
+    return report
+
+
 @router.post(
     "/api/companies/{company_id}/teams",
     response_model=TeamResponse,
@@ -258,11 +297,31 @@ async def create_company_invite(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     ctx = await build_tenant_context(current_user.id, session)
-    require_company_role(ctx, company_id, "director")
     if body.scope not in {"company", "team"}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid invite scope")
     if body.role not in {"director", "manager", "employee"}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid invite role")
+    if body.scope == "company" and body.role != "director":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid company invite role")
+    if body.scope == "team" and body.role not in {"manager", "employee"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid team invite role")
+
+    if body.scope == "team":
+        if body.team_id is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Team is required")
+        team_id = body.team_id
+        team = await session.get(m.TeamModel, team_id)
+        if team is None or team.company_id != company_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found in company")
+    else:
+        team_id = None
+
+    if ctx.company_roles.get(company_id) != "director":
+        if body.scope != "team" or body.role != "employee" or team_id is None:
+            require_company_role(ctx, company_id, "director")
+        assert team_id is not None
+        require_team_role(ctx, team_id, "manager")
+
     token = secrets.token_urlsafe(32)
     invite = m.InviteModel(
         id=uuid4(),
@@ -457,7 +516,7 @@ async def create_team_meeting(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     ctx = await build_tenant_context(current_user.id, session)
-    require_team_member(ctx, team_id)
+    require_team_role(ctx, team_id, "manager")
     team = await session.get(m.TeamModel, team_id)
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
@@ -984,6 +1043,7 @@ def _meeting_payload(row: m.MeetingModel) -> dict:
         "duration_minutes": row.duration_minutes,
         "state": row.state,
         "status": row.status,
+        "summary": row.summary,
     }
 
 

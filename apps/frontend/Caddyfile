@@ -1,14 +1,23 @@
 :5173 {
 	root * /srv
-	try_files {path} /index.html
 
 	# index.html и JS-бандл не кэшируем — иначе пользователь видит старую версию
 	# фронта (напр. устаревший Telegram deep-link) после деплоя.
 	@nocache path / /index.html /js/*.js
 	header @nocache Cache-Control "no-cache, no-store, must-revalidate"
 
+	header /downloads/*.exe Content-Type application/octet-stream
 	header /downloads/*.msi Content-Type application/octet-stream
 	header /downloads/*.deb Content-Type application/vnd.debian.binary-package
 	header /downloads/*.dmg Content-Type application/x-apple-diskimage
-	file_server
+
+	# Download URLs must return a real file or 404, never the SPA index.
+	handle /downloads/* {
+		file_server
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
 }

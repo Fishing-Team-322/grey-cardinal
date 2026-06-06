@@ -46,6 +46,7 @@ const GCApi = {
   logout: () => gcFetch('/api/auth/logout', { method: 'POST' }),
   authMe: () => gcFetch('/api/auth/me'),
   me: () => gcFetch('/api/me'),
+  gamificationProfile: () => gcFetch('/api/users/me/gamification'),
   telegramWebappAuth: (initData) =>
     gcFetch('/api/auth/telegram-webapp', { method: 'POST', body: { init_data: initData } }),
 
@@ -56,6 +57,9 @@ const GCApi = {
   createTeam: (companyId, body) =>
     gcFetch(`/api/companies/${companyId}/teams`, { method: 'POST', body }),
   getTeam: (teamId) => gcFetch(`/api/teams/${teamId}`),
+  teamLeaderboard: (teamId) => gcFetch(`/api/teams/${teamId}/leaderboard`),
+  teamMemberReport: (teamId, userId) =>
+    gcFetch(`/api/teams/${teamId}/members/${userId}/report`),
   createInvite: (companyId, body) =>
     gcFetch(`/api/companies/${companyId}/invites`, { method: 'POST', body }),
   getInvite: (token) => gcFetch(`/api/invites/${encodeURIComponent(token)}`),

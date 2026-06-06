@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from brain_api.application.rendering import format_deadline
+from brain_api.application.use_cases.team_gamification import (
+    MEETING_SUMMARY_XP,
+    grant_team_xp,
+)
 from brain_api.infrastructure.db import models as m
 
 logger = logging.getLogger(__name__)
@@ -24,7 +29,12 @@ def _as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
-async def run_meeting_finalize(session_factory, gateway, now: datetime | None = None) -> int:
+async def run_meeting_finalize(
+    session_factory,
+    gateway,
+    now: datetime | None = None,
+    llm_provider_factory=None,
+) -> int:
     """Завершить созвоны, окно которых прошло, и отправить саммари в чат команды."""
     now = now or datetime.now(UTC)
     finalized = 0
@@ -67,14 +77,32 @@ async def run_meeting_finalize(session_factory, gateway, now: datetime | None = 
             meeting.state = "finished"
             meeting.status = "finished"
             meeting.stopped_at = now
-            meeting.summary = f"tasks={task_count}, attendees={yes}"
+            meeting.summary = await _meeting_summary(
+                session,
+                meeting,
+                task_count=task_count,
+                attendees=yes,
+                window_start=window_start,
+                end_at=end_at,
+                llm_provider_factory=llm_provider_factory,
+            )
+            if meeting.team_id is not None:
+                await grant_team_xp(
+                    session,
+                    user_id=meeting.created_by or meeting.created_by_user_id,
+                    team_id=meeting.team_id,
+                    meeting_id=meeting.id,
+                    kind="meeting_summary_ready",
+                    points=MEETING_SUMMARY_XP,
+                    reason=f"Получил саммари созвона {meeting.public_id}",
+                    idempotency_key=f"meeting_summary_ready:{meeting.id}",
+                )
             if team and team.tg_chat_id:
                 when = format_deadline(meeting.scheduled_at, team.timezone)
                 text = (
                     f"⏹ Созвон {when} завершён.\n\n"
-                    f"Участников (Приду): {yes}\n"
-                    f"Задач создано за созвон: {task_count}\n\n"
-                    "Итоги и карточки — в чате выше и на доске YouGile."
+                    f"{meeting.summary}\n\n"
+                    "Карточки и полный итог доступны в Grey Cardinal и на доске YouGile."
                 )
                 await gateway.send_message(team.tg_chat_id, text)
             finalized += 1
@@ -82,6 +110,102 @@ async def run_meeting_finalize(session_factory, gateway, now: datetime | None = 
     if finalized:
         logger.info("Finalized %d meetings", finalized)
     return finalized
+
+
+async def _meeting_summary(
+    session,
+    meeting: m.MeetingModel,
+    *,
+    task_count: int,
+    attendees: int,
+    window_start: datetime,
+    end_at: datetime,
+    llm_provider_factory,
+) -> str:
+    tasks = (
+        await session.execute(
+            select(m.TaskModel)
+            .where(
+                m.TaskModel.team_id == meeting.team_id,
+                m.TaskModel.created_at >= window_start,
+                m.TaskModel.created_at <= end_at,
+            )
+            .order_by(m.TaskModel.created_at)
+        )
+    ).scalars().all()
+    transcripts = (
+        await session.execute(
+            select(m.TranscriptEventModel)
+            .where(
+                or_(
+                    m.TranscriptEventModel.meeting_db_id == meeting.id,
+                    m.TranscriptEventModel.meeting_id == meeting.public_id,
+                ),
+                m.TranscriptEventModel.ts >= window_start,
+                m.TranscriptEventModel.ts <= end_at,
+                m.TranscriptEventModel.is_final.is_(True),
+            )
+            .order_by(m.TranscriptEventModel.ts)
+            .limit(200)
+        )
+    ).scalars().all()
+    fallback = _fallback_summary(task_count, attendees, tasks)
+    if llm_provider_factory is None or meeting.team_id is None:
+        return fallback
+
+    transcript_text = "\n".join(
+        f"{item.speaker_name or 'Участник'}: {item.text}" for item in transcripts
+    )[-12000:]
+    task_text = "\n".join(
+        f"- {task.public_id}: {task.title}; исполнитель: {task.assignee_text or 'не назначен'}"
+        for task in tasks
+    )
+    prompt = (
+        "Составь итог командного созвона на русском языке. Верни строгий JSON с ключами "
+        "summary (строка), highlights (массив строк), decisions (массив строк), "
+        "next_steps (массив строк), risks (массив строк). Не придумывай факты.\n\n"
+        f"Название: {meeting.title or meeting.public_id}\n"
+        f"Участников: {attendees}\n"
+        f"Созданные задачи:\n{task_text or '- нет'}\n\n"
+        f"Транскрипт:\n{transcript_text or 'Транскрипт отсутствует.'}"
+    )
+    try:
+        provider = await llm_provider_factory.for_team(meeting.team_id)
+        data = await provider.complete_json(prompt, schema_name="meeting_summary")
+        return _format_ai_summary(data, fallback)
+    except Exception:
+        logger.exception("Meeting AI summary failed for %s", meeting.public_id)
+        return fallback
+
+
+def _fallback_summary(task_count: int, attendees: int, tasks: list[m.TaskModel]) -> str:
+    task_lines = [f"• {task.public_id}: {task.title}" for task in tasks[:5]]
+    result = [
+        "Итог созвона",
+        f"Участников: {attendees}. Создано задач: {task_count}.",
+    ]
+    if task_lines:
+        result.extend(["", "Следующие шаги:", *task_lines])
+    return "\n".join(result)[:3500]
+
+
+def _format_ai_summary(data: dict[str, Any], fallback: str) -> str:
+    summary = str(data.get("summary") or "").strip()
+    if not summary:
+        return fallback
+    result = ["AI-саммари", summary]
+    for key, title in (
+        ("highlights", "Ключевые моменты"),
+        ("decisions", "Решения"),
+        ("next_steps", "Следующие шаги"),
+        ("risks", "Риски"),
+    ):
+        values = data.get(key)
+        if isinstance(values, list):
+            clean = [str(value).strip() for value in values if str(value).strip()]
+            if clean:
+                result.extend(["", f"{title}:", *(f"• {value}" for value in clean[:6])])
+    return "\n".join(result)[:3500]
 
 
 async def run_meeting_reminders(session_factory, gateway, now: datetime | None = None) -> int:

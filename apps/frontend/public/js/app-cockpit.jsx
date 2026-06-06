@@ -86,6 +86,7 @@ const AgentCard = () => {
 // ── Профиль: привязка Telegram ──────────────────────────────────────────────
 const ProfilePanel = ({ user }) => {
   const st = useAsync(() => GCApi.telegramStatus(), []);
+  const game = useAsync(() => GCApi.gamificationProfile(), []);
   const [link, setLink] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const start = async () => { setBusy(true); try { setLink(await GCApi.telegramLinkStart()); } finally { setBusy(false); } st.reload(); };
@@ -96,6 +97,7 @@ const ProfilePanel = ({ user }) => {
       <div style={card}>
         <div style={row}><b>{user.display_name}</b> <span className="gc-mute">{user.email}</span></div>
       </div>
+      <GamificationProfile data={game.data} loading={game.loading} error={game.error}/>
       <div style={card}>
         <h3>Telegram</h3>
         {st.loading ? <span className="gc-mute">Загрузка…</span> : st.data && st.data.linked
@@ -111,6 +113,39 @@ const ProfilePanel = ({ user }) => {
       </div>
       <AgentCard/>
     </div>
+  );
+};
+
+const GamificationProfile = ({ data, loading, error }) => {
+  if (loading) return <div style={card}><span className="gc-mute">Считаем опыт…</span></div>;
+  if (error) return <Notice kind="err">{error.message}</Notice>;
+  const unlocked = (data.achievements || []).filter((a) => a.unlocked).length;
+  const pct = Math.min(100, Math.round((data.level_xp / data.next_level_xp) * 100));
+  return (
+    <>
+      <div style={card}>
+        <div style={{ ...row, justifyContent:'space-between' }}>
+          <div><div className="gc-mute" style={{ fontSize:12 }}>УРОВЕНЬ АККАУНТА</div><div style={{ fontSize:34, fontWeight:800 }}>{data.level}</div></div>
+          <div style={{ textAlign:'right' }}><div style={{ fontSize:24, fontWeight:700 }}>{data.points_total} XP</div><div className="gc-mute" style={{ fontSize:12 }}>{unlocked} достижений открыто</div></div>
+        </div>
+        <div style={{ height:8, background:'var(--rf-line,#262a31)', borderRadius:8, overflow:'hidden', marginTop:12 }}>
+          <div style={{ height:'100%', width:`${pct}%`, background:'#e23a52' }}/>
+        </div>
+        <div className="gc-mute" style={{ fontSize:11, marginTop:5 }}>{data.level_xp} / {data.next_level_xp} XP до следующего уровня</div>
+      </div>
+      <div style={card}>
+        <h3>Достижения</h3>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:10 }}>
+          {(data.achievements || []).map((a) => (
+            <div key={a.id} style={{ padding:12, borderRadius:10, border:`1px solid ${a.unlocked ? '#e23a52' : 'var(--rf-line,#262a31)'}`, opacity:a.unlocked?1:.62 }}>
+              <b>{a.unlocked ? '✓ ' : ''}{a.title}</b>
+              <div className="gc-mute" style={{ fontSize:12, marginTop:4 }}>{a.description}</div>
+              <div style={{ fontSize:11, marginTop:7 }}>{a.progress} / {a.target}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
   );
 };
 
@@ -184,19 +219,113 @@ const TeamPanel = ({ teamId }) => {
   if (team.error) return <Notice kind="err">{team.error.message}</Notice>;
   const t = team.data;
   const isManager = t.role === 'manager';
-  const tabs = [['telegram','Telegram'], ['board','YouGile'], ['llm','LLM'], ['meetings','Созвоны'], ['sync','Синк']];
+  const tabs = [['telegram','Telegram'], ['leaderboard','Лидерборд'], ...(isManager ? [['reports','Отчёты']] : []), ['board','YouGile'], ['llm','LLM'], ['meetings','Созвоны'], ['sync','Синк']];
   return (
     <div>
       <h2 className="gc-display-4">{t.name}</h2>
       <p className="gc-mute">Роль: {t.role} · TZ: {t.timezone}</p>
+      {isManager && <div style={{ marginBottom:14 }}>
+        <InviteButton companyId={t.company_id} teamId={teamId} role="employee"/>
+      </div>}
       <div style={{ ...row, marginBottom:14 }}>
         {tabs.map(([k,v]) => <button key={k} className={'gc-btn gc-btn--sm ' + (tab===k?'gc-btn--primary':'gc-btn--ghost')} onClick={() => setTab(k)}>{v}</button>)}
       </div>
       {tab==='telegram' && <TeamTelegram teamId={teamId} isManager={isManager}/>}
+      {tab==='leaderboard' && <TeamLeaderboard teamId={teamId}/>}
+      {tab==='reports' && isManager && <TeamReports teamId={teamId}/>}
       {tab==='board' && <TeamBoard teamId={teamId} isManager={isManager}/>}
       {tab==='llm' && <TeamLLM teamId={teamId} isManager={isManager}/>}
-      {tab==='meetings' && <TeamMeetings teamId={teamId} timezone={t.timezone}/>}
+      {tab==='meetings' && <TeamMeetings teamId={teamId} timezone={t.timezone} isManager={isManager}/>}
       {tab==='sync' && <TeamSync teamId={teamId} isManager={isManager}/>}
+    </div>
+  );
+};
+
+const TeamReports = ({ teamId }) => {
+  const members = useAsync(() => GCApi.teamLeaderboard(teamId), [teamId]);
+  const [report, setReport] = React.useState(null);
+  const [busy, setBusy] = React.useState('');
+  const open = async (userId) => {
+    setBusy(userId);
+    try { setReport(await GCApi.teamMemberReport(teamId, userId)); }
+    finally { setBusy(''); }
+  };
+  if (members.loading) return <div style={card}><span className="gc-mute">Загружаем сотрудников…</span></div>;
+  if (members.error) return <Notice kind="err">{members.error.message}</Notice>;
+  return (
+    <div>
+      <div style={card}>
+        <h3>Отчёт по сотруднику</h3>
+        <p className="gc-mute" style={{ fontSize:12 }}>Метрики считаются по реальным задачам, дедлайнам, карточкам доски и событиям Grey Cardinal.</p>
+        {(members.data.items || []).map((member) => (
+          <div key={member.user_id} style={{ ...row, justifyContent:'space-between', borderBottom:'1px solid var(--rf-line,#262a31)', padding:'9px 0' }}>
+            <span><b>{member.display_name}</b> <span className="gc-mute">· {member.role}</span></span>
+            <button className="gc-btn gc-btn--ghost gc-btn--sm" disabled={busy===member.user_id} onClick={() => open(member.user_id)}>
+              {busy===member.user_id ? 'Считаем…' : 'Открыть отчёт'}
+            </button>
+          </div>
+        ))}
+      </div>
+      {report && <MemberReport report={report}/>}
+    </div>
+  );
+};
+
+const MemberReport = ({ report }) => {
+  const m = report.metrics;
+  const avg = m.avg_completion_hours == null ? 'нет данных' : `${m.avg_completion_hours} ч`;
+  const onTime = m.on_time_rate == null ? 'нет дедлайнов' : `${m.on_time_rate}%`;
+  const stats = [
+    ['Индекс выполнения', `${m.performance_index}/100`],
+    ['XP / уровень', `${m.points} / ${m.level}`],
+    ['Назначено', m.assigned_total],
+    ['Закрыто всего', m.completed_total],
+    ['Закрыто за 7 дней', m.completed_7d],
+    ['Закрыто за 30 дней', m.completed_30d],
+    ['Открыто', m.open_tasks],
+    ['Просрочено', m.overdue_open],
+    ['Среднее закрытие', avg],
+    ['В срок', onTime],
+    ['На доске', m.board_synced_tasks],
+    ['Обновлений статуса за 30 дней', m.status_updates_30d],
+  ];
+  const TaskRows = ({ title, tasks }) => tasks.length ? <div style={card}>
+    <h3>{title}</h3>
+    {tasks.map((task) => <div key={task.id} style={{ borderBottom:'1px solid var(--rf-line,#262a31)', padding:'8px 0' }}>
+      <b>{task.public_id} · {task.title}</b>
+      <div className="gc-mute" style={{ fontSize:11 }}>{task.status} · источник: {task.source}{task.source_author ? ` · от ${task.source_author}` : ''}{task.board_synced ? ' · доска ✓' : ''}</div>
+    </div>)}
+  </div> : null;
+  return (
+    <>
+      <div style={card}>
+        <h3>{report.member.display_name} · персональный отчёт</h3>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:8 }}>
+          {stats.map(([label,value]) => <div key={label} style={{ padding:10, background:'rgba(255,255,255,.025)', borderRadius:8 }}><div className="gc-mute" style={{ fontSize:11 }}>{label}</div><b>{value}</b></div>)}
+        </div>
+        <p className="gc-mute" style={{ fontSize:11, marginTop:10 }}>{m.performance_formula}</p>
+      </div>
+      <TaskRows title="Текущие задачи" tasks={report.active_tasks || []}/>
+      <TaskRows title="Последние закрытые" tasks={report.recent_completed || []}/>
+    </>
+  );
+};
+
+const TeamLeaderboard = ({ teamId }) => {
+  const board = useAsync(() => GCApi.teamLeaderboard(teamId), [teamId]);
+  if (board.loading) return <div style={card}><span className="gc-mute">Считаем рейтинг…</span></div>;
+  if (board.error) return <Notice kind="err">{board.error.message}</Notice>;
+  return (
+    <div style={card}>
+      <h3>Лидерборд команды</h3>
+      <p className="gc-mute" style={{ fontSize:12 }}>Опыт начисляется за закрытые задачи, обновления статусов, участие в созвонах и полезные действия.</p>
+      {(board.data.items || []).map((item) => (
+        <div key={item.user_id} style={{ ...row, justifyContent:'space-between', borderBottom:'1px solid var(--rf-line,#262a31)', padding:'11px 0' }}>
+          <div><b>#{item.rank} {item.display_name}</b><div className="gc-mute" style={{ fontSize:11 }}>{item.role} · закрыто задач: {item.completed_tasks}</div></div>
+          <div style={{ textAlign:'right' }}><b>{item.points} XP</b><div className="gc-mute" style={{ fontSize:11 }}>уровень {item.level}</div></div>
+        </div>
+      ))}
+      {(board.data.items || []).length === 0 && <p className="gc-mute">Участников пока нет.</p>}
     </div>
   );
 };
@@ -360,7 +489,7 @@ const TeamLLM = ({ teamId, isManager }) => {
   );
 };
 
-const TeamMeetings = ({ teamId, timezone }) => {
+const TeamMeetings = ({ teamId, timezone, isManager }) => {
   const ms = useAsync(() => GCApi.listMeetings(teamId), [teamId]);
   const [title, setTitle] = React.useState('Созвон');
   const [when, setWhen] = React.useState('');
@@ -373,20 +502,23 @@ const TeamMeetings = ({ teamId, timezone }) => {
   return (
     <div style={card}>
       <h3>Созвоны</h3>
-      <div style={{ ...row, marginBottom:12 }}>
+      {isManager && <div style={{ ...row, marginBottom:12 }}>
         <TextInput value={title} onChange={setTitle} placeholder="Название" style={{ maxWidth:180 }}/>
         <input className="gc-input" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ maxWidth:220 }}/>
         <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={create}>Создать</button>
-      </div>
+      </div>}
       {ms.loading ? <span className="gc-mute">…</span> : (ms.data.items || []).length === 0 ? <p className="gc-mute">Созвонов нет.</p> :
         (ms.data.items || []).map((m) => (
-          <div key={m.id} style={{ ...row, justifyContent:'space-between', borderBottom:'1px solid var(--rf-line,#262a31)', padding:'8px 0' }}>
-            <span>{m.public_id} · {m.title} · <b>{m.state}</b> · {gcFormatDateTime(m.scheduled_at)}</span>
-            <span style={row}>
-              <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => act(() => GCApi.confirmMeeting(m.id))}>Подтвердить</button>
-              <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => act(() => GCApi.rsvpMeeting(m.id, 'yes'))}>Приду</button>
-              <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => act(() => GCApi.cancelMeeting(m.id))}>Отмена</button>
-            </span>
+          <div key={m.id} style={{ borderBottom:'1px solid var(--rf-line,#262a31)', padding:'10px 0' }}>
+            <div style={{ ...row, justifyContent:'space-between' }}>
+              <span>{m.public_id} · {m.title} · <b>{m.state}</b> · {gcFormatDateTime(m.scheduled_at)}</span>
+              <span style={row}>
+                {isManager && <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => act(() => GCApi.confirmMeeting(m.id))}>Подтвердить</button>}
+                <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => act(() => GCApi.rsvpMeeting(m.id, 'yes'))}>Приду</button>
+                {isManager && <button className="gc-btn gc-btn--ghost gc-btn--sm" onClick={() => act(() => GCApi.cancelMeeting(m.id))}>Отмена</button>}
+              </span>
+            </div>
+            {m.summary && <div style={{ whiteSpace:'pre-wrap', background:'rgba(255,255,255,.025)', borderRadius:8, padding:10, marginTop:8, fontSize:13 }}>{m.summary}</div>}
           </div>
         ))}
     </div>

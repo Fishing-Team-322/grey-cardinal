@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 
@@ -12,8 +14,6 @@ from brain_api.api.deps import get_container
 from brain_api.container import Container
 
 router = APIRouter(tags=["health"])
-
-ALEMBIC_HEAD = "0001_initial_v2"
 
 
 @router.get("/health")
@@ -74,18 +74,27 @@ async def _check_db(container: Container) -> dict[str, object]:
 
 async def _check_migrations(container: Container) -> dict[str, object]:
     if not container.settings.is_production:
-        return {"ok": True, "required": ALEMBIC_HEAD, "skipped": "non-production"}
+        return {"ok": True, "required": sorted(_alembic_heads()), "skipped": "non-production"}
+    required: set[str] = set()
     try:
+        required = _alembic_heads()
         async with container.session_factory() as session:
             result = await session.execute(text("SELECT version_num FROM alembic_version"))
             versions = {row[0] for row in result.all()}
         return {
-            "ok": ALEMBIC_HEAD in versions,
-            "required": ALEMBIC_HEAD,
+            "ok": versions == required,
+            "required": sorted(required),
             "versions": sorted(versions),
         }
     except Exception as exc:
-        return {"ok": False, "required": ALEMBIC_HEAD, "error": str(exc)}
+        return {"ok": False, "required": sorted(required), "error": str(exc)}
+
+
+def _alembic_heads() -> set[str]:
+    app_dir = Path(__file__).resolve().parents[4]
+    config = Config(str(app_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(app_dir / "alembic"))
+    return set(ScriptDirectory.from_config(config).get_heads())
 
 
 def _check_production_config(container: Container) -> dict[str, object]:

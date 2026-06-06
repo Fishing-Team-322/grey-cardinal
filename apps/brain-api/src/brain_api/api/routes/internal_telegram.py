@@ -39,6 +39,11 @@ from brain_api.application.use_cases.meeting_flow import (
     handle_pending_meeting_time,
     is_meeting_callback,
 )
+from brain_api.application.use_cases.member_reports import (
+    manager_report_from_membership,
+    manager_report_menu,
+    render_member_report,
+)
 from brain_api.application.use_cases.reject_task import RejectTask
 from brain_api.application.use_cases.send_evening_digest import SendEveningDigest
 from brain_api.application.use_cases.send_personal_evening_digests import (
@@ -53,6 +58,11 @@ from brain_api.application.use_cases.task_help import (
 from brain_api.application.use_cases.task_status_flow import (
     handle_task_status_callback,
     is_task_status_callback,
+)
+from brain_api.application.use_cases.team_gamification import (
+    TASK_COMPLETED_XP,
+    grant_team_xp,
+    team_leaderboard_text_for_chat,
 )
 from brain_api.application.use_cases.team_settings import (
     handle_settings_callback,
@@ -86,6 +96,8 @@ CB_MENU_TASKS = "menu:tasks"
 CB_MENU_MEETINGS = "menu:meetings"
 CB_MENU_SETTINGS = "menu:settings"
 CB_MENU_DIGEST = "menu:digest"
+CB_MENU_LEADERBOARD = "menu:leaderboard"
+CB_MENU_REPORTS = "menu:reports"
 CB_SETUP_JIRA = "setup:jira"
 CB_SETUP_YOUGILE = "setup:yougile"
 CB_MEETING_START = "meeting:start"
@@ -115,11 +127,15 @@ def _main_menu_kb(is_group: bool = False) -> dict:
     if is_group:
         return _kb(
             [("📋 Задачи команды", CB_TASK_LIST), ("🎙 Встречи", CB_MENU_MEETINGS)],
-            [("📊 Дайджест", CB_MENU_DIGEST), ("⚙️ Настройки", CB_MENU_SETTINGS)],
+            [("🏆 Лидерборд", CB_MENU_LEADERBOARD), ("📊 Дайджест", CB_MENU_DIGEST)],
+            [("📈 Отчёты по сотрудникам", CB_MENU_REPORTS)],
+            [("⚙️ Настройки", CB_MENU_SETTINGS)],
         )
     return _kb(
         [("📋 Мои задачи", CB_TASK_LIST), ("📊 Дайджест", CB_MENU_DIGEST)],
-        [("🎙 Встречи", CB_MENU_MEETINGS), ("⚙️ Настройки", CB_MENU_SETTINGS)],
+        [("🎙 Встречи", CB_MENU_MEETINGS), ("🏆 Лидерборд", CB_MENU_LEADERBOARD)],
+        [("📈 Отчёты по сотрудникам", CB_MENU_REPORTS)],
+        [("⚙️ Настройки", CB_MENU_SETTINGS)],
     )
 
 
@@ -174,7 +190,9 @@ _HELP_TEXT = (
     "`/done GC\\-1` — закрыть задачу\n"
     "`/start_task GC\\-1` — взять в работу\n"
     "`/block GC\\-1` — заблокировать\n"
-    "`/digest` — вечерний дайджест"
+    "`/digest` — вечерний дайджест\n"
+    "`/leaderboard` — рейтинг команды\n"
+    "`/reports` — отчёт по сотруднику для руководителя"
 )
 
 _JIRA_SETUP_TEXT = (
@@ -384,6 +402,30 @@ async def ingest_callback(
         async with container.session_factory() as session:
             return await handle_settings_callback(session, data, event)
 
+    if data.startswith("report:member:"):
+        try:
+            membership_id = UUID(data.rsplit(":", 1)[-1])
+        except ValueError:
+            return _answer(cq_id, "Некорректный отчёт.")
+        async with container.session_factory() as session:
+            report = await manager_report_from_membership(
+                session,
+                telegram_user_id=event.from_user.id,
+                membership_id=membership_id,
+            )
+        if report is None:
+            return _answer(cq_id, "Отчёт доступен только руководителю этой команды.")
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Отчёт отправлен в личку."),
+                SendMessageAction(
+                    chat_id=event.from_user.id,
+                    text=render_member_report(report),
+                    reply_markup=_kb([("↩️ Другой сотрудник", CB_MENU_REPORTS)]),
+                ),
+            ]
+        )
+
     # ── Navigation callbacks ──────────────────────────────────────────────
     if data == CB_MENU_MAIN:
         return _edit_with_kb(chat_id, msg_id, cq_id, _WELCOME_PRIVATE, _main_menu_kb())
@@ -395,6 +437,25 @@ async def ingest_callback(
             cq_id,
             "⚙️ *Настройки интеграций*\n\nВыберите доску:",
             _settings_kb(),
+        )
+
+    if data == CB_MENU_LEADERBOARD:
+        async with container.session_factory() as session:
+            text = await team_leaderboard_text_for_chat(session, chat_id)
+        return _edit_with_kb(chat_id, msg_id, cq_id, text, _back_kb())
+
+    if data == CB_MENU_REPORTS:
+        async with container.session_factory() as session:
+            text, keyboard = await manager_report_menu(session, event.from_user.id)
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Открываю отчёты в личке."),
+                SendMessageAction(
+                    chat_id=event.from_user.id,
+                    text=text,
+                    reply_markup=keyboard,
+                ),
+            ]
         )
 
     if data in (CB_MODE_CONFIRM, CB_MODE_AUTO):
@@ -896,10 +957,22 @@ async def _route_v2_status_update(session, container, team, sender, message, par
         await session.commit()
         return ActionsResponse(actions=[])
 
+    was_done = task.status == "done"
     task.status = detected
     task.last_status_update_at = now
     if detected == "done":
         task.completed_at = now
+        if not was_done:
+            await grant_team_xp(
+                session,
+                user_id=task.assignee_id or sender.id,
+                team_id=team.id,
+                task_id=task.id,
+                kind="task_completed",
+                points=TASK_COMPLETED_XP,
+                reason=f"Закрыл задачу {task.public_id}",
+                idempotency_key=f"task_completed:{task.id}",
+            )
 
     board_ok = True
     card = await session.scalar(
@@ -1057,6 +1130,23 @@ async def ingest_command(
     if command == "settings":
         async with container.session_factory() as session:
             return await open_settings(session, chat_id)
+
+    if command in {"leaderboard", "rating", "top"}:
+        async with container.session_factory() as session:
+            return _text(chat_id, await team_leaderboard_text_for_chat(session, chat_id))
+
+    if command in {"report", "reports"}:
+        async with container.session_factory() as session:
+            text, keyboard = await manager_report_menu(session, event.sender.id)
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.sender.id,
+                    text=text,
+                    reply_markup=keyboard,
+                )
+            ]
+        )
 
     if command == "bind_team":
         if not event.args:

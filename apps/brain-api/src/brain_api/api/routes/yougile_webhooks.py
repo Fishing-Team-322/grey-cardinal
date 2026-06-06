@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.api.deps import get_container
 from brain_api.api.routes.accounts import get_db
+from brain_api.application.use_cases.team_gamification import TASK_COMPLETED_XP, grant_team_xp
 from brain_api.container import Container
 from brain_api.infrastructure.board.yougile import was_recent_outbound
 from brain_api.infrastructure.db import models as m
@@ -88,9 +89,21 @@ async def receive_yougile_webhook(
     if task is None:
         task = await _create_local_task(session, team_id, config, task_data)
 
+    was_done = task.status == "done"
     _apply_task_payload(task, config, task_data, event_name)
     if "assigned" in task_data:
         task.assignee_id = await _local_assignee(session, team_id, task_data)
+    if task.status == "done" and not was_done:
+        await grant_team_xp(
+            session,
+            user_id=task.assignee_id,
+            team_id=team_id,
+            task_id=task.id,
+            kind="task_completed",
+            points=TASK_COMPLETED_XP,
+            reason=f"Закрыл задачу {task.public_id} в YouGile",
+            idempotency_key=f"task_completed:{task.id}",
+        )
     await repo.upsert("task", yougile_id, local_id=task.id, payload=task_data)
     repo.log(
         direction="inbound",

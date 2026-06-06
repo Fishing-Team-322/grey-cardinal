@@ -13,6 +13,8 @@ const rawHash = (hash) => {
   let h = (hash || '').replace(/^#/, '');
   if (!h) h = '/';
   if (h.length > 1 && h.endsWith('/')) h = h.slice(0, -1);
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (h === '/' && tg && tg.initData) return '/tg';
   return h;
 };
 

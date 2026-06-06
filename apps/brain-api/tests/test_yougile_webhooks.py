@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -83,12 +84,38 @@ def test_task_created_and_moved_are_mirrored(
     session_factory,
 ):
     client, events = webhook_client
+
+    async def _seed_assignee():
+        async with session_factory() as session:
+            user = await session.scalar(select(m.UserModel))
+            session.add_all(
+                [
+                    m.TeamMemberModel(
+                        team_id=connected_team,
+                        user_id=user.id,
+                        role="employee",
+                    ),
+                    m.YouGileMappingModel(
+                        team_id=connected_team,
+                        entity_type="user",
+                        local_id=user.id,
+                        yougile_id="remote-user",
+                        last_synced_at=datetime.now(UTC),
+                    ),
+                ]
+            )
+            await session.commit()
+
+    import asyncio
+
+    asyncio.run(_seed_assignee())
     created = client.post(
         _url(connected_team, "task-created"),
         json={
             "id": "remote-1",
             "title": "Remote task",
             "columnId": "col-todo",
+            "assigned": ["remote-user"],
             "deadline": {"deadline": 1781278200000, "withTime": True},
         },
     )
@@ -101,6 +128,7 @@ def test_task_created_and_moved_are_mirrored(
             "title": "Remote task",
             "columnId": "col-done",
             "completed": True,
+            "assigned": ["remote-user"],
         },
     )
     assert moved.status_code == 202, moved.text
@@ -120,8 +148,13 @@ def test_task_created_and_moved_are_mirrored(
             task = await session.get(m.TaskModel, mapping.local_id)
             assert task.status == "done"
             assert task.completed_at is not None
-
-    import asyncio
+            xp = await session.scalar(
+                select(m.UserXpEventModel).where(
+                    m.UserXpEventModel.user_id == task.assignee_id,
+                    m.UserXpEventModel.kind == "task_completed",
+                )
+            )
+            assert xp is not None
 
     asyncio.run(_assert_db())
 
