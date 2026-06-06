@@ -15,6 +15,7 @@ from brain_api.api.deps import get_container
 from brain_api.api.routes import yougile as yg_routes
 from brain_api.api.routes.accounts import get_current_user, get_db
 from brain_api.infrastructure.db import models as m
+from brain_api.integrations.yougile import YouGileServerError
 
 
 @pytest_asyncio.fixture
@@ -101,6 +102,28 @@ def test_connect_with_expired_token_rejected(client: TestClient, manager_and_tea
     base = f"/api/teams/{team_id}/integrations/yougile"
     r = client.post(f"{base}/connect", json={"onboarding_token": "nope", "company_id": "co1"})
     assert r.status_code == 422
+
+
+def test_login_hides_upstream_error_body(
+    client: TestClient,
+    manager_and_team,
+    monkeypatch,
+):
+    class FailingClient:
+        async def auth_companies(self, login, password):
+            raise YouGileServerError("POST", "/auth/companies", 500, "<html>sensitive</html>")
+
+    monkeypatch.setattr(yg_routes, "YouGileClient", lambda *args, **kwargs: FailingClient())
+    _, team_id = manager_and_team
+
+    response = client.post(
+        f"/api/teams/{team_id}/integrations/yougile/login",
+        json={"login": "a@b.com", "password": "pw"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {"error": "yougile_unavailable"}
+    assert "sensitive" not in response.text
 
 
 @pytest.mark.asyncio

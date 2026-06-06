@@ -239,11 +239,12 @@ const TeamBoard = ({ teamId, isManager }) => {
   const [busy, setBusy] = React.useState(false);
   const startLogin = async () => {
     setBusy(true); setMsg('');
+    const submittedPassword = password;
+    setPassword('');
     try {
-      const result = await GCApi.yougileLogin(teamId, { login, password });
+      const result = await GCApi.yougileLogin(teamId, { login, password:submittedPassword });
       setOnboarding(result);
       setCompanyId(result.companies.length === 1 ? result.companies[0].id : '');
-      setPassword('');
     } catch (ex) { setMsg(ex.message); }
     finally { setBusy(false); }
   };

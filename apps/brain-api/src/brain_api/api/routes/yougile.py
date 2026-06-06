@@ -107,7 +107,10 @@ async def yougile_login(
             {"error": "invalid_credentials"},
         ) from None
     except YouGileError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"YouGile unavailable: {exc}") from exc
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            {"error": "yougile_unavailable"},
+        ) from exc
 
     _purge_expired()
     token = secrets.token_urlsafe(24)
@@ -158,7 +161,10 @@ async def yougile_connect(
             {"error": "invalid_credentials"},
         ) from None
     except YouGileError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"YouGile unavailable: {exc}") from exc
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            {"error": "yougile_unavailable"},
+        ) from exc
 
     webhook_secret = secrets.token_urlsafe(24)
     team.board_provider = "yougile"
