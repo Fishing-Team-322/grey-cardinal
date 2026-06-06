@@ -46,6 +46,8 @@ const GCApi = {
   logout: () => gcFetch('/api/auth/logout', { method: 'POST' }),
   authMe: () => gcFetch('/api/auth/me'),
   me: () => gcFetch('/api/me'),
+  telegramWebappAuth: (initData) =>
+    gcFetch('/api/auth/telegram-webapp', { method: 'POST', body: { init_data: initData } }),
 
   // ── Companies / teams / invites ──────────────────────────────────────────
   createCompany: (body) => gcFetch('/api/companies', { method: 'POST', body }),
@@ -62,6 +64,11 @@ const GCApi = {
 
   // ── PC agent (daemon) token ──────────────────────────────────────────────
   agentToken: () => gcFetch('/api/daemon/token', { method: 'POST' }),
+
+  // ── Bot settings (Mini App) ──────────────────────────────────────────────
+  getBotSettings: (teamId) => gcFetch(`/api/teams/${teamId}/bot-settings`),
+  setBotSettings: (teamId, body) =>
+    gcFetch(`/api/teams/${teamId}/bot-settings`, { method: 'PUT', body }),
 
   // ── Personal Telegram link ───────────────────────────────────────────────
   telegramLinkStart: () => gcFetch('/api/users/me/telegram/link', { method: 'POST' }),

@@ -38,6 +38,13 @@ def test_detects_task_with_assignee_and_deadline():
     assert result["task"]["deadline"] is not None
 
 
+def test_detects_task_ey_name():
+    text = "Эй Саня тебе надо клавиатуру собрать до вечера"
+    result = classify_message(text, NOW, "Europe/Moscow")
+    assert result["kind"] == "task_candidate"
+    assert result["task"]["assignee_text"] == "Саня"
+
+
 def test_detects_status_done():
     result = classify_message("Я сделал задачу по авторизации", NOW, "Europe/Moscow")
     assert result["kind"] == "status_update"

@@ -338,7 +338,7 @@ async def ingest_message(
             if pending is not None:
                 return pending
             if is_help_request_text(event.text):
-                return _text(event.chat.id, await materials_for_arg(session, event.text))
+                return _html(event.chat.id, await materials_for_arg(session, event.text))
 
     v2_response = await _try_v2_semantic_message(event, container)
     if v2_response is not None:
@@ -695,7 +695,9 @@ async def _try_v2_semantic_message(
         if kind == "absence_notice":
             return await _route_v2_absence(session, team, sender, message, parsed, event)
         if kind == "status_update":
-            return await _route_v2_status_update(session, team, sender, message, parsed, event)
+            return await _route_v2_status_update(
+                session, container, team, sender, message, parsed, event
+            )
 
         session.add(
             m.AuditLogModel(
@@ -851,26 +853,77 @@ async def _route_v2_absence(session, team, sender, message, parsed, event):
     )
 
 
-async def _route_v2_status_update(session, team, sender, message, parsed, event):
+async def _route_v2_status_update(session, container, team, sender, message, parsed, event):
+    """Сотрудник пишет статус в чат («приступаю» / «готово» / «застрял») →
+    меняем статус задачи, двигаем карточку на доске и подтверждаем в чате."""
+    from brain_api.domain.enums import TaskStatus
+
+    now = datetime.now(UTC)
+    detected = (parsed.get("daily_report") or {}).get("detected_status")
+    if detected not in {"done", "in_progress", "blocked"}:
+        await session.commit()
+        return ActionsResponse(actions=[])
+
+    active = ["todo", "in_progress", "blocked", "review"]
     task = await session.scalar(
         select(m.TaskModel)
         .where(
             m.TaskModel.team_id == team.id,
             m.TaskModel.assignee_id == sender.id,
-            m.TaskModel.status.in_(["todo", "in_progress", "blocked", "review"]),
+            m.TaskModel.status.in_(active),
         )
         .order_by(m.TaskModel.updated_at.desc())
     )
-    if task is not None:
-        task.last_status_update_at = datetime.now(UTC)
-        report = parsed.get("daily_report") or {}
-        detected = report.get("detected_status")
-        if detected in {"done", "in_progress", "blocked"}:
-            task.status = detected
+    # запасной матчинг: по имени исполнителя в тексте задачи (если assignee_id не проставлен)
+    if task is None:
+        name = (sender.display_name or sender.telegram_username or "").split()
+        needle = name[0].lower() if name else ""
+        if needle:
+            rows = await session.execute(
+                select(m.TaskModel)
+                .where(
+                    m.TaskModel.team_id == team.id,
+                    m.TaskModel.status.in_(active),
+                    m.TaskModel.assignee_text.is_not(None),
+                )
+                .order_by(m.TaskModel.updated_at.desc())
+            )
+            for candidate in rows.scalars():
+                if needle in (candidate.assignee_text or "").lower():
+                    task = candidate
+                    break
+    if task is None:
+        await session.commit()
+        return ActionsResponse(actions=[])
+
+    task.status = detected
+    task.last_status_update_at = now
+    if detected == "done":
+        task.completed_at = now
+
+    board_ok = True
+    card = await session.scalar(
+        select(m.BoardCardModel).where(m.BoardCardModel.task_id == task.id)
+    )
+    if card is not None:
+        try:
             if detected == "done":
-                task.completed_at = datetime.now(UTC)
+                await container.board.close_card(card.external_card_id)
+            else:
+                await container.board.move_card(card.external_card_id, TaskStatus(detected))
+        except Exception as exc:  # noqa: BLE001 — ошибка доски не должна терять статус
+            board_ok = False
+            logger.warning("board move failed for %s: %s", task.public_id, exc)
     await session.commit()
-    return ActionsResponse(actions=[])
+
+    labels = {"in_progress": "🔄 В работе", "done": "✅ Готово", "blocked": "⛔ Заблокирована"}
+    text = f"{task.public_id} {task.title}\n→ {labels[detected]}"
+    if card is not None:
+        text += (
+            "\n(карточка на доске обновлена)" if board_ok
+            else "\n(доску синхронизировать не удалось)"
+        )
+    return _text(event.chat.id, text)
 
 
 async def _match_v2_assignee(session, team_id, assignee_text):
@@ -983,7 +1036,7 @@ async def ingest_command(
         if not topic:
             return _text(chat_id, "Укажи тему: /howto написать REST API на FastAPI")
         async with container.session_factory() as session:
-            return _text(chat_id, await materials_for_arg(session, topic))
+            return _html(chat_id, await materials_for_arg(session, topic))
 
     if command == "help":
         if event.args:
@@ -1204,6 +1257,12 @@ def _parse_callback(data: str) -> tuple[str, UUID | None]:
 
 def _text(chat_id: int, text: str) -> ActionsResponse:
     return ActionsResponse(actions=[SendMessageAction(chat_id=chat_id, text=text)])
+
+
+def _html(chat_id: int, text: str) -> ActionsResponse:
+    return ActionsResponse(actions=[
+        SendMessageAction(chat_id=chat_id, text=text, parse_mode="HTML")
+    ])
 
 
 def _telegram_display_name(payload: TelegramLinkRequest) -> str:

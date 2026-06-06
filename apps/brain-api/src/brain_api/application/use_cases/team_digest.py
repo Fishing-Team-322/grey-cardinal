@@ -44,8 +44,11 @@ async def run_team_digests(session_factory, gateway, now: datetime | None = None
             await session.execute(select(m.TeamModel).where(m.TeamModel.tg_chat_id.is_not(None)))
         ).scalars().all()
         for team in teams:
-            mode = (team.board_config or {}).get("digest_mode", "off")
-            slots = digest_slots(mode)
+            cfg = team.board_config or {}
+            mode = cfg.get("digest_mode", "off")
+            if mode == "off":
+                continue
+            slots = cfg.get("digest_hours") or digest_slots(mode)
             if not slots:
                 continue
             local = now.astimezone(ZoneInfo(team.timezone))
