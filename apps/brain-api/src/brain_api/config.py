@@ -58,7 +58,13 @@ class Settings(BaseSettings):
     jira_in_progress_transition_id: str = "21"
 
     yougile_enabled: bool = False
-    yougile_api_base_url: str = "https://ru.yougile.com"
+    # Full API base (verified working host). Override via YOUGILE_API_BASE_URL.
+    yougile_api_base_url: str = "https://yougile.com/api-v2"
+    yougile_rate_limit_per_minute: int = 50
+    yougile_onboarding_token_ttl_seconds: int = 90
+    yougile_discovery_schedule_hours: int = 6
+    # Public origin for inbound webhook URLs (falls back to telegram_public_base_url).
+    public_base_url: str = ""
     yougile_api_key: str = ""
     yougile_company_id: str = ""
     yougile_project_id: str = ""

@@ -456,7 +456,7 @@ class LLMSettingsModel(TimestampMixin, Base):
 class TeamModel(TimestampMixin, Base):
     __tablename__ = "teams"
     __table_args__ = (
-        CheckConstraint("board_provider in ('yougile')", name="ck_team_board_provider"),
+        CheckConstraint("board_provider in ('yougile','mock')", name="ck_team_board_provider"),
     )
 
     id: Mapped[UUID] = _uuid_pk()
