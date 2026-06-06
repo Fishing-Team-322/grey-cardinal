@@ -57,6 +57,9 @@ const GCApi = {
   acceptInvite: (token) =>
     gcFetch(`/api/invites/${encodeURIComponent(token)}/accept`, { method: 'POST' }),
 
+  // ── PC agent (daemon) token ──────────────────────────────────────────────
+  agentToken: () => gcFetch('/api/daemon/token', { method: 'POST' }),
+
   // ── Personal Telegram link ───────────────────────────────────────────────
   telegramLinkStart: () => gcFetch('/api/users/me/telegram/link', { method: 'POST' }),
   telegramStatus: () => gcFetch('/api/users/me/telegram/status'),

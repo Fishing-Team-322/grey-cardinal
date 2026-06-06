@@ -53,6 +53,36 @@ const OnboardingCreateCompany = ({ onDone }) => {
   );
 };
 
+// ── ПК-агент (трей): токен привязки ─────────────────────────────────────────
+const AgentCard = () => {
+  const [token, setToken] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const get = async () => {
+    setBusy(true);
+    try {
+      const r = await GCApi.agentToken();
+      setToken(r.token);
+      try { await navigator.clipboard.writeText(r.token); } catch (_) {}
+    } finally { setBusy(false); }
+  };
+  return (
+    <div style={card}>
+      <h3>ПК-агент (запись созвонов)</h3>
+      <p className="gc-mute" style={{ fontSize:13 }}>
+        Скачайте агента на странице <a href="#/download">Загрузка</a>, запустите его (появится в трее),
+        получите токен ниже и вставьте его в config агента (меню трея → «Вставить токен» → строка <code>agent_token</code>).
+      </p>
+      <button className="gc-btn gc-btn--primary gc-btn--sm" onClick={get} disabled={busy}>
+        {busy ? '…' : 'Получить токен агента'}
+      </button>
+      {token && <Notice kind="ok">Токен (скопирован):<br/><code style={{ wordBreak:'break-all' }}>{token}</code></Notice>}
+      <p className="gc-mute" style={{ fontSize:12 }}>
+        Голос с агента → распознавание → задача появится в Telegram-чате вашей команды с кнопкой «Создать карточку».
+      </p>
+    </div>
+  );
+};
+
 // ── Профиль: привязка Telegram ──────────────────────────────────────────────
 const ProfilePanel = ({ user }) => {
   const st = useAsync(() => GCApi.telegramStatus(), []);
@@ -79,6 +109,7 @@ const ProfilePanel = ({ user }) => {
               </Notice>}
             </>}
       </div>
+      <AgentCard/>
     </div>
   );
 };

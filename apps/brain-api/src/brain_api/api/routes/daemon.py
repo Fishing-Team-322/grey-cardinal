@@ -19,17 +19,24 @@ scheduler'а, который персистит переходы (см. буду
 
 from __future__ import annotations
 
+import logging
+import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from brain_api.api.deps import get_container
+from brain_api.api.routes.accounts import CurrentUser, get_db
+from brain_api.application.rendering import proposal_keyboard
+from brain_api.application.semantic_parser import SemanticMessageInput
 from brain_api.config import get_settings
 from brain_api.container import Container
 from brain_api.infrastructure.db import models as m
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/daemon", tags=["daemon"])
 
 _ACTIVE_MEETING_STATES = ("scheduled", "armed", "recording")
@@ -151,3 +158,158 @@ def _payload(state, meeting, recording_started_at, now: datetime, settings) -> d
 
 def _as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+# ── Agent pairing token (для ПК-агента, привязка к аккаунту пользователя) ─────
+
+@router.post("/token")
+async def issue_agent_token(
+    current_user: CurrentUser,
+    session=Depends(get_db),
+) -> dict:
+    """Выдать ПК-агенту токен, привязанный к аккаунту (= client_session_id).
+
+    Пользователь генерирует токен в кабинете и вставляет его в трей-агент. Аплоады
+    агента маршрутизируются в команды этого пользователя.
+    """
+    now = datetime.now(UTC)
+    device = m.DeviceModel(
+        user_id=current_user.id, device_name="PC Agent", platform="windows", last_seen_at=now
+    )
+    session.add(device)
+    await session.flush()
+    cs = m.ClientSessionModel(
+        user_id=current_user.id, device_id=device.id, status="active", started_at=now
+    )
+    session.add(cs)
+    await session.commit()
+    return {"token": str(cs.id), "server_url": get_settings().telegram_public_base_url or ""}
+
+
+# ── Daemon audio → v2 team task proposal ──────────────────────────────────────
+
+@router.post("/v2/uploads")
+async def daemon_v2_upload(
+    audio: UploadFile | None = File(default=None),
+    transcript_text: str = Form(default=""),
+    duration_sec: float = Form(default=0),
+    x_agent_token: str | None = Header(default=None, alias="X-Agent-Token"),
+    container: Container = Depends(get_container),
+) -> dict:
+    """Аудио/транскрипт с ПК-агента → ASR → v2-семантика команды → proposal в чат.
+
+    Auth: X-Agent-Token (client_session_id). Команда выбирается по пользователю
+    агента (первая команда с привязанным Telegram-чатом).
+    """
+    token = _extract_token(x_agent_token, None)
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing agent token")
+    async with container.session_factory() as session:
+        cs = await _resolve_session(session, token)
+        if cs is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid agent token")
+        team = await _agent_team(session, cs.user_id)
+        team_id = team.id if team else None
+    if team_id is None:
+        return {"ok": True, "proposal_created": False, "detail": "no bound team"}
+
+    text = (transcript_text or "").strip()
+    if not text and audio is not None:
+        content = await audio.read()
+        text = await _transcribe_audio(content)
+    if not text:
+        return {"ok": True, "transcript": "", "proposal_created": False}
+
+    result = await ingest_team_text(container, team_id, text, source="daemon_audio")
+    return {"ok": True, "transcript": text[:200], **result}
+
+
+async def _agent_team(session, user_id: UUID):
+    """Первая команда пользователя с привязанным Telegram-чатом (куда слать proposal)."""
+    return await session.scalar(
+        select(m.TeamModel)
+        .join(m.TeamMemberModel, m.TeamMemberModel.team_id == m.TeamModel.id)
+        .where(m.TeamMemberModel.user_id == user_id, m.TeamModel.tg_chat_id.is_not(None))
+        .order_by(m.TeamMemberModel.joined_at)
+    )
+
+
+async def _transcribe_audio(content: bytes) -> str:
+    url = os.getenv("ASR_SERVICE_URL", "http://asr-service:8030").rstrip("/") + "/transcribe"
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            r = await client.post(url, content=content, headers={"Content-Type": "audio/wav"})
+            r.raise_for_status()
+            return (r.json().get("text") or "").strip()
+    except Exception as exc:  # noqa: BLE001 — ASR ошибка не должна ронять аплоад
+        logger.warning("daemon ASR failed: %s", exc)
+        return ""
+
+
+async def ingest_team_text(container: Container, team_id: UUID, text: str, source: str) -> dict:
+    """Прогнать текст через v2-семантику команды и при task_candidate создать
+    proposal + отправить его в Telegram-чат команды с кнопками подтверждения."""
+    from brain_api.api.routes.internal_telegram import (
+        _find_v2_duplicate,
+        _match_v2_assignee,
+        _parse_dt,
+    )
+
+    now = datetime.now(UTC)
+    async with container.session_factory() as session:
+        team = await session.get(m.TeamModel, team_id)
+        if team is None or team.tg_chat_id is None:
+            return {"kind": "unknown", "proposal_created": False}
+        try:
+            parsed = await container.semantic_parser.parse(
+                SemanticMessageInput(
+                    team_id=team.id, message_text=text, sender_user_id=None,
+                    team_timezone=team.timezone, now=now,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("daemon semantic parse failed: %s", exc)
+            return {"kind": "unknown", "proposal_created": False}
+
+        kind = parsed["kind"]
+        conf = float(parsed["confidence"])
+        if kind != "task_candidate" or conf < container.config.task_extraction_min_confidence:
+            return {"kind": kind, "proposal_created": False}
+
+        task = parsed.get("task") or {}
+        title = str(task.get("title") or text[:120]).strip()
+        assignee_text = task.get("assignee_text")
+        assignee = await _match_v2_assignee(session, team.id, assignee_text)
+        deadline = _parse_dt(task.get("deadline"), team.timezone)
+        duplicate = await _find_v2_duplicate(
+            session, team.id, title, assignee.id if assignee else None
+        )
+        if duplicate is not None:
+            return {"kind": kind, "proposal_created": False, "duplicate": duplicate.public_id}
+
+        proposal = m.TaskProposalModel(
+            team_id=team.id, source=source, title=title, description=task.get("description"),
+            assignee_text=assignee_text, assignee_id=assignee.id if assignee else None,
+            deadline=deadline, deadline_timezone=team.timezone,
+            priority=task.get("priority") or "medium", confidence=conf,
+            raw_text=text, extractor_payload=parsed,
+        )
+        session.add(proposal)
+        await session.flush()
+        confirmation = m.ConfirmationModel(
+            team_id=team.id, proposal_id=proposal.id, status="pending",
+            telegram_chat_id=team.tg_chat_id,
+        )
+        session.add(confirmation)
+        await session.commit()
+        chat_id = team.tg_chat_id
+        conf_id = confirmation.id
+
+    msg = (
+        "🎙 Из созвона — нашёл задачу\n\n"
+        f"Что сделать:\n{title}\n\n"
+        f"Исполнитель:\n{assignee_text or 'не указан'}\n\n"
+        "Создать карточку?"
+    )
+    await container.telegram_gateway.send_message(chat_id, msg, proposal_keyboard(conf_id))
+    return {"kind": kind, "proposal_created": True, "title": title}

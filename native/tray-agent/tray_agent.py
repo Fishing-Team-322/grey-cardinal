@@ -21,11 +21,9 @@ import contextlib
 import io
 import logging
 import os
-import socket
 import sys
 import threading
 import time
-import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -157,31 +155,6 @@ class Backend:
     def _url(self, path: str) -> str:
         return self.cfg.server_url.rstrip("/") + path
 
-    def pair(self, code: str | None = None) -> tuple[str, str]:
-        """Self-pair (code=None) или привязка по коду из кабинета."""
-        if requests is None:
-            raise RuntimeError("requests не установлен")
-        if not code:
-            pc = requests.post(self._url("/api/agents/pairing-code"), json={}, timeout=20)
-            pc.raise_for_status()
-            code = pc.json()["pairing_code"]
-        reg = requests.post(
-            self._url("/api/agents/register"),
-            json={"pairing_code": code, "device_name": socket.gethostname(),
-                  "os": "windows", "daemon_version": VERSION},
-            timeout=20,
-        )
-        reg.raise_for_status()
-        data = reg.json()
-        return data["agent_token"], data.get("workspace_id", "")
-
-    def heartbeat(self, status: str) -> None:
-        if requests is None or not self.cfg.agent_token:
-            return
-        with contextlib.suppress(Exception):
-            requests.post(self._url("/api/agents/heartbeat"),
-                          json={"status": status}, headers={"X-Agent-Token": self.cfg.agent_token}, timeout=10)
-
     def session_active(self) -> tuple[bool, str | None]:
         if requests is None:
             return False, None
@@ -193,25 +166,15 @@ class Backend:
             return False, None
 
     def upload(self, wav_bytes: bytes, duration: int) -> dict:
+        """Аудио -> ASR -> v2-задача команды (proposal уходит в Telegram-чат команды)."""
         if requests is None or not self.cfg.agent_token:
-            raise RuntimeError("агент не привязан")
+            raise RuntimeError("нет токена агента")
         files = {"audio": ("chunk.wav", wav_bytes, "audio/wav")}
-        data = {"recording_id": uuid.uuid4().hex, "duration_sec": str(duration),
-                "source": "microphone", "transcript_text": ""}
-        r = requests.post(self._url("/api/daemon/uploads"), files=files, data=data,
+        data = {"duration_sec": str(duration), "transcript_text": ""}
+        r = requests.post(self._url("/api/daemon/v2/uploads"), files=files, data=data,
                           headers={"X-Agent-Token": self.cfg.agent_token}, timeout=180)
         r.raise_for_status()
         return r.json()
-
-    def last_history(self) -> dict | None:
-        if requests is None:
-            return None
-        with contextlib.suppress(Exception):
-            r = requests.get(self._url("/api/daemon/hearing-history"),
-                             params={"workspace_id": self.cfg.workspace_id, "limit": 1}, timeout=10)
-            items = r.json().get("items", [])
-            return items[0] if items else None
-        return None
 
 
 # ── Recorder ──────────────────────────────────────────────────────────────────
@@ -248,20 +211,21 @@ class TrayApp:
             return
         try:
             if not self.cfg.agent_token:
-                self._set(ICON_ERR, "Не привязан — нажмите «Перепривязать»")
+                self._set(ICON_ERR, "Нет токена — вставьте в config")
                 return
             self._set(ICON_REC, f"Запись {self.cfg.chunk_sec}с…")
-            self.be.heartbeat("recording")
             wav = record_wav(self.cfg.chunk_sec)
-            self._set(ICON_BUSY, "Отправка на сервер…")
+            self._set(ICON_BUSY, "Распознавание на сервере…")
             res = self.be.upload(wav, self.cfg.chunk_sec)
-            self.be.heartbeat("idle")
+            transcript = (res.get("transcript") or "").strip()
             if res.get("proposal_created"):
-                self._set(ICON_IDLE, "Задача найдена ✓")
-                log.info("Загружено, задача создана: %s", res.get("proposal_id"))
+                self._set(ICON_IDLE, f"Задача: {(res.get('title') or '')[:28]} ✓")
+                log.info("Распознано: %s | задача в чат команды: %s", transcript, res.get("title"))
+            elif transcript:
+                self._set(ICON_IDLE, "Распознано, задач нет")
+                log.info("Распознано: %s | задач не найдено", transcript)
             else:
-                self._set(ICON_IDLE, "Загружено (задач нет)")
-                log.info("Загружено, задач не найдено")
+                self._set(ICON_IDLE, "Тишина / не распознано")
         except Exception as e:  # noqa: BLE001
             log.error("Запись/загрузка: %s", e)
             self._set(ICON_ERR, f"Ошибка: {str(e)[:40]}")
@@ -272,29 +236,18 @@ class TrayApp:
     def _record_now(self, icon=None, item=None) -> None:
         threading.Thread(target=self._record_and_upload, daemon=True).start()
 
-    def _repair(self, icon=None, item=None) -> None:
-        def _do():
-            try:
-                self._set(ICON_BUSY, "Привязка…")
-                token, ws = self.be.pair()
-                self.cfg.agent_token, self.cfg.workspace_id = token, ws
-                self.cfg.save()
-                self._set(ICON_IDLE, "Привязано ✓")
-                log.info("Привязано к workspace %s", ws)
-            except Exception as e:  # noqa: BLE001
-                self._set(ICON_ERR, f"Привязка не удалась: {str(e)[:30]}")
-                log.error("Привязка: %s", e)
-            self._refresh_menu()
-        threading.Thread(target=_do, daemon=True).start()
-
-    def _show_last(self, icon=None, item=None) -> None:
-        h = self.be.last_history()
-        if h:
-            self._set(self._icon.icon if self._icon else ICON_IDLE,
-                      f"Последнее: {(h.get('prepared_task') or h.get('transcript_text') or '—')[:40]}")
-            log.info("Последняя реплика: %s | задача: %s", h.get("transcript_text"), h.get("prepared_task"))
+    def _reload_token(self, icon=None, item=None) -> None:
+        self.cfg.agent_token = Config.load().agent_token
+        if self.cfg.agent_token:
+            self._set(ICON_IDLE, "Токен загружен ✓")
+            log.info("Токен агента загружен из config")
         else:
-            self._set(ICON_IDLE, "История пуста")
+            self._set(ICON_ERR, "Токен пуст — вставьте в config")
+        self._refresh_menu()
+
+    def _open_config(self, icon=None, item=None) -> None:
+        with contextlib.suppress(Exception):
+            os.startfile(str(_config_path()))
 
     # ── tray plumbing ──
     def _set(self, icon_img, tooltip: str) -> None:
@@ -309,17 +262,16 @@ class TrayApp:
                 self._icon.update_menu()
 
     def _menu(self) -> "pystray.Menu":
-        paired = "да" if self.cfg.agent_token else "нет"
+        paired = "да" if self.cfg.agent_token else "НЕТ — вставьте в config"
         return pystray.Menu(
             pystray.MenuItem(lambda i: self._status, None, enabled=False),
-            pystray.MenuItem(f"Привязан: {paired}", None, enabled=False),
+            pystray.MenuItem(f"Токен: {paired}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("⏺ Записать сейчас (тест)", self._record_now,
                              enabled=lambda i: _AUDIO_OK),
-            pystray.MenuItem("🔗 Перепривязать", self._repair),
-            pystray.MenuItem("📜 Последняя реплика", self._show_last),
+            pystray.MenuItem("🔑 Вставить токен (config)", self._open_config),
+            pystray.MenuItem("🔄 Перечитать токен", self._reload_token),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Настройки (config)", lambda i, it: os.startfile(str(_config_path()))),
             pystray.MenuItem("Логи", lambda i, it: os.startfile(str(_log_path()))),
             pystray.MenuItem("Выход", self._quit),
         )
@@ -331,12 +283,13 @@ class TrayApp:
 
     # ── background loop ──
     def _loop(self) -> None:
-        # авто-привязка при первом запуске
-        if not self.cfg.agent_token:
-            self._repair()
         while not self._stop.is_set():
-            self.be.heartbeat("idle")
-            if self.cfg.auto_record and self.cfg.agent_token:
+            # подхватываем токен, если его вставили в config «на лету»
+            if not self.cfg.agent_token:
+                self.cfg.agent_token = Config.load().agent_token
+            if not self.cfg.agent_token:
+                self._set(ICON_ERR, "Нет токена агента — вставьте в config")
+            elif self.cfg.auto_record:
                 active, mid = self.be.session_active()
                 if active and not self._rec_lock.locked():
                     log.info("Активная встреча %s — запись", mid)
