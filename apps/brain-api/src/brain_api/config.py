@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2
     llm_strict_json: bool = True
 
-    board_provider: str = "yougile"
+    board_provider: str = "mock"
     board_creds_encryption_key: str = ""
 
     jira_url: str = ""
@@ -58,19 +58,13 @@ class Settings(BaseSettings):
     jira_in_progress_transition_id: str = "21"
 
     yougile_enabled: bool = False
-    yougile_api_base_url: str = "https://ru.yougile.com"
-    yougile_api_key: str = ""
-    yougile_company_id: str = ""
-    yougile_project_id: str = ""
-    yougile_board_id: str = ""
-    yougile_column_backlog_id: str = ""
-    yougile_column_todo_id: str = ""
-    yougile_column_in_progress_id: str = ""
-    yougile_column_review_id: str = ""
-    yougile_column_blocked_id: str = ""
-    yougile_column_done_id: str = ""
-    yougile_user_map: str = ""
-
+    # Full API base (verified working host). Override via YOUGILE_API_BASE_URL.
+    yougile_api_base_url: str = "https://yougile.com/api-v2"
+    yougile_rate_limit_per_minute: int = 50
+    yougile_onboarding_token_ttl_seconds: int = 90
+    yougile_discovery_schedule_hours: int = 6
+    # Public origin for inbound webhook URLs (falls back to telegram_public_base_url).
+    public_base_url: str = ""
     brain_store_path: str = ""
     uploads_dir: str = "/data/uploads"
 

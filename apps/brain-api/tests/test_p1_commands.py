@@ -33,18 +33,6 @@ def _container(make_uow, config, extractor, telegram, events):
         event_publisher=events,
         settings=SimpleNamespace(
             app_env="dev",
-            board_provider="mock",
-            yougile_api_base_url="https://ru.yougile.com",
-            yougile_api_key="",
-            yougile_company_id="",
-            yougile_project_id="",
-            yougile_board_id="",
-            yougile_column_backlog_id="",
-            yougile_column_todo_id="",
-            yougile_column_in_progress_id="",
-            yougile_column_review_id="",
-            yougile_column_blocked_id="",
-            yougile_column_done_id="",
             telegram_bot_base_url="http://telegram-bot:8010",
         ),
     )
@@ -71,7 +59,7 @@ async def test_debug_state_and_dependencies(make_uow, config, extractor, telegra
     assert counts["meetings"] == 0
     result = await dependencies(container)
     assert result["ok"] is True
-    assert result["board_provider"] == "mock"
+    assert result["board_provider"] == "team-scoped"
 
 
 async def test_bind_chat_replaces_previous_notification_chat(

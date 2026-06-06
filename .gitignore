@@ -31,6 +31,7 @@ __pycache__/
 .venv/
 venv/
 .tools/
+.venv312
 
 # CMake / native builds
 native/desktop-agent/build/

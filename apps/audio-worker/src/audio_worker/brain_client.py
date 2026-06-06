@@ -38,7 +38,7 @@ class BrainClient:
         return MeetingStatusResponse.model_validate(data) if data else None
 
     async def get_active_meeting(self) -> MeetingStatusResponse | None:
-        """Return the currently active workspace meeting, or None if none is running."""
+        """Return the active meeting used to route legacy audio uploads."""
         url = f"{self._base_url}/internal/meetings/active"
         headers = {"X-Internal-Token": self._internal_token}
         try:

@@ -23,7 +23,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: grey-cardinal-daemon-windows-x64
-          path: apps/frontend-dashboard/public/downloads/grey-cardinal-daemon-windows-x64.msi
+          path: apps/frontend/public/downloads/grey-cardinal-daemon-windows-x64.msi
 
   linux-deb-preview:
     runs-on: ubuntu-latest
