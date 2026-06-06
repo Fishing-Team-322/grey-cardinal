@@ -958,6 +958,72 @@ async def team_llm_health(
         }
 
 
+class BotSettingsRequest(BaseModel):
+    digest_mode: str | None = None
+    digest_hours: list[int] | None = None
+    meeting_reminders: bool | None = None
+    daemon_autorecord: bool | None = None
+
+
+def _bot_settings_payload(team: m.TeamModel) -> dict:
+    cfg = team.board_config or {}
+    return {
+        "team_id": str(team.id),
+        "team_name": team.name,
+        "timezone": team.timezone,
+        "digest_mode": cfg.get("digest_mode", "off"),
+        "digest_hours": cfg.get("digest_hours"),
+        "meeting_reminders": cfg.get("meeting_reminders", True),
+        "daemon_autorecord": cfg.get("daemon_autorecord", True),
+    }
+
+
+@router.get("/api/teams/{team_id}/bot-settings")
+async def get_bot_settings(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_member(ctx, team_id)
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    return _bot_settings_payload(team)
+
+
+@router.put("/api/teams/{team_id}/bot-settings")
+async def set_bot_settings(
+    team_id: UUID,
+    body: BotSettingsRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    from brain_api.application.use_cases.team_settings import DIGEST_MODES
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    cfg = dict(team.board_config or {})
+    if body.digest_mode is not None:
+        if body.digest_mode not in DIGEST_MODES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid digest_mode")
+        cfg["digest_mode"] = body.digest_mode
+    if body.digest_hours is not None:
+        hours = sorted({int(h) for h in body.digest_hours if 0 <= int(h) <= 23})
+        cfg["digest_hours"] = hours[:6]
+    if body.meeting_reminders is not None:
+        cfg["meeting_reminders"] = bool(body.meeting_reminders)
+    if body.daemon_autorecord is not None:
+        cfg["daemon_autorecord"] = bool(body.daemon_autorecord)
+    team.board_config = cfg
+    session.add(team)
+    await session.commit()
+    return _bot_settings_payload(team)
+
+
 async def _unique_telegram_link_code(session: AsyncSession) -> str:
     alphabet = string.ascii_uppercase + string.digits
     for _ in range(10):

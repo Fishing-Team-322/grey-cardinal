@@ -79,6 +79,10 @@ async def resolve_daemon_state(session, token: str, now: datetime, settings) -> 
         raise DaemonAuthError()
     team_ids = await _user_team_ids(session, client_session.user_id)
     meeting = await _pick_meeting(session, team_ids, now, settings) if team_ids else None
+    if meeting is not None:
+        team = await session.get(m.TeamModel, meeting.team_id)
+        if team is not None and not (team.board_config or {}).get("daemon_autorecord", True):
+            meeting = None  # команда отключила авто-запись даемоном
     state, recording_started_at = _compute_state(meeting, now, settings)
     return _payload(state, meeting, recording_started_at, now, settings)
 

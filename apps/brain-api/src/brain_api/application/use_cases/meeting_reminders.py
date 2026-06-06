@@ -102,6 +102,8 @@ async def run_meeting_reminders(session_factory, gateway, now: datetime | None =
             if meta.get("reminded_5min"):
                 continue
             team = await session.get(m.TeamModel, meeting.team_id)
+            if team is not None and not (team.board_config or {}).get("meeting_reminders", True):
+                continue
             tz = team.timezone if team else "Europe/Moscow"
             recipients = await _recipients(session, meeting, team)
             when = format_deadline(meeting.scheduled_at, tz)

@@ -62,6 +62,11 @@ const GCApi = {
   // ── PC agent (daemon) token ──────────────────────────────────────────────
   agentToken: () => gcFetch('/api/daemon/token', { method: 'POST' }),
 
+  // ── Bot settings (Mini App) ──────────────────────────────────────────────
+  getBotSettings: (teamId) => gcFetch(`/api/teams/${teamId}/bot-settings`),
+  setBotSettings: (teamId, body) =>
+    gcFetch(`/api/teams/${teamId}/bot-settings`, { method: 'PUT', body }),
+
   // ── Personal Telegram link ───────────────────────────────────────────────
   telegramLinkStart: () => gcFetch('/api/users/me/telegram/link', { method: 'POST' }),
   telegramStatus: () => gcFetch('/api/users/me/telegram/status'),

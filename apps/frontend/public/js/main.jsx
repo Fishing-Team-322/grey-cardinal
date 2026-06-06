@@ -6,6 +6,7 @@ const ROUTES = {
   '/login':    (props) => <LoginPage {...props}/>,
   '/register': (props) => <RegisterPage {...props}/>,
   '/app':      (props) => <AppDashboardPage {...props}/>,
+  '/tg':       (props) => <BotSettingsPage {...props}/>,
 };
 
 const rawHash = (hash) => {
