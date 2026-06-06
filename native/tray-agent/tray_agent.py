@@ -155,13 +155,15 @@ class Backend:
     def _url(self, path: str) -> str:
         return self.cfg.server_url.rstrip("/") + path
 
-    def session_active(self) -> tuple[bool, str | None]:
-        if requests is None:
+    def daemon_state(self) -> tuple[bool, str | None]:
+        """Tenant-scoped: запись только когда у команды реально идёт/скоро созвон."""
+        if requests is None or not self.cfg.agent_token:
             return False, None
         try:
-            r = requests.get(self._url("/api/session/current"), timeout=6)
+            r = requests.get(self._url("/api/daemon/state"),
+                             headers={"X-Agent-Token": self.cfg.agent_token}, timeout=6)
             d = r.json()
-            return bool(d.get("active")), d.get("meeting_id")
+            return (d.get("state") in ("armed", "recording")), d.get("meeting_public_id")
         except Exception:  # noqa: BLE001
             return False, None
 
@@ -290,12 +292,12 @@ class TrayApp:
             if not self.cfg.agent_token:
                 self._set(ICON_ERR, "Нет токена агента — вставьте в config")
             elif self.cfg.auto_record:
-                active, mid = self.be.session_active()
+                active, mid = self.be.daemon_state()
                 if active and not self._rec_lock.locked():
-                    log.info("Активная встреча %s — запись", mid)
+                    log.info("Идёт созвон %s — запись", mid)
                     self._record_and_upload(mid)
                 elif not active and not self._rec_lock.locked():
-                    self._set(ICON_IDLE, "Нет активной встречи")
+                    self._set(ICON_IDLE, "Нет активного созвона")
             self._refresh_menu()
             self._stop.wait(self.cfg.poll_interval)
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from brain_api.application.rendering import format_deadline
 from brain_api.infrastructure.db import models as m
@@ -18,6 +18,70 @@ from brain_api.infrastructure.db import models as m
 logger = logging.getLogger(__name__)
 
 REMINDER_LEAD_MINUTES = 5
+
+
+def _as_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+async def run_meeting_finalize(session_factory, gateway, now: datetime | None = None) -> int:
+    """Завершить созвоны, окно которых прошло, и отправить саммари в чат команды."""
+    now = now or datetime.now(UTC)
+    finalized = 0
+    async with session_factory() as session:
+        rows = await session.execute(
+            select(m.MeetingModel).where(
+                m.MeetingModel.state.in_(("scheduled", "armed", "recording")),
+                m.MeetingModel.scheduled_at.is_not(None),
+            )
+        )
+        for meeting in rows.scalars():
+            duration = meeting.duration_minutes or 60
+            end_at = _as_utc(meeting.scheduled_at) + timedelta(minutes=duration)
+            if now < end_at:
+                continue
+            team = await session.get(m.TeamModel, meeting.team_id)
+            window_start = _as_utc(meeting.scheduled_at) - timedelta(minutes=10)
+            task_count = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(m.TaskModel)
+                    .where(
+                        m.TaskModel.team_id == meeting.team_id,
+                        m.TaskModel.created_at >= window_start,
+                    )
+                )
+                or 0
+            )
+            yes = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(m.MeetingRsvpModel)
+                    .where(
+                        m.MeetingRsvpModel.meeting_id == meeting.id,
+                        m.MeetingRsvpModel.status == "yes",
+                    )
+                )
+                or 0
+            )
+            meeting.state = "finished"
+            meeting.status = "finished"
+            meeting.stopped_at = now
+            meeting.summary = f"tasks={task_count}, attendees={yes}"
+            if team and team.tg_chat_id:
+                when = format_deadline(meeting.scheduled_at, team.timezone)
+                text = (
+                    f"⏹ Созвон {when} завершён.\n\n"
+                    f"Участников (Приду): {yes}\n"
+                    f"Задач создано за созвон: {task_count}\n\n"
+                    "Итоги и карточки — в чате выше и на доске YouGile."
+                )
+                await gateway.send_message(team.tg_chat_id, text)
+            finalized += 1
+        await session.commit()
+    if finalized:
+        logger.info("Finalized %d meetings", finalized)
+    return finalized
 
 
 async def run_meeting_reminders(session_factory, gateway, now: datetime | None = None) -> int:

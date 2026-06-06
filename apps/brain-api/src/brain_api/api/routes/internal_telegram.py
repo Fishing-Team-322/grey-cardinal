@@ -109,12 +109,10 @@ def _main_menu_kb(is_group: bool = False) -> dict:
         return _kb(
             [("📋 Задачи команды", CB_TASK_LIST), ("🎙 Встречи", CB_MENU_MEETINGS)],
             [("📊 Дайджест", CB_MENU_DIGEST), ("⚙️ Настройки", CB_MENU_SETTINGS)],
-            [("🚀 Запустить демо", CB_DEMO_RUN)],
         )
     return _kb(
         [("📋 Мои задачи", CB_TASK_LIST), ("📊 Дайджест", CB_MENU_DIGEST)],
         [("🎙 Встречи", CB_MENU_MEETINGS), ("⚙️ Настройки", CB_MENU_SETTINGS)],
-        [("🚀 Запустить демо", CB_DEMO_RUN)],
     )
 
 
