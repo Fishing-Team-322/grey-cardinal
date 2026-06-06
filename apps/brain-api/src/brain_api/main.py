@@ -70,9 +70,6 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(session.router)
     app.include_router(accounts.router)
-    # organizations.router (старая Organization/OrganizationMember модель) намеренно
-    # НЕ подключается: v2 использует единую Company/Team модель (v2_tenants.router).
-    # Файл routes/organizations.py оставлен как legacy и в production app не маунтится.
     app.include_router(agents.router)
     app.include_router(daemon.router)
     app.include_router(demo_routes.router)

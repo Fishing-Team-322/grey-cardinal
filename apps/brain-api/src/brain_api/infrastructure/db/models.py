@@ -385,42 +385,6 @@ class UserXpTotalModel(Base):
     )
 
 
-# ── Organizations (migration 0005) ────────────────────────────────────────────
-
-
-class OrganizationModel(TimestampMixin, Base):
-    """Workspace / team owned by one user, with multiple members."""
-
-    __tablename__ = "organizations"
-
-    id: Mapped[UUID] = _uuid_pk()
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
-    description: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
-    photo_data_url: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
-    owner_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-
-
-class OrganizationMemberModel(TimestampMixin, Base):
-    """Membership record: active member or pending invite."""
-
-    __tablename__ = "organization_members"
-    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_org_member_user"),)
-
-    id: Mapped[UUID] = _uuid_pk()
-    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), nullable=False)
-    # NULL for pending email invites (user hasn't registered yet)
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    # Role: owner | admin | member | operator | daemon_maintainer
-    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="member")
-    # Status: active | invited | removed
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
-    # For email invites not yet accepted
-    invited_email: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Token used in join link
-    invite_token: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
-
-
 # --- Grey Cardinal v2 production domain ------------------------------------
 
 

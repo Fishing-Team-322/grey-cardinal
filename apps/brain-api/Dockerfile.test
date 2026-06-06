@@ -1,0 +1,11 @@
+# Test image: installs brain-api + dev deps (Linux wheels), source mounted at runtime.
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+COPY packages/contracts/python /app/packages/contracts/python
+RUN pip install -e /app/packages/contracts/python
+COPY apps/brain-api/pyproject.toml /app/apps/brain-api/pyproject.toml
+COPY apps/brain-api/src /app/apps/brain-api/src
+RUN pip install -e "/app/apps/brain-api[dev]"
+WORKDIR /app/apps/brain-api
+CMD ["pytest", "-q"]
