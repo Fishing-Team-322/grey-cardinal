@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Text,
@@ -507,6 +508,61 @@ class InviteModel(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     max_uses: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     uses: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ── YouGile integration (migration 0004) ──────────────────────────────────────
+
+
+class YouGileMappingModel(Base):
+    """Bidirectional mapping between our entities and YouGile entities.
+
+    UNIQUE(team_id, entity_type, yougile_id) makes discovery idempotent (upsert).
+    local_id is NULL for entities that exist only in YouGile (not mirrored yet).
+    payload keeps the last known YouGile snapshot for diffing.
+    """
+
+    __tablename__ = "yougile_mappings"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type in ('project','board','column','task','user')",
+            name="ck_yougile_mapping_entity",
+        ),
+        UniqueConstraint("team_id", "entity_type", "yougile_id", name="uq_yougile_mapping"),
+        Index("ix_yougile_mapping_local", "team_id", "entity_type", "local_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    local_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    yougile_id: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    last_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class YouGileSyncLogModel(Base):
+    """Append-only audit of inbound (webhook) and outbound (our push) sync events."""
+
+    __tablename__ = "yougile_sync_log"
+    __table_args__ = (
+        CheckConstraint(
+            "direction in ('inbound','outbound')", name="ck_yougile_synclog_direction"
+        ),
+        Index("ix_yougile_synclog_team_created", "team_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    yougile_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    event: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
