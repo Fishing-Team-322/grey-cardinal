@@ -44,9 +44,20 @@ from brain_api.application.use_cases.send_evening_digest import SendEveningDiges
 from brain_api.application.use_cases.send_personal_evening_digests import (
     SendPersonalEveningDigests,
 )
+from brain_api.application.use_cases.task_help import (
+    handle_help_callback,
+    is_help_callback,
+    is_help_request_text,
+    materials_for_arg,
+)
 from brain_api.application.use_cases.task_status_flow import (
     handle_task_status_callback,
     is_task_status_callback,
+)
+from brain_api.application.use_cases.team_settings import (
+    handle_settings_callback,
+    is_settings_callback,
+    open_settings,
 )
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.container import Container
@@ -325,14 +336,16 @@ async def ingest_message(
     event: TelegramMessageEvent,
     container: Container = Depends(get_container),
 ) -> ActionsResponse:
-    # Личка: руководитель вписывает время созвона, которое бот не распознал.
+    # Личка: время созвона / «помощь по задаче» → материалы.
     if event.chat.type == "private":
         async with container.session_factory() as session:
             pending = await handle_pending_meeting_time(
                 session, event.sender, event.text, datetime.now(UTC)
             )
-        if pending is not None:
-            return pending
+            if pending is not None:
+                return pending
+            if is_help_request_text(event.text):
+                return _text(event.chat.id, await materials_for_arg(session, event.text))
 
     v2_response = await _try_v2_semantic_message(event, container)
     if v2_response is not None:
@@ -367,6 +380,16 @@ async def ingest_callback(
     # ── Task status callbacks (сценарий 3): В процессе / Сделал / Не буду ──
     if is_task_status_callback(data):
         return await handle_task_status_callback(container, data, event)
+
+    # ── Материалы по задаче ──────────────────────────────────────────────
+    if is_help_callback(data):
+        async with container.session_factory() as session:
+            return await handle_help_callback(session, data, event)
+
+    # ── Меню настроек команды ────────────────────────────────────────────
+    if is_settings_callback(data):
+        async with container.session_factory() as session:
+            return await handle_settings_callback(session, data, event)
 
     # ── Navigation callbacks ──────────────────────────────────────────────
     if data == CB_MENU_MAIN:
@@ -934,13 +957,29 @@ async def ingest_command(
             reply_markup=_main_menu_kb(is_group=False),
         )])
 
+    # ── Материалы по задаче: /howto, /material, /help <тема|GC-id> ───────
+    if command in ("howto", "material", "materials"):
+        topic = " ".join(event.args).strip()
+        if not topic:
+            return _text(chat_id, "Укажи тему: /howto написать REST API на FastAPI")
+        async with container.session_factory() as session:
+            return _text(chat_id, await materials_for_arg(session, topic))
+
     if command == "help":
+        if event.args:
+            async with container.session_factory() as session:
+                return _text(chat_id, await materials_for_arg(session, " ".join(event.args)))
         return ActionsResponse(actions=[SendMessageAction(
             chat_id=chat_id,
             text=_HELP_TEXT,
             parse_mode="MarkdownV2",
             reply_markup=_back_kb(),
         )])
+
+    # ── Визуальное меню настроек команды ─────────────────────────────────
+    if command == "settings":
+        async with container.session_factory() as session:
+            return await open_settings(session, chat_id)
 
     if command == "bind_team":
         if not event.args:

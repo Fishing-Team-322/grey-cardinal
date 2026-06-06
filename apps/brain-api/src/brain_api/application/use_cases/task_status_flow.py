@@ -55,6 +55,7 @@ def task_status_keyboard(task_id: UUID) -> dict:
                 {"text": "✅ Сделал", "callback_data": f"{CB_TS_DONE}:{t}"},
             ],
             [{"text": "🚫 Не буду делать", "callback_data": f"{CB_TS_REJECT}:{t}"}],
+            [{"text": "🔎 Материалы по задаче", "callback_data": f"help_task:{t}"}],
         ]
     }
 
