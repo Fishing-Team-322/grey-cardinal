@@ -196,7 +196,7 @@ async def unpair_agent(
     await session.execute(
         update(m.ClientSessionModel)
         .where(m.ClientSessionModel.device_id == device_id)
-        .values(status="revoked")
+        .values(status="revoked", device_id=None)
     )
     await session.delete(device)
     await session.commit()

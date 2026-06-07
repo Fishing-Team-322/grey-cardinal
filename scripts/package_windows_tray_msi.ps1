@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.6.2",
+    [string]$Version = "0.6.5",
     [string]$WixVersion = "6.0.2"
 )
 

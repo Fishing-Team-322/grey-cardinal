@@ -38,7 +38,7 @@ async function renderBoard(root, teamId, view) {
       <aside class="board-switcher">${BOARD_VIEWS.map(([key, label]) => `<a class="${key === view ? "active" : ""}" href="/app/teams/${teamId}/board?view=${key}">${label}</a>`).join("")}</aside>
       <section class="board-main">
         ${healthBar(data.health)}
-        <div class="agent-board">${data.groups.map(groupHtml).join("")}</div>
+        <div class="agent-board">${(data.groups || data.columns || []).map(groupHtml).join("")}</div>
       </section>
       <aside class="agent-rail">
         <div class="rail-title">Agent Recommendations</div>
@@ -69,9 +69,10 @@ function healthPill(label, ok) {
 }
 
 function groupHtml(group) {
+  const cards = group.cards || group.tasks || [];
   return `<div class="agent-col">
-    <div class="agent-col-head"><b>${escapeHtml(group.title)}</b><span class="mono">${group.count ?? group.cards.length}</span></div>
-    <div class="col gap-10">${group.cards.map(cardHtml).join("") || '<span class="faint">Пусто</span>'}</div>
+    <div class="agent-col-head"><b>${escapeHtml(group.title)}</b><span class="mono">${group.count ?? cards.length}</span></div>
+    <div class="col gap-10">${cards.map(cardHtml).join("") || '<span class="faint">Пусто</span>'}</div>
   </div>`;
 }
 

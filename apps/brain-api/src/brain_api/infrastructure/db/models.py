@@ -269,6 +269,18 @@ class TaskModel(TimestampMixin, Base):
     )
 
 
+class TaskCommentModel(TimestampMixin, Base):
+    __tablename__ = "task_comments"
+
+    id: Mapped[UUID] = _uuid_pk()
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    author_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    author_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class BoardCardModel(TimestampMixin, Base):
     __tablename__ = "board_cards"
 

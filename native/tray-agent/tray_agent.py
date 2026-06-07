@@ -21,14 +21,16 @@ import contextlib
 import io
 import logging
 import os
+import queue
 import socket
 import sys
 import threading
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
 
-VERSION = "0.6.2"
+VERSION = "0.6.5"
 SAMPLE_RATE = 16000
 
 # ── Optional deps (graceful degradation) ─────────────────────────────────────
@@ -76,6 +78,32 @@ def _log_path() -> Path:
     return _base_dir() / "tray_agent.log"
 
 
+def ensure_windows_autostart() -> bool:
+    """Keep autostart healthy even if an installer/upgrade missed the Run value."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+
+        executable = Path(sys.executable).resolve()
+        command = f'"{executable}"'
+        if not getattr(sys, "frozen", False):
+            command += f' "{Path(__file__).resolve()}"'
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+        ) as key:
+            with contextlib.suppress(FileNotFoundError):
+                current, _ = winreg.QueryValueEx(key, "GreyCardinalAgent")
+                if current == command:
+                    return True
+            winreg.SetValueEx(key, "GreyCardinalAgent", 0, winreg.REG_SZ, command)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось проверить автозапуск: %s", exc)
+        return False
+
+
 @dataclass
 class Config:
     server_url: str = "https://fishingteam.su"
@@ -83,7 +111,7 @@ class Config:
     workspace_id: str = ""
     chunk_sec: int = 25
     poll_interval: int = 5
-    auto_record: bool = True
+    auto_record: bool = False
     capture_mode: str = "mixed"
     log_level: str = "INFO"
 
@@ -97,10 +125,17 @@ class Config:
                     import tomllib  # py3.11+
                 except ImportError:
                     import tomli as tomllib  # type: ignore
-                data = tomllib.loads(path.read_text("utf-8"))
+                # utf-8-sig also accepts configs edited by Windows tools that
+                # prepend a BOM.
+                data = tomllib.loads(path.read_text("utf-8-sig"))
                 for k, v in data.items():
                     if hasattr(cfg, k):
                         setattr(cfg, k, v)
+                # Since 0.6.4 recording is manual-only. Migrate old configs
+                # that enabled repeated meeting-state recording.
+                if cfg.auto_record:
+                    cfg.auto_record = False
+                    cfg.save()
             except Exception:  # noqa: BLE001
                 pass
         else:
@@ -230,48 +265,95 @@ class Backend:
 
 # ── Recorder ──────────────────────────────────────────────────────────────────
 
-def record_wav(seconds: int, capture_mode: str = "mixed") -> bytes:
+def record_wav(
+    seconds: int,
+    capture_mode: str = "mixed",
+    stop_event: threading.Event | None = None,
+) -> tuple[bytes, float]:
     if not _AUDIO_OK:
         raise RuntimeError("запись недоступна (нет sounddevice/numpy или микрофона)")
-    frames = int(seconds * SAMPLE_RATE)
-    microphone = None
-    if capture_mode == "mixed":
-        try:
-            microphone = sd.rec(frames, samplerate=SAMPLE_RATE, channels=1, dtype="int16")
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Микрофон недоступен, продолжаю только с системным звуком: %s", exc)
+    stop_event = stop_event or threading.Event()
+    chunk_frames = SAMPLE_RATE // 4
+    microphone_chunks: list = []
+    loopback_chunks: list = []
+    started = time.monotonic()
+    deadline = started + seconds
 
-    loopback = None
+    def microphone_callback(indata, frames, callback_time, status) -> None:
+        del frames, callback_time
+        if status:
+            log.warning("Микрофон: %s", status)
+        microphone_chunks.append(indata.copy())
+
+    microphone_stream = None
+    if capture_mode in {"mixed", "microphone"}:
+        try:
+            microphone_stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="int16",
+                callback=microphone_callback,
+                blocksize=chunk_frames,
+            )
+            microphone_stream.start()
+        except Exception as exc:  # noqa: BLE001
+            microphone_stream = None
+            log.warning("Микрофон недоступен: %s", exc)
+
+    loopback_recorder = None
     if capture_mode in {"mixed", "system_loopback"} and _LOOPBACK_OK and sc is not None:
         try:
             speaker = sc.default_speaker()
             source = sc.get_microphone(speaker.id, include_loopback=True)
-            with source.recorder(samplerate=SAMPLE_RATE, channels=1) as recorder:
-                samples = recorder.record(numframes=frames)
-            loopback = (_numpy.clip(samples, -1.0, 1.0) * 32767).astype("int16")
+            loopback_recorder = source.recorder(samplerate=SAMPLE_RATE, channels=1)
+            loopback_recorder.__enter__()
         except Exception as exc:  # noqa: BLE001
-            log.warning("System loopback недоступен, переключаюсь на микрофон: %s", exc)
+            loopback_recorder = None
+            log.warning("System loopback недоступен: %s", exc)
 
-    if microphone is not None:
-        sd.wait()
+    if microphone_stream is None and loopback_recorder is None:
+        raise RuntimeError("не найден доступный источник звука")
+
+    try:
+        while time.monotonic() < deadline and not stop_event.is_set():
+            if loopback_recorder is not None:
+                samples = loopback_recorder.record(numframes=chunk_frames)
+                loopback_chunks.append(
+                    (_numpy.clip(samples, -1.0, 1.0) * 32767).astype("int16")
+                )
+            else:
+                stop_event.wait(0.1)
+    finally:
+        if microphone_stream is not None:
+            with contextlib.suppress(Exception):
+                microphone_stream.stop()
+                microphone_stream.close()
+        if loopback_recorder is not None:
+            with contextlib.suppress(Exception):
+                loopback_recorder.__exit__(None, None, None)
+
+    microphone = _numpy.concatenate(microphone_chunks) if microphone_chunks else None
+    loopback = _numpy.concatenate(loopback_chunks) if loopback_chunks else None
     if loopback is not None and microphone is not None:
+        frames = min(len(loopback), len(microphone))
         audio = _numpy.clip(
-            loopback.astype("int32") + microphone.astype("int32"), -32768, 32767
+            loopback[:frames].astype("int32") + microphone[:frames].astype("int32"),
+            -32768,
+            32767,
         ).astype("int16")
-    elif loopback is not None:
-        audio = loopback
-    elif microphone is not None:
-        audio = microphone
     else:
-        audio = sd.rec(frames, samplerate=SAMPLE_RATE, channels=1, dtype="int16")
-        sd.wait()
+        audio = loopback if loopback is not None else microphone
+    if audio is None or len(audio) == 0:
+        raise RuntimeError("запись остановлена до получения звука")
+
+    duration = len(audio) / SAMPLE_RATE
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
         w.writeframes(audio.tobytes())
-    return buf.getvalue()
+    return buf.getvalue(), duration
 
 
 # ── Tray app ──────────────────────────────────────────────────────────────────
@@ -281,41 +363,123 @@ class TrayApp:
         self.cfg = cfg
         self.be = Backend(cfg)
         self._stop = threading.Event()
+        self._record_stop = threading.Event()
         self._rec_lock = threading.Lock()
         self._status = "Инициализация…"
         self._icon: pystray.Icon | None = None
 
     # ── recording ──
     def _record_and_upload(self, meeting_id: str | None = None) -> None:
+        del meeting_id
         if not self._rec_lock.acquire(blocking=False):
             log.info("Уже идёт запись — пропуск")
             return
+        uploads: queue.Queue[tuple[bytes, float] | None] = queue.Queue(maxsize=12)
+        stats = {"chunks": 0, "uploaded": 0, "proposals": 0, "errors": 0}
+
+        def upload_chunks() -> None:
+            while True:
+                item = uploads.get()
+                try:
+                    if item is None:
+                        return
+                    wav, duration = item
+                    try:
+                        res = self.be.upload(wav, max(1, round(duration)))
+                        stats["uploaded"] += 1
+                        transcript = (res.get("transcript") or "").strip()
+                        if res.get("proposal_created"):
+                            stats["proposals"] += 1
+                            log.info(
+                                "Распознано: %s | задача в Grey Board: %s",
+                                transcript,
+                                res.get("title"),
+                            )
+                        elif transcript:
+                            log.info("Распознано: %s | задач не найдено", transcript)
+                        else:
+                            log.info("Фрагмент загружен: тишина / не распознано")
+                    except Exception as exc:  # noqa: BLE001
+                        stats["errors"] += 1
+                        log.error("Загрузка фрагмента: %s", exc)
+                finally:
+                    uploads.task_done()
+
+        uploader = threading.Thread(
+            target=upload_chunks,
+            daemon=True,
+            name="recording-uploader",
+        )
         try:
+            self._record_stop.clear()
             if not self.cfg.agent_token:
                 self._set(ICON_ERR, "Нет токена — вставьте в config")
                 return
-            self._set(ICON_REC, f"Запись {self.cfg.chunk_sec}с…")
-            wav = record_wav(self.cfg.chunk_sec, self.cfg.capture_mode)
-            self._set(ICON_BUSY, "Распознавание на сервере…")
-            res = self.be.upload(wav, self.cfg.chunk_sec)
-            transcript = (res.get("transcript") or "").strip()
-            if res.get("proposal_created"):
-                self._set(ICON_IDLE, f"Задача: {(res.get('title') or '')[:28]} ✓")
-                log.info("Распознано: %s | задача в чат команды: %s", transcript, res.get("title"))
-            elif transcript:
-                self._set(ICON_IDLE, "Распознано, задач нет")
-                log.info("Распознано: %s | задач не найдено", transcript)
-            else:
-                self._set(ICON_IDLE, "Тишина / не распознано")
+            uploader.start()
+            self._set(ICON_REC, "Идёт запись — можно остановить из меню")
+            self._refresh_menu()
+            while not self._record_stop.is_set():
+                try:
+                    wav, duration = record_wav(
+                        self.cfg.chunk_sec,
+                        self.cfg.capture_mode,
+                        self._record_stop,
+                    )
+                except RuntimeError:
+                    if self._record_stop.is_set():
+                        break
+                    raise
+                uploads.put((wav, duration))
+                stats["chunks"] += 1
+                log.info(
+                    "Фрагмент записи %s поставлен на загрузку (%.1f сек.)",
+                    stats["chunks"],
+                    duration,
+                )
+                if not self._record_stop.is_set():
+                    self._set(
+                        ICON_REC,
+                        f"Идёт запись — фрагментов: {stats['chunks']}",
+                    )
+                    self._refresh_menu()
+            self._set(ICON_BUSY, "Запись остановлена — завершаю загрузку…")
+            self._refresh_menu()
         except Exception as e:  # noqa: BLE001
             log.error("Запись/загрузка: %s", e)
             self._set(ICON_ERR, f"Ошибка: {str(e)[:40]}")
         finally:
+            if uploader.is_alive():
+                uploads.put(None)
+                uploads.join()
+                uploader.join(timeout=2)
+            if stats["chunks"]:
+                if stats["errors"]:
+                    self._set(
+                        ICON_ERR,
+                        f"Готово: {stats['uploaded']}/{stats['chunks']} загружено",
+                    )
+                elif stats["proposals"]:
+                    self._set(
+                        ICON_IDLE,
+                        f"Готово: задач создано {stats['proposals']} ✓",
+                    )
+                else:
+                    self._set(
+                        ICON_IDLE,
+                        f"Запись завершена: {stats['uploaded']} фрагм.",
+                    )
+            self._record_stop.clear()
             self._rec_lock.release()
             self._refresh_menu()
 
     def _record_now(self, icon=None, item=None) -> None:
         threading.Thread(target=self._record_and_upload, daemon=True).start()
+
+    def _stop_recording(self, icon=None, item=None) -> None:
+        if self._rec_lock.locked():
+            self._record_stop.set()
+            self._set(ICON_BUSY, "Останавливаю запись…")
+            self._refresh_menu()
 
     def _reload_token(self, icon=None, item=None) -> None:
         self.cfg.agent_token = Config.load().agent_token
@@ -327,19 +491,55 @@ class TrayApp:
         self._refresh_menu()
 
     def _pair(self, icon=None, item=None) -> None:
+        threading.Thread(target=self._pair_dialog, daemon=True, name="pair-dialog").start()
+
+    def _pair_dialog(self) -> None:
         root = None
         try:
             import tkinter as tk
-            from tkinter import messagebox, simpledialog
+            from tkinter import messagebox
 
             root = tk.Tk()
-            root.withdraw()
+            root.title("Grey Cardinal — привязка")
+            root.resizable(False, False)
             root.attributes("-topmost", True)
-            code = simpledialog.askstring(
-                "Grey Cardinal",
-                "Вставьте код привязки с сайта (GC-XXXXXX):",
-                parent=root,
+            root.geometry("430x180")
+            root.columnconfigure(0, weight=1)
+            tk.Label(
+                root,
+                text="Введите или вставьте код привязки с сайта:",
+                anchor="w",
+            ).grid(row=0, column=0, columnspan=2, padx=18, pady=(18, 6), sticky="ew")
+            code_var = tk.StringVar()
+            entry = tk.Entry(root, textvariable=code_var, font=("Segoe UI", 12))
+            entry.grid(row=1, column=0, columnspan=2, padx=18, sticky="ew")
+
+            def paste_code(event=None) -> str:
+                del event
+                with contextlib.suppress(Exception):
+                    code_var.set(root.clipboard_get().strip())
+                    entry.icursor("end")
+                return "break"
+
+            def submit(event=None) -> None:
+                del event
+                root.quit()
+
+            tk.Button(root, text="Вставить", command=paste_code).grid(
+                row=2, column=0, padx=(18, 6), pady=18, sticky="ew"
             )
+            tk.Button(root, text="Привязать", command=submit).grid(
+                row=2, column=1, padx=(6, 18), pady=18, sticky="ew"
+            )
+            entry.bind("<Control-v>", paste_code)
+            entry.bind("<Control-V>", paste_code)
+            entry.bind("<Shift-Insert>", paste_code)
+            entry.bind("<Return>", submit)
+            entry.bind("<Button-3>", paste_code)
+            root.protocol("WM_DELETE_WINDOW", root.quit)
+            root.after(150, lambda: (entry.focus_force(), root.lift()))
+            root.mainloop()
+            code = code_var.get().strip()
             if not code:
                 return
             result = self.be.pair(code)
@@ -347,6 +547,7 @@ class TrayApp:
             self.cfg.save()
             self.be.heartbeat("idle")
             self._set(ICON_IDLE, "Агент привязан и онлайн")
+            ensure_windows_autostart()
             messagebox.showinfo(
                 "Grey Cardinal",
                 "Агент успешно привязан. Он будет работать в системном трее.",
@@ -387,8 +588,11 @@ class TrayApp:
             pystray.MenuItem(f"Привязан: {paired}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Привязать по коду", self._pair),
-            pystray.MenuItem("⏺ Записать сейчас (тест)", self._record_now,
-                             enabled=lambda i: _AUDIO_OK),
+            pystray.MenuItem("⏺ Начать запись", self._record_now,
+                             enabled=lambda i: _AUDIO_OK and not self._rec_lock.locked(),
+                             visible=lambda i: not self._rec_lock.locked()),
+            pystray.MenuItem("⏹ Остановить запись", self._stop_recording,
+                             visible=lambda i: self._rec_lock.locked()),
             pystray.MenuItem("Настройки", self._open_config),
             pystray.MenuItem("Перечитать настройки", self._reload_token),
             pystray.Menu.SEPARATOR,
@@ -398,6 +602,7 @@ class TrayApp:
 
     def _quit(self, icon=None, item=None) -> None:
         self._stop.set()
+        self._record_stop.set()
         if self._icon:
             self._icon.stop()
 
@@ -414,18 +619,14 @@ class TrayApp:
                     self.be.heartbeat("recording" if self._rec_lock.locked() else "idle")
                 except Exception as e:  # noqa: BLE001
                     log.warning("Heartbeat: %s", e)
-            if self.cfg.agent_token and self.cfg.auto_record:
-                active, mid = self.be.daemon_state()
-                if active and not self._rec_lock.locked():
-                    log.info("Идёт созвон %s — запись", mid)
-                    self._record_and_upload(mid)
-                elif not active and not self._rec_lock.locked():
-                    self._set(ICON_IDLE, "Нет активного созвона")
+            if self.cfg.agent_token and not self._rec_lock.locked():
+                self._set(ICON_IDLE, "Готов — запись запускается из меню")
             self._refresh_menu()
             self._stop.wait(self.cfg.poll_interval)
 
     def run(self) -> None:
         setup_logging(self.cfg.log_level)
+        ensure_windows_autostart()
         log.info(
             "Grey Cardinal Tray Agent v%s | server=%s | audio=%s | capture=%s",
             VERSION,

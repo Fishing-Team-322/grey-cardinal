@@ -158,6 +158,10 @@ async def grey_board(
         yougile_health = "error" if latest_sync_error else "synced"
     elif team.board_credentials_encrypted:
         yougile_health = "pending"
+    board_columns = [
+        {"id": key, "title": title, "cards": items, "tasks": items}
+        for key, title, items in columns
+    ]
     return {
         "team_id": str(team_id),
         "view": view,
@@ -177,9 +181,10 @@ async def grey_board(
             "sync_errors": sync_error_count,
             "ai_inbox": len(pending_inbox),
         },
-        "columns": [
-            {"id": key, "title": title, "cards": items} for key, title, items in columns
-        ],
+        # `tasks` and `groups` keep already-open clients compatible while the
+        # current frontend uses `columns[].cards`.
+        "columns": board_columns,
+        "groups": board_columns,
         "recommendations": [],
     }
 
@@ -304,6 +309,67 @@ async def ask_status(
     return {"queued": True, "task_id": str(task.id)}
 
 
+class CommentBody(BaseModel):
+    body: str
+
+
+def _comment_payload(c: "m.TaskCommentModel") -> dict[str, Any]:
+    return {
+        "id": str(c.id),
+        "body": c.body,
+        "author_id": str(c.author_id) if c.author_id else None,
+        "author_name": c.author_name,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.get("/api/tasks/{task_id}/comments")
+async def list_comments(
+    task_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    task = await session.get(m.TaskModel, task_id)
+    if task is None or task.team_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    await _team_access(task.team_id, current_user, session)
+    rows = list(
+        await session.scalars(
+            select(m.TaskCommentModel)
+            .where(m.TaskCommentModel.task_id == task_id)
+            .order_by(m.TaskCommentModel.created_at.asc())
+            .limit(500)
+        )
+    )
+    return {"items": [_comment_payload(c) for c in rows]}
+
+
+@router.post("/api/tasks/{task_id}/comments")
+async def add_comment(
+    task_id: UUID,
+    body: CommentBody,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    text = (body.body or "").strip()
+    if not text:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty comment")
+    task = await session.get(m.TaskModel, task_id)
+    if task is None or task.team_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    await _team_access(task.team_id, current_user, session)
+    comment = m.TaskCommentModel(
+        task_id=task_id,
+        author_id=current_user.id,
+        author_name=current_user.display_name,
+        body=text[:4000],
+    )
+    session.add(comment)
+    await session.commit()
+    await session.refresh(comment)
+    return _comment_payload(comment)
+
+
 @router.get("/api/teams/{team_id}/ai-inbox")
 async def ai_inbox(
     team_id: UUID,
@@ -311,6 +377,7 @@ async def ai_inbox(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     await _team_access(team_id, current_user, session)
+    await _sync_daemon_proposals_to_inbox(session, team_id)
     rows = list(
         await session.scalars(
             select(m.AIInboxItemModel)
@@ -322,11 +389,78 @@ async def ai_inbox(
     return {"items": [_inbox_payload(item) for item in rows]}
 
 
+async def _sync_daemon_proposals_to_inbox(session: AsyncSession, team_id: UUID) -> None:
+    """Expose old/new Windows-agent confirmations in the website AI Inbox."""
+    rows = (
+        await session.execute(
+            select(m.TaskProposalModel, m.ConfirmationModel)
+            .join(
+                m.ConfirmationModel,
+                m.ConfirmationModel.proposal_id == m.TaskProposalModel.id,
+            )
+            .where(
+                m.TaskProposalModel.team_id == team_id,
+                m.TaskProposalModel.source == "meeting_transcript",
+            )
+        )
+    ).all()
+    existing = {
+        item.source_id: item
+        for item in (
+            await session.scalars(
+                select(m.AIInboxItemModel).where(
+                    m.AIInboxItemModel.team_id == team_id,
+                    m.AIInboxItemModel.source_type == "daemon_proposal",
+                )
+            )
+        )
+    }
+    changed = False
+    for proposal, confirmation in rows:
+        source_id = str(proposal.id)
+        item = existing.get(source_id)
+        if item is None and confirmation.status == "pending":
+            identity = {
+                "status": "resolved" if proposal.assignee_id else "unresolved",
+                "user_id": str(proposal.assignee_id) if proposal.assignee_id else None,
+                "display_name": proposal.assignee_text,
+                "source": "proposal",
+                "confidence": proposal.confidence,
+                "candidates": [],
+                "raw_reference": proposal.assignee_text,
+            }
+            session.add(
+                m.AIInboxItemModel(
+                    team_id=team_id,
+                    kind="task_candidate",
+                    status="pending",
+                    reason="windows_agent_proposal",
+                    raw_text=proposal.raw_text,
+                    semantic_payload=proposal.extractor_payload,
+                    identity_payload=identity,
+                    item_type="task_proposal",
+                    source_type="daemon_proposal",
+                    source_id=source_id,
+                    source_text=proposal.raw_text,
+                    proposed_action="approve",
+                    confidence=proposal.confidence,
+                )
+            )
+            changed = True
+        elif item is not None and confirmation.status in {"accepted", "rejected", "expired"}:
+            expected = "approved" if confirmation.status == "accepted" else confirmation.status
+            if item.status != expected or item.linked_task_id != confirmation.created_task_id:
+                item.status = expected
+                item.linked_task_id = confirmation.created_task_id
+                changed = True
+    if changed:
+        await session.commit()
+
+
 @router.post("/api/ai-inbox/{item_id}/approve")
 async def approve_inbox(
     item_id: UUID,
     current_user: CurrentUser,
-    container: Container = Depends(get_container),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     item = await session.get(m.AIInboxItemModel, item_id)
@@ -334,28 +468,72 @@ async def approve_inbox(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Inbox item not found")
     ctx = await build_tenant_context(current_user.id, session)
     require_team_role(ctx, item.team_id, "manager")
+    if item.status == "approved" and item.linked_task_id:
+        task = await session.get(m.TaskModel, item.linked_task_id)
+        if task is not None:
+            return {
+                "task_id": str(task.id),
+                "public_id": task.public_id,
+                "sync_status": "local_only",
+            }
     semantic = item.semantic_payload or {}
     payload = semantic.get("task") or {}
     identity = item.identity_payload or {}
     assignee_id = UUID(identity["user_id"]) if identity.get("user_id") else None
+    proposal = None
+    if item.source_type == "daemon_proposal" and item.source_id:
+        try:
+            proposal_id = UUID(item.source_id)
+        except ValueError:
+            proposal_id = None
+        if proposal_id:
+            proposal = await session.get(m.TaskProposalModel, proposal_id)
+            existing = await session.scalar(
+                select(m.TaskModel).where(m.TaskModel.created_from_proposal_id == proposal_id)
+            )
+            if existing is not None:
+                item.status = "approved"
+                item.linked_task_id = existing.id
+                item.decided_by = current_user.id
+                item.decided_at = datetime.now(UTC)
+                await session.commit()
+                return {
+                    "task_id": str(existing.id),
+                    "public_id": existing.public_id,
+                    "sync_status": "local_only",
+                }
     task = await _create_task_row(
         session,
         team_id=item.team_id,
-        title=str(payload.get("title") or (item.raw_text or item.source_text or "")[:120]),
-        description=payload.get("description"),
-        assignee_id=assignee_id,
-        deadline=_parse_dt(payload.get("deadline")),
-        priority=str(payload.get("priority") or "medium"),
+        title=proposal.title if proposal else str(
+            payload.get("title") or (item.raw_text or item.source_text or "")[:120]
+        ),
+        description=proposal.description if proposal else payload.get("description"),
+        assignee_id=assignee_id if assignee_id else (proposal.assignee_id if proposal else None),
+        assignee_text=identity.get("display_name")
+        or (proposal.assignee_text if proposal else None),
+        deadline=proposal.deadline if proposal else _parse_dt(payload.get("deadline")),
+        priority=proposal.priority if proposal else str(payload.get("priority") or "medium"),
         source_message_id=item.source_message_id,
-        source="telegram_chat",
+        source=proposal.source if proposal else "telegram_chat",
+        created_from_proposal_id=proposal.id if proposal else None,
     )
     item.status = "approved"
+    item.linked_task_id = task.id
+    item.decided_by = current_user.id
+    item.decided_at = datetime.now(UTC)
+    if proposal is not None:
+        confirmation = await session.scalar(
+            select(m.ConfirmationModel).where(m.ConfirmationModel.proposal_id == proposal.id)
+        )
+        if confirmation is not None:
+            confirmation.status = "accepted"
+            confirmation.created_task_id = task.id
     await session.commit()
-    sync = await container.board_mirror.create_external_task(task.id)
     return {
         "task_id": str(task.id),
         "public_id": task.public_id,
-        "sync_status": sync.sync_status,
+        "sync_status": "local_only",
     }
 
 
@@ -371,6 +549,19 @@ async def reject_inbox(
     ctx = await build_tenant_context(current_user.id, session)
     require_team_role(ctx, item.team_id, "manager")
     item.status = "rejected"
+    item.decided_by = current_user.id
+    item.decided_at = datetime.now(UTC)
+    if item.source_type == "daemon_proposal" and item.source_id:
+        try:
+            proposal_id = UUID(item.source_id)
+        except ValueError:
+            proposal_id = None
+        if proposal_id:
+            confirmation = await session.scalar(
+                select(m.ConfirmationModel).where(m.ConfirmationModel.proposal_id == proposal_id)
+            )
+            if confirmation is not None and confirmation.status == "pending":
+                confirmation.status = "rejected"
     await session.commit()
     return {"status": item.status}
 
@@ -405,6 +596,16 @@ async def assign_inbox(
         confidence=1.0,
     ).payload()
     item.kind = "task_candidate_uncertain"
+    if item.source_type == "daemon_proposal" and item.source_id:
+        try:
+            proposal_id = UUID(item.source_id)
+        except ValueError:
+            proposal_id = None
+        if proposal_id:
+            proposal = await session.get(m.TaskProposalModel, proposal_id)
+            if proposal is not None:
+                proposal.assignee_id = user.id
+                proposal.assignee_text = user.display_name
     await session.commit()
     return {"assignee": _user_payload(user)}
 
@@ -524,6 +725,8 @@ async def _create_task_row(
     priority: str,
     source_message_id: UUID | None,
     source: str,
+    assignee_text: str | None = None,
+    created_from_proposal_id: UUID | None = None,
 ) -> m.TaskModel:
     seq, public_id = await next_task_public_id(session, team_id)
     assignee = await session.get(m.UserModel, assignee_id) if assignee_id else None
@@ -536,10 +739,11 @@ async def _create_task_row(
         status="todo",
         priority=priority if priority in {"low", "medium", "high", "critical"} else "medium",
         assignee_id=assignee_id,
-        assignee_text=assignee.display_name if assignee else None,
+        assignee_text=assignee.display_name if assignee else assignee_text,
         deadline=deadline,
         source=source,
         source_message_id=source_message_id,
+        created_from_proposal_id=created_from_proposal_id,
     )
     session.add(task)
     await session.flush()

@@ -20,6 +20,7 @@ from brain_api.api.routes import (
     internal_telegram,
     meetings,
     tasks,
+    tgapp,
     v2_tenants,
     websocket,
     yandex_telemost,
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(internal_audio.router)
     app.include_router(meetings.router)
     app.include_router(tasks.router)
+    app.include_router(tgapp.router)
     app.include_router(v2_tenants.router)
     app.include_router(websocket.router)
     app.include_router(yandex_telemost.router)

@@ -224,6 +224,12 @@ export const api = {
     askStatus(taskId) {
       return request("POST", `/api/tasks/${taskId}/ask-status`);
     },
+    comments(taskId) {
+      return request("GET", `/api/tasks/${taskId}/comments`);
+    },
+    addComment(taskId, body) {
+      return request("POST", `/api/tasks/${taskId}/comments`, { body: { body } });
+    },
   },
   greyBoard: {
     get(teamId, view) {

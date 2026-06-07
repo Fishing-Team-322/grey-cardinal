@@ -24,6 +24,18 @@
       <ComponentRef Id="AgentAutostart" />
       <ComponentRef Id="ApplicationShortcut" />
     </Feature>
+
+    <CustomAction
+      Id="LaunchAgentAfterInstall"
+      FileRef="AgentExeFile"
+      ExeCommand=""
+      Execute="immediate"
+      Return="asyncNoWait"
+      Impersonate="yes" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchAgentAfterInstall" After="InstallFinalize" Condition="NOT Installed" />
+    </InstallExecuteSequence>
   </Package>
 
   <Fragment>

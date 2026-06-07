@@ -39,6 +39,15 @@ async def test_grey_board_contract_matches_frontend(session_factory):
 
     assert payload["team_id"] == str(team.id)
     assert payload["view"] == "agent"
-    assert set(payload) >= {"health", "stats", "columns", "recommendations", "generated_at"}
+    assert set(payload) >= {
+        "health",
+        "stats",
+        "columns",
+        "groups",
+        "recommendations",
+        "generated_at",
+    }
     assert {"tasks", "overdue", "risks", "sync_errors", "ai_inbox"} <= set(payload["stats"])
-    assert all({"id", "title", "cards"} <= set(column) for column in payload["columns"])
+    assert all({"id", "title", "cards", "tasks"} <= set(column) for column in payload["columns"])
+    assert all(column["cards"] == column["tasks"] for column in payload["columns"])
+    assert payload["groups"] == payload["columns"]
