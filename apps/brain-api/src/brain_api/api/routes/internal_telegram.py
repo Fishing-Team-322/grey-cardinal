@@ -143,8 +143,8 @@ def _kb(*rows: list[tuple[str, str]]) -> dict:
 
 def _telemost_prompt_kb() -> dict:
     return _kb(
-        [("📹 Создать в Яндекс Телемост", CB_TELEMOST_CREATE)],
-        [("Другое / не сейчас", CB_TELEMOST_DISMISS)],
+        [("📹 Создать ссылку на созвон", CB_TELEMOST_CREATE)],
+        [("Не сейчас", CB_TELEMOST_DISMISS)],
     )
 
 
@@ -406,7 +406,7 @@ async def ingest_message(
                 SendMessageAction(
                     chat_id=event.chat.id,
                     text=(
-                        "🎙 Похоже, нужен созвон. Создать комнату Яндекс Телемоста?"
+                        "🎙 Похоже, нужен созвон. Создать ссылку на встречу?"
                     ),
                     reply_markup=_telemost_prompt_kb(),
                 )
@@ -1984,70 +1984,39 @@ async def _handle_telemost_callback(
         )
 
     settings = get_settings()
+    provider_label = "Яндекс Телемост"
     async with container.session_factory() as session:
         team = await session.scalar(
             select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
         )
-        if team is None:
-            return ActionsResponse(
-                actions=[
-                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
-                    SendMessageAction(
-                        chat_id=chat_id,
-                        text=(
-                            "Этот чат не привязан к команде Grey Cardinal. "
-                            "Менеджер команды должен привязать его в настройках команды."
-                        ),
-                    ),
-                ]
-            )
+        result: dict | None = None
 
-        integration = await telemost_svc.get_integration(session, team.id)
-        if integration is None or integration.status != "connected":
-            return ActionsResponse(
-                actions=[
-                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
-                    SendMessageAction(
-                        chat_id=chat_id,
-                        text=(
-                            "Яндекс Телемост ещё не подключён. Подключите его в "
-                            "Grey Cardinal → Integrations → Yandex Telemost."
-                        ),
-                    ),
-                ]
-            )
+        # 1) Try Yandex Telemost first if a team has it connected.
+        if team is not None:
+            integration = await telemost_svc.get_integration(session, team.id)
+            if integration is not None and integration.status == "connected":
+                try:
+                    result = await telemost_svc.create_room_for_chat(
+                        session,
+                        settings,
+                        telegram_chat_id=chat_id,
+                        created_by_telegram_user_id=event.from_user.id,
+                    )
+                except (telemost_svc.TelemostNotConnected, YandexTelemostError):
+                    # Telemost unavailable (e.g. 403 no API access) → fall back.
+                    await session.rollback()
+                    result = None
 
-        try:
-            result = await telemost_svc.create_room_for_chat(
+        # 2) Fallback: Jitsi public room (no OAuth). Works for any chat.
+        if result is None or not result.get("join_url"):
+            result = await telemost_svc.create_jitsi_room_for_chat(
                 session,
-                settings,
                 telegram_chat_id=chat_id,
                 created_by_telegram_user_id=event.from_user.id,
             )
-            await session.commit()
-        except telemost_svc.TelemostNotConnected:
-            return ActionsResponse(
-                actions=[
-                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
-                    SendMessageAction(
-                        chat_id=chat_id,
-                        text=(
-                            "Яндекс Телемост ещё не подключён. Подключите его в "
-                            "Grey Cardinal → Integrations → Yandex Telemost."
-                        ),
-                    ),
-                ]
-            )
-        except YandexTelemostError:
-            return ActionsResponse(
-                actions=[
-                    AnswerCallbackAction(callback_query_id=cq_id, text="Ошибка"),
-                    SendMessageAction(
-                        chat_id=chat_id,
-                        text="Не удалось создать встречу в Телемосте. Попробуйте позже.",
-                    ),
-                ]
-            )
+            provider_label = "Видеовстреча (Jitsi)"
+
+        await session.commit()
 
     join_url = result.get("join_url")
     if not join_url:
@@ -2056,7 +2025,7 @@ async def _handle_telemost_callback(
                 AnswerCallbackAction(callback_query_id=cq_id, text="Ошибка"),
                 SendMessageAction(
                     chat_id=chat_id,
-                    text="Телемост не вернул ссылку на встречу. Попробуйте позже.",
+                    text="Не удалось создать ссылку на встречу. Попробуйте позже.",
                 ),
             ]
         )
@@ -2064,12 +2033,12 @@ async def _handle_telemost_callback(
     actions: list = [
         AnswerCallbackAction(callback_query_id=cq_id, text="Готово"),
         EditMessageAction(
-            chat_id=chat_id, message_id=msg_id, text="📹 Создаю встречу в Яндекс Телемосте…"
+            chat_id=chat_id, message_id=msg_id, text="📹 Создаю ссылку на созвон…"
         ),
         SendMessageAction(
             chat_id=chat_id,
             text=(
-                "✅ Создал встречу в Яндекс Телемосте\n\n"
+                f"✅ Созвон готов — {provider_label}\n\n"
                 f"Ссылка: {join_url}\n\n"
                 f"{_TELEMOST_NOTICE}"
             ),

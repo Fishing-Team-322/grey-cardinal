@@ -349,6 +349,71 @@ async def create_room_for_chat(
     }
 
 
+# ── Provider-agnostic fallback (Jitsi, no OAuth) ──────────────────────────────
+
+
+def build_jitsi_url(team_name: str | None) -> str:
+    """A unique, hard-to-guess public Jitsi Meet room. No account/OAuth needed."""
+    slug = "".join(ch for ch in (team_name or "") if ch.isalnum())[:24] or "team"
+    return f"https://meet.jit.si/GreyCardinal-{slug}-{secrets.token_hex(4)}"
+
+
+async def create_jitsi_room_for_chat(
+    session,
+    *,
+    telegram_chat_id: int,
+    created_by_telegram_user_id: int | None = None,
+    title: str | None = None,
+) -> dict:
+    """Create a Jitsi meeting link (no OAuth) and, if the chat is bound to a
+    team, a scheduled Meeting so the RSVP poll can run alongside the link."""
+    team = await session.scalar(
+        select(m.TeamModel).where(m.TeamModel.tg_chat_id == telegram_chat_id)
+    )
+    join_url = build_jitsi_url(team.name if team is not None else None)
+    room_title = title or (f"Созвон {team.name}".strip() if team is not None else "Созвон")
+
+    meeting_id = None
+    if team is not None:
+        created_by_user_id = None
+        if created_by_telegram_user_id is not None:
+            created_by_user_id = await session.scalar(
+                select(m.UserModel.id).where(
+                    m.UserModel.telegram_user_id == created_by_telegram_user_id
+                )
+            )
+        session.add(
+            m.MeetingAgentJoinJobModel(
+                team_id=team.id,
+                provider="jitsi",
+                meeting_url=join_url,
+                conference_id=None,
+                telegram_chat_id=telegram_chat_id,
+                created_by_user_id=created_by_user_id,
+                created_by_telegram_user_id=created_by_telegram_user_id,
+                status="pending",
+            )
+        )
+        meeting = await _create_scheduled_meeting(
+            session,
+            team_id=team.id,
+            title=room_title,
+            join_url=join_url,
+            created_by_user_id=created_by_user_id,
+            provider="jitsi",
+        )
+        meeting_id = meeting.id
+
+    return {
+        "ok": True,
+        "team_id": team.id if team is not None else None,
+        "join_url": join_url,
+        "conference_id": None,
+        "meeting_id": meeting_id,
+        "provider": "jitsi",
+    }
+
+
 async def _create_scheduled_meeting(
     session,
     *,
@@ -356,6 +421,7 @@ async def _create_scheduled_meeting(
     title: str,
     join_url: str,
     created_by_user_id: UUID | None,
+    provider: str = "yandex_telemost",
 ):
     """Create a minimal scheduled Meeting row for the RSVP poll (independent of UoW)."""
     from sqlalchemy import func
@@ -374,8 +440,8 @@ async def _create_scheduled_meeting(
         started_at=now,
         created_by=created_by_user_id,
         created_by_user_id=created_by_user_id,
-        external_source="yandex_telemost",
-        metadata_json={"join_url": join_url},
+        external_source=provider,
+        metadata_json={"join_url": join_url, "provider": provider},
     )
     session.add(meeting)
     await session.flush()
