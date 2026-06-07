@@ -60,7 +60,7 @@ async function render(root, team) {
         ${integration("Telegram-чат", telegram.linked, "/app/integrations/telegram")}
         ${integration("YouGile", yougile.connected, "/app/integrations/yougile")}
         ${integration("LLM (семантика)", llm.status === "ok", "/app/integrations/llm")}
-        ${integration("Desktop Agent", agents.agents.length > 0, "/app/integrations/daemon")}
+        ${integration("Windows Agent", agents.agents.length > 0, "/app/integrations/daemon")}
       </div>
     </div>`;
 }

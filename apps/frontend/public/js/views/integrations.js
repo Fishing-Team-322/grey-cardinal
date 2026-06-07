@@ -18,7 +18,7 @@ export default async function integrationsView(root) {
     ${row("Командный Telegram", teamTelegram.linked, "/app/integrations/telegram", team?.name || "")}
     ${row("YouGile", yougile.connected, "/app/integrations/yougile", team?.name || "")}
     ${row("LLM (семантика)", llm.status === "ok", "/app/integrations/llm", llm.primary?.provider || "")}
-    ${row("Desktop Agent", agents.agents.length > 0, "/app/integrations/daemon", `${agents.agents.length} устройств`)}
+    ${row("Windows Agent", agents.agents.length > 0, "/app/integrations/daemon", `${agents.agents.length} устройств`)}
     ${row("Yandex Telemost", telemost.available, "/app/integrations/telemost", telemost.provider || "")}
   </div>`;
 }

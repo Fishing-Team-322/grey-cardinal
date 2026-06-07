@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { escapeHtml, formatDate, setTopbar, toast } from "../view-utils.js";
 
 export default async function daemonView(root) {
-  setTopbar("Desktop Agent");
+  setTopbar("Windows Agent");
   const content = root.querySelector("#daemon-content");
   let timer;
   let pairing = null;
