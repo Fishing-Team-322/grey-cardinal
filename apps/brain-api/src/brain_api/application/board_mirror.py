@@ -582,9 +582,13 @@ class BoardMirrorService:
                 team_id=team_id,
                 task_id=task_id,
                 link_id=link_id,
+                provider="yougile",
                 direction=direction,
                 action=action,
+                entity_type="task",
+                entity_id=task_id,
                 status=status,
+                message=error,
                 payload=payload,
                 error=error,
             )

@@ -32,6 +32,8 @@ from brain_api.application.rendering import (
     proposal_keyboard,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
+from brain_api.application.telemost_intent import detect_call_intent
+from brain_api.application.use_cases import yandex_telemost as telemost_svc
 from brain_api.application.use_cases.confirm_task import ConfirmTask
 from brain_api.application.use_cases.ingest_chat_message import IngestChatMessage
 from brain_api.application.use_cases.ingest_transcript_event import IngestTranscriptEvent
@@ -78,8 +80,10 @@ from brain_api.application.use_cases.team_settings import (
     open_settings,
 )
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
+from brain_api.config import get_settings
 from brain_api.container import Container
 from brain_api.infrastructure.db import models as m
+from brain_api.integrations.yandex_telemost import YandexTelemostError
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
@@ -117,6 +121,8 @@ CB_DEMO_RUN = "demo:run"
 CB_BIND_CHAT = "chat:bind"
 CB_MODE_CONFIRM = "mode:confirm"
 CB_MODE_AUTO = "mode:auto"
+CB_TELEMOST_CREATE = "tmcall:create"
+CB_TELEMOST_DISMISS = "tmcall:dismiss"
 
 _DEMO_LINES = [
     "Петя, подготовь оплату до завтра 18:00",
@@ -130,6 +136,13 @@ _DEMO_LINES = [
 def _kb(*rows: list[tuple[str, str]]) -> dict:
     """Build inline_keyboard reply_markup from rows of (text, callback_data)."""
     return {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in row] for row in rows]}
+
+
+def _telemost_prompt_kb() -> dict:
+    return _kb(
+        [("📹 Создать в Яндекс Телемост", CB_TELEMOST_CREATE)],
+        [("Другое / не сейчас", CB_TELEMOST_DISMISS)],
+    )
 
 
 def _main_menu_kb(is_group: bool = False) -> dict:
@@ -368,6 +381,20 @@ async def ingest_message(
             if is_help_request_text(event.text):
                 return _html(event.chat.id, await materials_for_arg(session, event.text))
 
+    # Группа: явный intent «нужен созвон» → спросить про Телемост (не создаём сами).
+    if event.chat.type in {"group", "supergroup"} and detect_call_intent(event.text):
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.chat.id,
+                    text=(
+                        "🎙 Похоже, нужен созвон. Создать комнату Яндекс Телемоста?"
+                    ),
+                    reply_markup=_telemost_prompt_kb(),
+                )
+            ]
+        )
+
     v2_response = await _try_v2_semantic_message(event, container)
     if v2_response is not None:
         return v2_response
@@ -395,6 +422,10 @@ async def ingest_callback(
 
     if data.startswith("taskcmd:"):
         return await _handle_taskcmd_callback(container, event)
+
+    # ── Telemost: выбор провайдера для созвона ────────────────────────────
+    if data.startswith("tmcall:"):
+        return await _handle_telemost_callback(container, event)
 
     # ── Meeting (созвон) callbacks: подтверждение времени и RSVP ──────────
     if is_meeting_callback(data):
@@ -749,7 +780,6 @@ async def _try_v2_semantic_message(
             message_thread_id=event.message_thread_id,
             text=event.text,
             raw_json=event.raw or {},
-            message_thread_id=event.message_thread_id,
         )
         session.add(message)
         await session.flush()
@@ -1794,6 +1824,130 @@ def _parse_callback(data: str) -> tuple[str, UUID | None]:
         return action, UUID(raw_id)
     except ValueError:
         return action, None
+
+
+_TELEMOST_NOTICE = (
+    "ℹ️ Если включён meeting agent Grey Cardinal, он может подключиться для "
+    "заметок и задач."
+)
+
+
+async def _handle_telemost_callback(
+    container: Container, event: TelegramCallbackEvent
+) -> ActionsResponse:
+    """Inline-кнопки выбора провайдера созвона.
+
+    Проверяет: чат привязан к команде, Телемост подключён, право инициировать.
+    Сам создаёт комнату только по явному нажатию пользователя (не автоматически).
+    """
+    cq_id = event.callback_query_id
+    chat_id = event.message.chat_id
+    msg_id = event.message.message_id
+
+    if event.data == CB_TELEMOST_DISMISS:
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Ок"),
+                EditMessageAction(
+                    chat_id=chat_id, message_id=msg_id, text="Хорошо, без созвона."
+                ),
+            ]
+        )
+
+    settings = get_settings()
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            "Этот чат не привязан к команде Grey Cardinal. "
+                            "Менеджер команды должен привязать его в настройках команды."
+                        ),
+                    ),
+                ]
+            )
+
+        integration = await telemost_svc.get_integration(session, team.id)
+        if integration is None or integration.status != "connected":
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            "Яндекс Телемост ещё не подключён. Подключите его в "
+                            "Grey Cardinal → Integrations → Yandex Telemost."
+                        ),
+                    ),
+                ]
+            )
+
+        try:
+            result = await telemost_svc.create_room_for_chat(
+                session,
+                settings,
+                telegram_chat_id=chat_id,
+                created_by_telegram_user_id=event.from_user.id,
+            )
+            await session.commit()
+        except telemost_svc.TelemostNotConnected:
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            "Яндекс Телемост ещё не подключён. Подключите его в "
+                            "Grey Cardinal → Integrations → Yandex Telemost."
+                        ),
+                    ),
+                ]
+            )
+        except YandexTelemostError:
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text="Ошибка"),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text="Не удалось создать встречу в Телемосте. Попробуйте позже.",
+                    ),
+                ]
+            )
+
+    join_url = result.get("join_url")
+    if not join_url:
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Ошибка"),
+                SendMessageAction(
+                    chat_id=chat_id,
+                    text="Телемост не вернул ссылку на встречу. Попробуйте позже.",
+                ),
+            ]
+        )
+
+    return ActionsResponse(
+        actions=[
+            AnswerCallbackAction(callback_query_id=cq_id, text="Готово"),
+            EditMessageAction(
+                chat_id=chat_id, message_id=msg_id, text="📹 Создаю встречу в Яндекс Телемосте…"
+            ),
+            SendMessageAction(
+                chat_id=chat_id,
+                text=(
+                    "✅ Создал встречу в Яндекс Телемосте\n\n"
+                    f"Ссылка: {join_url}\n\n"
+                    f"{_TELEMOST_NOTICE}"
+                ),
+            ),
+        ]
+    )
 
 
 def _text(chat_id: int, text: str) -> ActionsResponse:

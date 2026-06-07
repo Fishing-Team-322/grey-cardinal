@@ -112,6 +112,23 @@ class Settings(BaseSettings):
     meeting_arm_minutes_before: int = 5
     meeting_default_duration_minutes: int = 60
 
+    # Yandex Telemost OAuth (значения только из env; secret никогда не хардкодить
+    # и не логировать). redirect_uri должен строго совпадать с настройкой OAuth-app.
+    yandex_telemost_client_id: str = ""
+    yandex_telemost_client_secret: str = ""
+    yandex_telemost_redirect_uri: str = (
+        "https://fishingteam.su/api/integrations/yandex-telemost/oauth/callback"
+    )
+    yandex_telemost_scopes: str = (
+        "telemost-api:conferences.create "
+        "telemost-api:conferences.read "
+        "telemost-api:conferences.update"
+    )
+
+    @property
+    def yandex_telemost_configured(self) -> bool:
+        return bool(self.yandex_telemost_client_id and self.yandex_telemost_client_secret)
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in {"prod", "production"}
