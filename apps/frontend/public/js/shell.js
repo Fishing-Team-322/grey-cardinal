@@ -21,6 +21,7 @@ import settings from "./views/settings.js";
 import deploy from "./views/deploy.js";
 import board from "./views/board.js";
 import aiInbox from "./views/ai-inbox.js";
+import { teamMapView, setupView, profileView } from "./views/agentic.js";
 
 function ensureMobileMenu() {
   const topbar = document.getElementById("app-topbar");

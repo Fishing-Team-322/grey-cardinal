@@ -78,3 +78,4 @@ native/**/dist/
 native/**/build/
 native/**/installer/**/output/
 proriv/
+scripts/ops/remote.py

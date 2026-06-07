@@ -31,7 +31,7 @@ from brain_api.integrations.yandex_telemost import (
 
 logger = logging.getLogger(__name__)
 
-STATE_TTL_MINUTES = 15
+STATE_TTL_MINUTES = 60
 # Refresh a bit before actual expiry to avoid racing a 401 mid-request.
 _REFRESH_SKEW = timedelta(seconds=60)
 
@@ -312,6 +312,7 @@ async def create_room_for_chat(
         )
 
     # Queue stub — MVP does not auto-join/record. A future worker consumes 'pending'.
+    meeting_id = None
     if join_url:
         session.add(
             m.MeetingAgentJoinJobModel(
@@ -327,11 +328,129 @@ async def create_room_for_chat(
                 status="queued" if cfg["enable_meeting_agent_auto_join"] else "pending",
             )
         )
+        # Create a scheduled Meeting so we can run a "who is coming?" RSVP poll
+        # in the chat alongside the link.
+        meeting = await _create_scheduled_meeting(
+            session,
+            team_id=team.id,
+            title=room_title,
+            join_url=join_url,
+            created_by_user_id=created_by_user_id,
+        )
+        meeting_id = meeting.id
 
     return {
         "ok": True,
         "team_id": team.id,
         "join_url": join_url,
         "conference_id": result.get("conference_id"),
+        "meeting_id": meeting_id,
         "settings": cfg,
     }
+
+
+# ── Provider-agnostic fallback (Jitsi, no OAuth) ──────────────────────────────
+
+
+def build_jitsi_url(team_name: str | None) -> str:
+    """A unique public Jitsi room on an open instance (no moderator login gate).
+
+    meet.jit.si now forces the first participant to authenticate as moderator,
+    which leaves everyone stuck "waiting for a host". meet.ffmuc.net is an open
+    Jitsi instance that lets anyone start the room. prejoinPageEnabled=false skips
+    the lobby so the link opens straight into the call. This is a stopgap until a
+    Yandex 360 account enables real Telemost rooms (also hostless via API).
+    """
+    slug = "".join(ch for ch in (team_name or "") if ch.isalnum())[:24] or "team"
+    room = f"GreyCardinal-{slug}-{secrets.token_hex(4)}"
+    return f"https://meet.ffmuc.net/{room}#config.prejoinPageEnabled=false"
+
+
+async def create_jitsi_room_for_chat(
+    session,
+    *,
+    telegram_chat_id: int,
+    created_by_telegram_user_id: int | None = None,
+    title: str | None = None,
+) -> dict:
+    """Create a Jitsi meeting link (no OAuth) and, if the chat is bound to a
+    team, a scheduled Meeting so the RSVP poll can run alongside the link."""
+    team = await session.scalar(
+        select(m.TeamModel).where(m.TeamModel.tg_chat_id == telegram_chat_id)
+    )
+    join_url = build_jitsi_url(team.name if team is not None else None)
+    room_title = title or (f"Созвон {team.name}".strip() if team is not None else "Созвон")
+
+    meeting_id = None
+    if team is not None:
+        created_by_user_id = None
+        if created_by_telegram_user_id is not None:
+            created_by_user_id = await session.scalar(
+                select(m.UserModel.id).where(
+                    m.UserModel.telegram_user_id == created_by_telegram_user_id
+                )
+            )
+        session.add(
+            m.MeetingAgentJoinJobModel(
+                team_id=team.id,
+                provider="jitsi",
+                meeting_url=join_url,
+                conference_id=None,
+                telegram_chat_id=telegram_chat_id,
+                created_by_user_id=created_by_user_id,
+                created_by_telegram_user_id=created_by_telegram_user_id,
+                status="pending",
+            )
+        )
+        meeting = await _create_scheduled_meeting(
+            session,
+            team_id=team.id,
+            title=room_title,
+            join_url=join_url,
+            created_by_user_id=created_by_user_id,
+            provider="jitsi",
+        )
+        meeting_id = meeting.id
+
+    return {
+        "ok": True,
+        "team_id": team.id if team is not None else None,
+        "join_url": join_url,
+        "conference_id": None,
+        "meeting_id": meeting_id,
+        "provider": "jitsi",
+    }
+
+
+async def _create_scheduled_meeting(
+    session,
+    *,
+    team_id: UUID,
+    title: str,
+    join_url: str,
+    created_by_user_id: UUID | None,
+    provider: str = "yandex_telemost",
+):
+    """Create a minimal scheduled Meeting row for the RSVP poll (independent of UoW)."""
+    from sqlalchemy import func
+
+    now = datetime.now(UTC)
+    next_seq = (await session.scalar(select(func.max(m.MeetingModel.seq)))) or 0
+    next_seq += 1
+    meeting = m.MeetingModel(
+        seq=next_seq,
+        public_id=f"MTG-{next_seq}",
+        team_id=team_id,
+        title=title,
+        status="scheduled",
+        state="scheduled",
+        scheduled_at=now,
+        started_at=now,
+        created_by=created_by_user_id,
+        created_by_user_id=created_by_user_id,
+        external_source=provider,
+        metadata_json={"join_url": join_url, "provider": provider},
+    )
+    session.add(meeting)
+    await session.flush()
+    return meeting

@@ -309,6 +309,67 @@ async def ask_status(
     return {"queued": True, "task_id": str(task.id)}
 
 
+class CommentBody(BaseModel):
+    body: str
+
+
+def _comment_payload(c: "m.TaskCommentModel") -> dict[str, Any]:
+    return {
+        "id": str(c.id),
+        "body": c.body,
+        "author_id": str(c.author_id) if c.author_id else None,
+        "author_name": c.author_name,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.get("/api/tasks/{task_id}/comments")
+async def list_comments(
+    task_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    task = await session.get(m.TaskModel, task_id)
+    if task is None or task.team_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    await _team_access(task.team_id, current_user, session)
+    rows = list(
+        await session.scalars(
+            select(m.TaskCommentModel)
+            .where(m.TaskCommentModel.task_id == task_id)
+            .order_by(m.TaskCommentModel.created_at.asc())
+            .limit(500)
+        )
+    )
+    return {"items": [_comment_payload(c) for c in rows]}
+
+
+@router.post("/api/tasks/{task_id}/comments")
+async def add_comment(
+    task_id: UUID,
+    body: CommentBody,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    text = (body.body or "").strip()
+    if not text:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty comment")
+    task = await session.get(m.TaskModel, task_id)
+    if task is None or task.team_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    await _team_access(task.team_id, current_user, session)
+    comment = m.TaskCommentModel(
+        task_id=task_id,
+        author_id=current_user.id,
+        author_name=current_user.display_name,
+        body=text[:4000],
+    )
+    session.add(comment)
+    await session.commit()
+    await session.refresh(comment)
+    return _comment_payload(comment)
+
+
 @router.get("/api/teams/{team_id}/ai-inbox")
 async def ai_inbox(
     team_id: UUID,
