@@ -14,6 +14,7 @@ from grey_cardinal_contracts import (
     RegisterDeviceResponse,
     SpeakerIdentitySource,
     TranscriptEvent,
+    TranscriptSourceDetails,
     TranscriptSourceKind,
     TranscriptSpeaker,
 )
@@ -60,8 +61,10 @@ def test_transcript_event_v2_requires_authenticated_speaker_for_desktop_app() ->
         asr={"provider": "mock", "confidence": 0.91},
     )
 
+    assert isinstance(event.source, TranscriptSourceDetails)
     assert event.source.kind == TranscriptSourceKind.desktop_app
     assert event.source.capture_mode == CaptureMode.microphone
+    assert event.speaker is not None
     assert event.speaker.identity_confidence == 1.0
 
 

@@ -12,6 +12,8 @@
     cog: '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
+    board: '<path d="M3 3h7v18H3zM14 3h7v10h-7zM14 17h7v4h-7z"/>',
+    inbox: '<path d="M4 4h16v13H4zM4 13h4l2 3h4l2-3h4M8 21h8"/>',
   };
   window.gcIcon = (name, width = 1.7) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${icons[name] || ""}</svg>`;
@@ -59,6 +61,8 @@
         ${item("/app/employee", "user", "Моя панель", "/app/employee", ["employee"])}
       </div>
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
+        ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
+        ${item("/app/teams/:teamId/ai-inbox", "inbox", "AI Inbox", firstInbox(user), ["director", "manager"])}
         ${item("/app/meetings", "meet", "Созвоны", "/app/meetings", ["director", "manager", "employee"])}
         ${item("/app/leaderboard", "trophy", "Лидерборд", "/app/leaderboard", ["director", "manager", "employee"])}
       </div>
@@ -72,6 +76,12 @@
 
   function firstTeam(user) {
     return user.teams?.[0] ? `/app/teams/${user.teams[0].id}` : "/app/teams";
+  }
+  function firstBoard(user) {
+    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/board` : "/app/teams";
+  }
+  function firstInbox(user) {
+    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/ai-inbox` : "/app/teams";
   }
   function roleLabel(role) {
     return { director: "Директор", manager: "Руководитель", employee: "Сотрудник" }[role];

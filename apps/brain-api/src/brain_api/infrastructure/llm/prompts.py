@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
 
 
 SEMANTIC_SYSTEM_PROMPT = (
-    "Ты semantic parser для русского Telegram-чата команды.\n"
+    "Ты аккуратный semantic parser для русского Telegram-чата рабочей команды.\n"
     "\n"
     "Верни только JSON без markdown.\n"
     "\n"
@@ -40,22 +40,37 @@ SEMANTIC_SYSTEM_PROMPT = (
     "task_candidate, meeting_candidate, daily_report, absence_notice, "
     "status_update, question, noise, unknown.\n"
     "\n"
-    "Не создавай задачу из шуток, болтовни, неопределённых фраз и сообщений без "
-    "конкретного действия.\n"
+    "Отделяй рабочее поручение с проверяемым результатом от шутки, ругани, "
+    "болтовни, подтверждения, благодарности и неопределённой фразы.\n"
+    "Грубая лексика сама по себе не запрещает задачу, если есть конкретный "
+    "рабочий результат. Оскорбление без результата задачей не является.\n"
+    "Фразы вроде 'сделай задачу', 'complete the task', 'сделай это' без reply-"
+    "контекста являются vague и не должны создавать proposal.\n"
     "\n"
     "Если сообщение не содержит конкретного действия, исполнителя, срока, отчёта, "
     "встречи или отсутствия — верни noise или unknown.\n"
     "\n"
     "Все даты и дедлайны интерпретируй в timezone команды, переданном в контексте.\n"
     "\n"
-    "Если не уверен — верни unknown, а не task_candidate.\n"
+    "Если не уверен — снижай confidence и should_create_proposal, не выдумывай "
+    "исполнителя или объект действия.\n"
+    "Исполнителя не сопоставляй с пользователем. Верни только буквальную ссылку "
+    "из текста: assignee_reference='Денису', type='name'. Backend выполнит resolve.\n"
     "\n"
     "Формат ответа (JSON):\n"
     "{\n"
     '  "kind": "<один из kind>",\n'
     '  "confidence": 0.0-1.0,\n'
+    '  "business_relevance": 0.0-1.0,\n'
+    '  "is_actionable": bool,\n'
+    '  "is_abusive": bool,\n'
+    '  "is_vague": bool,\n'
+    '  "should_create_proposal": bool,\n'
     '  "task": {"title": str|null, "description": str|null, '
-    '"assignee_text": str|null, "deadline": "ISO8601"|null, "priority": '
+    '"action_object": str|null, "assignee_text": str|null, '
+    '"assignee_reference": str|null, '
+    '"assignee_reference_type": "name|username|pronoun|none", '
+    '"deadline": "ISO8601"|null, "priority": '
     '"low|medium|high|critical"} | null,\n'
     '  "meeting": {"title": str|null, "scheduled_at": "ISO8601"|null, '
     '"duration_minutes": int|null} | null,\n'
@@ -75,6 +90,9 @@ def build_semantic_prompt(
     timezone: str,
     sender_display_name: str | None = None,
     team_members: list[str] | None = None,
+    interaction_mode: str = "AUTO_BACKGROUND",
+    reply_to_text: str | None = None,
+    reply_to_sender_display_name: str | None = None,
 ) -> str:
     """Единый промпт semantic-классификатора (используется и в проде, и в eval).
 
@@ -86,6 +104,13 @@ def build_semantic_prompt(
         "now": now.isoformat(),
         "sender_display_name": sender_display_name,
         "team_members": team_members or [],
+        "interaction_mode": interaction_mode,
+        "reply_to": {
+            "text": reply_to_text,
+            "sender_display_name": reply_to_sender_display_name,
+        }
+        if reply_to_text or reply_to_sender_display_name
+        else None,
     }
     return (
         f"{SEMANTIC_SYSTEM_PROMPT}\n\n"

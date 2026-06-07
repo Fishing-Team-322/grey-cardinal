@@ -149,6 +149,20 @@ export const api = {
     syncNow(teamId) {
       return request("POST", `/api/teams/${teamId}/integrations/yougile/sync`);
     },
+    mirrorBoards(teamId) {
+      return request("GET", `/api/teams/${teamId}/integrations/yougile/boards`);
+    },
+    selectBoard(teamId, boardId, columnMappings) {
+      return request("POST", `/api/teams/${teamId}/integrations/yougile/select-board`, {
+        body: { board_id: boardId, column_mappings: columnMappings },
+      });
+    },
+    importBoard(teamId) {
+      return request("POST", `/api/teams/${teamId}/integrations/yougile/import`);
+    },
+    syncEvents(teamId) {
+      return request("GET", `/api/teams/${teamId}/integrations/yougile/sync-events`);
+    },
   },
   llm: {
     health(teamId) {
@@ -191,6 +205,37 @@ export const api = {
       return request("POST", `/api/tasks/${taskId}/status-response`, {
         body: { response, reason },
       });
+    },
+    move(taskId, status) {
+      return request("POST", `/api/tasks/${taskId}/move`, { body: { status } });
+    },
+    assign(taskId, userId) {
+      return request("POST", `/api/tasks/${taskId}/assign`, { body: { user_id: userId } });
+    },
+    deadline(taskId, deadline) {
+      return request("POST", `/api/tasks/${taskId}/deadline`, { body: { deadline } });
+    },
+    askStatus(taskId) {
+      return request("POST", `/api/tasks/${taskId}/ask-status`);
+    },
+  },
+  greyBoard: {
+    get(teamId, view) {
+      return request("GET", `/api/teams/${teamId}/grey-board`, { query: { view } });
+    },
+  },
+  aiInbox: {
+    list(teamId) {
+      return request("GET", `/api/teams/${teamId}/ai-inbox`);
+    },
+    approve(itemId) {
+      return request("POST", `/api/ai-inbox/${itemId}/approve`);
+    },
+    reject(itemId) {
+      return request("POST", `/api/ai-inbox/${itemId}/reject`);
+    },
+    assign(itemId, userId) {
+      return request("POST", `/api/ai-inbox/${itemId}/assign`, { body: { user_id: userId } });
     },
   },
   leaderboards: {

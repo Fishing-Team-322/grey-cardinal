@@ -31,6 +31,9 @@ class TaskPayload(BaseModel):
     title: str | None = None
     description: str | None = None
     assignee_text: str | None = None
+    assignee_reference: str | None = None
+    assignee_reference_type: Literal["name", "username", "pronoun", "none"] = "none"
+    action_object: str | None = None
     deadline: str | None = None
     priority: str | None = None
 
@@ -62,6 +65,14 @@ class SemanticParseResult(BaseModel):
 
     kind: SemanticKind
     confidence: float = Field(ge=0.0, le=1.0)
+    # Defaults keep compatibility with local/test providers that ignore
+    # response_format. The JSON Schema sent to production providers still
+    # requires every policy field.
+    business_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
+    is_actionable: bool = False
+    is_abusive: bool = False
+    is_vague: bool = False
+    should_create_proposal: bool = False
     task: TaskPayload | None = None
     meeting: MeetingPayload | None = None
     daily_report: DailyReportPayload | None = None
@@ -73,6 +84,11 @@ class SemanticParseResult(BaseModel):
         return {
             "kind": self.kind,
             "confidence": self.confidence,
+            "business_relevance": self.business_relevance,
+            "is_actionable": self.is_actionable,
+            "is_abusive": self.is_abusive,
+            "is_vague": self.is_vague,
+            "should_create_proposal": self.should_create_proposal,
             "task": self.task.model_dump() if self.task else None,
             "meeting": self.meeting.model_dump() if self.meeting else None,
             "daily_report": self.daily_report.model_dump() if self.daily_report else None,
@@ -94,12 +110,25 @@ def semantic_json_schema() -> dict:
             "properties": {
                 "kind": {"type": "string", "enum": sorted(SEMANTIC_KINDS)},
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "business_relevance": {"type": "number", "minimum": 0, "maximum": 1},
+                "is_actionable": {"type": "boolean"},
+                "is_abusive": {"type": "boolean"},
+                "is_vague": {"type": "boolean"},
+                "should_create_proposal": {"type": "boolean"},
                 "task": {"type": ["object", "null"]},
                 "meeting": {"type": ["object", "null"]},
                 "daily_report": {"type": ["object", "null"]},
                 "absence": {"type": ["object", "null"]},
                 "reason": {"type": "string"},
             },
-            "required": ["kind", "confidence"],
+            "required": [
+                "kind",
+                "confidence",
+                "business_relevance",
+                "is_actionable",
+                "is_abusive",
+                "is_vague",
+                "should_create_proposal",
+            ],
         },
     }

@@ -1,0 +1,13 @@
+{"text":"Денис, подготовь отчёт до завтра","mode":"auto","expected_action":"create_proposal","expected_assignee":"Денис"}
+{"text":"Денису подготовить отчёт до завтра","mode":"auto","expected_action":"create_proposal","expected_assignee":"Денис"}
+{"text":"@denis подготовь отчёт","mode":"auto","expected_action":"create_proposal","expected_assignee":"Денис"}
+{"text":"Denis, complete the task","mode":"auto","expected_action":"ignore_or_ai_inbox"}
+{"text":"Пенис, сделай мне супер задачу до завтра","mode":"auto","expected_action":"ignore_or_ai_inbox"}
+{"text":"Денису сходить нахуй до сегодняшнего вечера","mode":"auto","expected_action":"ignore"}
+{"text":"Денис, почини эту херню до вечера","mode":"auto","expected_action":"create_proposal","expected_assignee":"Денис"}
+{"text":"да, сделаю сегодня","mode":"auto","expected_action":"status_update_or_ai_inbox"}
+{"text":"ок","mode":"auto","expected_action":"ignore"}
+{"text":"спасибо","mode":"auto","expected_action":"ignore"}
+{"text":"/task @denis подготовить отчёт до завтра","mode":"explicit","expected_action":"create_proposal","expected_assignee":"Денис"}
+{"text":"/task Пенис сделать задачу","mode":"explicit","expected_action":"ask_assignee"}
+{"text":"/task сделать презентацию без исполнителя до пятницы","mode":"explicit","expected_action":"ask_or_create_without_assignee"}

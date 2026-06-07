@@ -7,6 +7,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from brain_api.application.board_mirror import BoardMirrorGateway, BoardMirrorService
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import (
     BoardGateway,
@@ -17,7 +18,7 @@ from brain_api.application.ports import (
 )
 from brain_api.application.semantic_parser import SemanticMessageParser
 from brain_api.config import Settings
-from brain_api.infrastructure.board.factory import BoardAdapterFactory, TeamScopedBoardGateway
+from brain_api.infrastructure.board.factory import BoardAdapterFactory
 from brain_api.infrastructure.board.jira import JiraBoardGateway, JiraConfig
 from brain_api.infrastructure.board.mock import MockBoardGateway
 from brain_api.infrastructure.db.repositories import SqlAlchemyUnitOfWork
@@ -68,10 +69,8 @@ class Container:
         self.extractor: TaskExtractor = self._build_extractor(settings)
 
         self.board_adapter_factory = BoardAdapterFactory(self.session_factory, settings)
-        self.board: BoardGateway = TeamScopedBoardGateway(
-            self.board_adapter_factory,
-            self._build_fallback_board(settings),
-        )
+        self.board_mirror = BoardMirrorService(self.session_factory, settings)
+        self.board: BoardGateway = BoardMirrorGateway(self.board_mirror)
 
     def make_uow(self) -> UnitOfWork:
         return cast(UnitOfWork, SqlAlchemyUnitOfWork(self.session_factory()))

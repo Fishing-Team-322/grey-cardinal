@@ -147,7 +147,17 @@ def test_task_created_and_moved_are_mirrored(
             )
             task = await session.get(m.TaskModel, mapping.local_id)
             assert task.status == "done"
+            assert task.source == "yougile_import"
             assert task.completed_at is not None
+            link = await session.scalar(
+                select(m.ExternalTaskLinkModel).where(
+                    m.ExternalTaskLinkModel.team_id == connected_team,
+                    m.ExternalTaskLinkModel.external_task_id == "remote-1",
+                )
+            )
+            assert link is not None
+            assert link.task_id == task.id
+            assert link.external_column_id == "col-done"
             xp = await session.scalar(
                 select(m.UserXpEventModel).where(
                     m.UserXpEventModel.user_id == task.assignee_id,
@@ -155,6 +165,69 @@ def test_task_created_and_moved_are_mirrored(
                 )
             )
             assert xp is not None
+
+    asyncio.run(_assert_db())
+
+
+def test_existing_external_link_prevents_delayed_webhook_duplicate(
+    webhook_client,
+    connected_team,
+    session_factory,
+):
+    client, _ = webhook_client
+
+    async def _seed_link():
+        async with session_factory() as session:
+            task = m.TaskModel(
+                id=uuid4(),
+                seq=1,
+                public_id="GC-1",
+                team_id=connected_team,
+                title="Original",
+                status="todo",
+                priority="medium",
+                source="manual",
+            )
+            session.add(task)
+            await session.flush()
+            session.add(
+                m.ExternalTaskLinkModel(
+                    team_id=connected_team,
+                    task_id=task.id,
+                    provider="yougile",
+                    external_board_id="board-1",
+                    external_column_id="col-todo",
+                    external_task_id="remote-existing",
+                    sync_status="synced",
+                )
+            )
+            await session.commit()
+            return task.id
+
+    import asyncio
+
+    task_id = asyncio.run(_seed_link())
+    response = client.post(
+        _url(connected_team, "task-updated"),
+        json={
+            "id": "remote-existing",
+            "title": "Updated once",
+            "columnId": "col-progress",
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["task_id"] == str(task_id)
+
+    async def _assert_db():
+        async with session_factory() as session:
+            tasks = list(
+                await session.scalars(
+                    select(m.TaskModel).where(m.TaskModel.team_id == connected_team)
+                )
+            )
+            assert len(tasks) == 1
+            assert tasks[0].title == "Updated once"
+            assert tasks[0].status == "in_progress"
 
     asyncio.run(_assert_db())
 

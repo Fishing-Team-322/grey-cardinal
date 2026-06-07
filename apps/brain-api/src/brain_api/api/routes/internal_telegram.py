@@ -7,6 +7,7 @@ UX: все взаимодействия через inline-кнопки. Кома
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, tzinfo
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -16,6 +17,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from brain_api.api.deps import get_container, verify_internal_token
+from brain_api.application.agentic_tasks import (
+    AssigneeCandidate,
+    AssigneeResolution,
+    IdentityResolver,
+    InteractionMode,
+    TaskDecisionEngine,
+)
 from brain_api.application.rendering import (
     CB_CONFIRM,
     CB_EDIT,
@@ -75,6 +83,7 @@ from brain_api.infrastructure.db import models as m
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
+    EditMessageAction,
     SendMessageAction,
     TelegramCallbackEvent,
     TelegramCommandEvent,
@@ -185,6 +194,7 @@ _WELCOME_GROUP = (
 _HELP_TEXT = (
     "📖 *Серый Кардинал* — команды\n\n"
     "Большинство действий — через кнопки. Дополнительные команды:\n\n"
+    "`/task @user что сделать до срока` — явно создать задачу\n"
     "`/jira URL EMAIL TOKEN ПРОЕКТ` — подключить Jira\n"
     "  Пример: `/jira https://team.atlassian.net user@mail.com token123 PROJ`\n\n"
     "`/done GC\\-1` — закрыть задачу\n"
@@ -382,6 +392,9 @@ async def ingest_callback(
     chat_id = event.message.chat_id
     msg_id = event.message.message_id
     cq_id = event.callback_query_id
+
+    if data.startswith("taskcmd:"):
+        return await _handle_taskcmd_callback(container, event)
 
     # ── Meeting (созвон) callbacks: подтверждение времени и RSVP ──────────
     if is_meeting_callback(data):
@@ -653,8 +666,11 @@ async def ingest_callback(
 
 
 async def _try_v2_semantic_message(
-    event: TelegramMessageEvent,
+    event: TelegramMessageEvent | TelegramCommandEvent,
     container: Container,
+    *,
+    interaction_mode: InteractionMode = InteractionMode.AUTO_BACKGROUND,
+    semantic_text: str | None = None,
 ) -> ActionsResponse | None:
     if event.chat.type not in {"group", "supergroup", "channel"}:
         return None
@@ -709,10 +725,28 @@ async def _try_v2_semantic_message(
             await session.commit()
             return ActionsResponse(actions=[])
 
+        reply_sender = None
+        if event.reply_to_sender is not None:
+            reply_sender = await session.scalar(
+                select(m.UserModel)
+                .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                .where(
+                    m.TeamMemberModel.team_id == team.id,
+                    m.UserModel.telegram_user_id == event.reply_to_sender.id,
+                )
+            )
         message = m.ChatMessageModel(
             telegram_message_id=event.message_id,
             chat_id=chat.id,
             sender_id=sender.id,
+            sender_telegram_user_id=event.sender.id,
+            reply_to_message_id=event.reply_to_message_id,
+            reply_to_sender_user_id=reply_sender.id if reply_sender else None,
+            reply_to_sender_telegram_user_id=(
+                event.reply_to_sender.id if event.reply_to_sender else None
+            ),
+            reply_to_text=event.reply_to_text,
+            message_thread_id=event.message_thread_id,
             text=event.text,
             raw_json=event.raw or {},
         )
@@ -731,12 +765,17 @@ async def _try_v2_semantic_message(
             parsed = await container.semantic_parser.parse(
                 SemanticMessageInput(
                     team_id=team.id,
-                    message_text=event.text,
+                    message_text=semantic_text or event.text,
                     sender_user_id=sender.id,
                     team_timezone=team.timezone,
                     now=now,
                     sender_display_name=sender.display_name,
                     team_members=member_names,
+                    interaction_mode=interaction_mode.value,
+                    reply_to_text=event.reply_to_text,
+                    reply_to_sender_display_name=(
+                        reply_sender.display_name if reply_sender else None
+                    ),
                 )
             )
         except Exception as exc:
@@ -754,11 +793,28 @@ async def _try_v2_semantic_message(
 
         kind = parsed["kind"]
         confidence = float(parsed["confidence"])
-        if (
-            kind == "task_candidate"
-            and confidence >= container.config.task_extraction_min_confidence
-        ):
-            return await _route_v2_task_candidate(session, team, sender, message, parsed, event)
+        if kind == "task_candidate":
+            resolver = IdentityResolver(session)
+            task_payload = parsed.get("task") or {}
+            resolution = await resolver.resolve_assignee(
+                team.id,
+                task_payload.get("assignee_reference") or task_payload.get("assignee_text"),
+                event.entities,
+                semantic_text or event.text,
+                reply_sender.id if reply_sender else None,
+                interaction_mode,
+            )
+            return await _route_v2_task_candidate(
+                session,
+                team,
+                sender,
+                message,
+                parsed,
+                event,
+                resolution,
+                interaction_mode,
+                semantic_text or event.text,
+            )
         if kind == "meeting_candidate" and confidence >= 0.6:
             return await _route_v2_meeting_candidate(session, team, sender, message, parsed, event)
         if kind == "daily_report":
@@ -768,6 +824,16 @@ async def _try_v2_semantic_message(
         if kind == "status_update":
             return await _route_v2_status_update(
                 session, container, team, sender, message, parsed, event
+            )
+        if interaction_mode in {
+            InteractionMode.EXPLICIT_TASK_COMMAND,
+            InteractionMode.REPLY_TASK_COMMAND,
+        }:
+            await session.commit()
+            return _text(
+                event.chat.id,
+                "Я понял команду создания задачи, но не вижу конкретного рабочего результата. "
+                "Напиши, что именно нужно сделать.",
             )
 
         session.add(
@@ -783,20 +849,133 @@ async def _try_v2_semantic_message(
         return ActionsResponse(actions=[])
 
 
-async def _route_v2_task_candidate(session, team, sender, message, parsed, event):
+async def _route_v2_task_candidate(
+    session,
+    team,
+    sender,
+    message,
+    parsed,
+    event,
+    resolution: AssigneeResolution,
+    interaction_mode: InteractionMode,
+    semantic_text: str,
+):
     task = parsed.get("task") or {}
-    title = str(task.get("title") or event.text[:120]).strip()
-    assignee_text = task.get("assignee_text")
-    assignee = await _match_v2_assignee(session, team.id, assignee_text)
+    title = str(task.get("title") or semantic_text[:120]).strip()
+    assignee_text = resolution.display_name or task.get("assignee_reference") or task.get(
+        "assignee_text"
+    )
     deadline = _parse_dt(task.get("deadline"), team.timezone)
-    duplicate = await _find_v2_duplicate(session, team.id, title, assignee.id if assignee else None)
-    if duplicate is not None:
+    duplicate = await _find_v2_duplicate(session, team.id, title, resolution.user_id)
+    decision = TaskDecisionEngine().decide(
+        semantic_result=parsed,
+        identity_resolution=resolution,
+        interaction_mode=interaction_mode,
+        has_context=bool(event.reply_to_text),
+        duplicate=duplicate is not None,
+    )
+    if decision.action == "ignore":
+        await session.commit()
+        return ActionsResponse(actions=[])
+    if decision.action == "create_ai_inbox_item":
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind=decision.reason
+                if decision.reason
+                in {
+                    "needs_assignee",
+                    "needs_task_object",
+                    "duplicate_suspected",
+                    "low_confidence",
+                }
+                else "task_candidate_uncertain",
+                status="pending",
+                reason=decision.reason,
+                raw_text=semantic_text,
+                semantic_payload=parsed,
+                identity_payload=resolution.payload(),
+                duplicate_task_id=duplicate.id if duplicate else None,
+                confidence=decision.confidence,
+            )
+        )
+        await session.commit()
+        return ActionsResponse(actions=[])
+    if decision.action == "ask_clarification":
+        if decision.reason == "needs_assignee":
+            return await _create_assignee_draft(
+                session,
+                team,
+                message,
+                parsed,
+                semantic_text,
+                resolution,
+                event.chat.id,
+            )
         await session.commit()
         return _text(
             event.chat.id,
-            "Похоже, такая задача уже есть:\n\n"
-            f"{duplicate.public_id} {duplicate.title}\n"
-            f"Статус: {duplicate.status}\n\nНе создаю дубль.",
+            "Я понял намерение создать задачу, но не понял конкретный результат. "
+            "Напиши, что именно нужно сделать.",
+        )
+    if decision.action == "duplicate_warning" and duplicate is not None:
+        proposal = m.TaskProposalModel(
+            team_id=team.id,
+            source="telegram_chat",
+            source_message_id=message.id,
+            title=title,
+            description=task.get("description"),
+            assignee_text=assignee_text,
+            assignee_id=resolution.user_id,
+            deadline=deadline,
+            deadline_timezone=team.timezone,
+            priority=task.get("priority") or "medium",
+            confidence=float(parsed["confidence"]),
+            raw_text=semantic_text,
+            extractor_payload={**parsed, "identity_resolution": resolution.payload()},
+            similar_task_id=duplicate.id,
+        )
+        session.add(proposal)
+        await session.flush()
+        confirmation = m.ConfirmationModel(
+            team_id=team.id,
+            proposal_id=proposal.id,
+            status="pending",
+            telegram_chat_id=event.chat.id,
+        )
+        session.add(confirmation)
+        await session.commit()
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.chat.id,
+                    text=(
+                        "Похоже, такая задача уже есть:\n\n"
+                        f"{duplicate.public_id} {duplicate.title}\n\nЧто сделать?"
+                    ),
+                    reply_markup={
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "Связать",
+                                    "callback_data": f"taskcmd:link:{confirmation.id}",
+                                },
+                                {
+                                    "text": "Создать всё равно",
+                                    "callback_data": f"taskcmd:create_anyway:{confirmation.id}",
+                                },
+                            ],
+                            [
+                                {
+                                    "text": "Отмена",
+                                    "callback_data": f"taskcmd:cancel:{confirmation.id}",
+                                }
+                            ],
+                        ]
+                    },
+                )
+            ]
         )
 
     proposal = m.TaskProposalModel(
@@ -806,13 +985,13 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
         title=title,
         description=task.get("description"),
         assignee_text=assignee_text,
-        assignee_id=assignee.id if assignee else None,
+        assignee_id=resolution.user_id,
         deadline=deadline,
         deadline_timezone=team.timezone,
         priority=task.get("priority") or "medium",
         confidence=float(parsed["confidence"]),
-        raw_text=event.text,
-        extractor_payload=parsed,
+        raw_text=semantic_text,
+        extractor_payload={**parsed, "identity_resolution": resolution.payload()},
     )
     session.add(proposal)
     await session.flush()
@@ -831,7 +1010,7 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
                 text=(
                     "🧠 Нашёл задачу\n\n"
                     f"Что сделать:\n{proposal.title}\n\n"
-                    f"Исполнитель:\n{proposal.assignee_text or 'не указан'}\n\n"
+                    f"Исполнитель:\n{proposal.assignee_text or 'без исполнителя'}\n\n"
                     "Дедлайн:\n"
                     f"{proposal.deadline.isoformat() if proposal.deadline else 'не указан'} "
                     f"{team.timezone}\n\nСоздать карточку?"
@@ -840,6 +1019,226 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
             )
         ]
     )
+
+
+async def _create_assignee_draft(
+    session,
+    team,
+    message,
+    parsed,
+    semantic_text,
+    resolution: AssigneeResolution,
+    chat_id: int,
+) -> ActionsResponse:
+    task = parsed.get("task") or {}
+    proposal = m.TaskProposalModel(
+        team_id=team.id,
+        source="telegram_chat",
+        source_message_id=message.id,
+        title=str(task.get("title") or semantic_text[:120]).strip(),
+        description=task.get("description"),
+        assignee_text=task.get("assignee_reference") or task.get("assignee_text"),
+        deadline=_parse_dt(task.get("deadline"), team.timezone),
+        deadline_timezone=team.timezone,
+        priority=task.get("priority") or "medium",
+        confidence=float(parsed["confidence"]),
+        raw_text=semantic_text,
+        extractor_payload={
+            **parsed,
+            "identity_resolution": resolution.payload(),
+            "draft_kind": "task_command",
+        },
+    )
+    session.add(proposal)
+    await session.flush()
+    confirmation = m.ConfirmationModel(
+        team_id=team.id,
+        proposal_id=proposal.id,
+        status="pending",
+        telegram_chat_id=chat_id,
+    )
+    session.add(confirmation)
+    await session.commit()
+
+    candidates = resolution.candidates
+    if not candidates:
+        candidates = [
+            AssigneeCandidate(
+                user_id=user.id,
+                display_name=user.display_name,
+                source="manual",
+                confidence=1.0,
+            )
+            for user in (
+                await session.execute(
+                    select(m.UserModel)
+                    .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                    .where(m.TeamMemberModel.team_id == team.id)
+                    .limit(6)
+                )
+            ).scalars()
+        ]
+    rows = []
+    candidate_payload = []
+    for index, candidate in enumerate(candidates[:6]):
+        user_id = candidate.user_id
+        display_name = candidate.display_name
+        if user_id is None:
+            continue
+        candidate_payload.append({"user_id": str(user_id), "display_name": display_name})
+        rows.append(
+            [
+                {
+                    "text": display_name,
+                    "callback_data": f"taskcmd:assignee:{confirmation.id}:{index}",
+                }
+            ]
+        )
+    proposal.extractor_payload = {
+        **(proposal.extractor_payload or {}),
+        "assignee_candidates": candidate_payload,
+    }
+    rows.append(
+        [
+            {
+                "text": "Без исполнителя",
+                "callback_data": f"taskcmd:no_assignee:{confirmation.id}",
+            },
+            {"text": "Отмена", "callback_data": f"taskcmd:cancel:{confirmation.id}"},
+        ]
+    )
+    await session.commit()
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=chat_id,
+                text=(
+                    f"Я не нашёл сотрудника «{resolution.raw_reference or 'не указан'}».\n\n"
+                    "Выберите исполнителя:"
+                ),
+                reply_markup={"inline_keyboard": rows},
+            )
+        ]
+    )
+
+
+async def _handle_taskcmd_callback(container: Container, event: TelegramCallbackEvent):
+    parts = event.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    cq_id = event.callback_query_id
+    if action in {
+        "cancel",
+        "create",
+        "create_anyway",
+        "link",
+        "no_assignee",
+        "assignee",
+    }:
+        try:
+            confirmation_id = UUID(parts[2])
+        except (IndexError, ValueError):
+            return _answer(cq_id, "Черновик не найден")
+    else:
+        return _answer(cq_id, "Действие недоступно")
+
+    if action in {"create", "create_anyway"}:
+        async with container.make_uow() as uow:
+            return await ConfirmTask(
+                uow, container.board, container.event_publisher, container.config
+            ).execute(
+                confirmation_id=confirmation_id,
+                callback_query_id=cq_id,
+                chat_id=event.message.chat_id,
+                message_id=event.message.message_id,
+                actor_telegram_id=event.from_user.id,
+            )
+    if action == "cancel":
+        async with container.make_uow() as uow:
+            return await RejectTask(uow, container.event_publisher).execute(
+                confirmation_id=confirmation_id,
+                callback_query_id=cq_id,
+                chat_id=event.message.chat_id,
+                message_id=event.message.message_id,
+                actor_telegram_id=event.from_user.id,
+            )
+
+    async with container.session_factory() as session:
+        confirmation = await session.get(m.ConfirmationModel, confirmation_id)
+        if confirmation is None or confirmation.status != "pending":
+            return _answer(cq_id, "Черновик уже закрыт")
+        proposal = await session.get(m.TaskProposalModel, confirmation.proposal_id)
+        if proposal is None:
+            return _answer(cq_id, "Черновик не найден")
+        if action == "link":
+            if proposal.similar_task_id is None:
+                return _answer(cq_id, "Похожая задача не найдена")
+            duplicate = await session.get(m.TaskModel, proposal.similar_task_id)
+            if duplicate is None:
+                return _answer(cq_id, "Похожая задача не найдена")
+            confirmation.status = "rejected"
+            await session.commit()
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(
+                        callback_query_id=cq_id,
+                        text=f"Связано с {duplicate.public_id}",
+                    ),
+                    EditMessageAction(
+                        chat_id=event.message.chat_id,
+                        message_id=event.message.message_id,
+                        text=(
+                            "Новая карточка не создана.\n\n"
+                            f"Используем существующую задачу: "
+                            f"{duplicate.public_id} {duplicate.title}"
+                        ),
+                    ),
+                ]
+            )
+        if action == "no_assignee":
+            proposal.assignee_id = None
+            proposal.assignee_text = None
+        else:
+            try:
+                index = int(parts[3])
+                candidate = (proposal.extractor_payload or {})["assignee_candidates"][index]
+                user = await session.get(m.UserModel, UUID(candidate["user_id"]))
+            except (IndexError, KeyError, TypeError, ValueError):
+                return _answer(cq_id, "Исполнитель не найден")
+            if user is None:
+                return _answer(cq_id, "Исполнитель не найден")
+            proposal.assignee_id = user.id
+            proposal.assignee_text = user.display_name
+        await session.commit()
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Исполнитель выбран"),
+                EditMessageAction(
+                    chat_id=event.message.chat_id,
+                    message_id=event.message.message_id,
+                    text=(
+                        "Создать задачу?\n\n"
+                        f"Что сделать: {proposal.title}\n"
+                        f"Исполнитель: {proposal.assignee_text or 'без исполнителя'}\n"
+                        "Дедлайн: "
+                        f"{proposal.deadline.isoformat() if proposal.deadline else 'не указан'}"
+                    ),
+                    reply_markup={
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "Создать",
+                                    "callback_data": f"taskcmd:create:{confirmation.id}",
+                                },
+                                {
+                                    "text": "Отмена",
+                                    "callback_data": f"taskcmd:cancel:{confirmation.id}",
+                                },
+                            ]
+                        ]
+                    },
+                ),
+            ]
+        )
 
 
 async def _route_v2_meeting_candidate(session, team, sender, message, parsed, event):
@@ -935,35 +1334,55 @@ async def _route_v2_status_update(session, container, team, sender, message, par
         await session.commit()
         return ActionsResponse(actions=[])
 
-    active = ["todo", "in_progress", "blocked", "review"]
-    task = await session.scalar(
-        select(m.TaskModel)
-        .where(
-            m.TaskModel.team_id == team.id,
-            m.TaskModel.assignee_id == sender.id,
-            m.TaskModel.status.in_(active),
-        )
-        .order_by(m.TaskModel.updated_at.desc())
-    )
-    # запасной матчинг: по имени исполнителя в тексте задачи (если assignee_id не проставлен)
-    if task is None:
-        name = (sender.display_name or sender.telegram_username or "").split()
-        needle = name[0].lower() if name else ""
-        if needle:
-            rows = await session.execute(
-                select(m.TaskModel)
-                .where(
-                    m.TaskModel.team_id == team.id,
-                    m.TaskModel.status.in_(active),
-                    m.TaskModel.assignee_text.is_not(None),
-                )
-                .order_by(m.TaskModel.updated_at.desc())
+    task = None
+    public_match = re.search(r"(?:#)?GC-\d+", event.text, flags=re.IGNORECASE)
+    if public_match:
+        task = await session.scalar(
+            select(m.TaskModel).where(
+                m.TaskModel.team_id == team.id,
+                func.lower(m.TaskModel.public_id) == public_match.group(0).lstrip("#").lower(),
             )
-            for candidate in rows.scalars():
-                if needle in (candidate.assignee_text or "").lower():
-                    task = candidate
-                    break
+        )
+    if task is None and message.reply_to_message_id is not None:
+        replied = await session.scalar(
+            select(m.ChatMessageModel).where(
+                m.ChatMessageModel.chat_id == message.chat_id,
+                m.ChatMessageModel.telegram_message_id == message.reply_to_message_id,
+            )
+        )
+        if replied is not None:
+            task = await session.scalar(
+                select(m.TaskModel).where(
+                    m.TaskModel.team_id == team.id,
+                    m.TaskModel.source_message_id == replied.id,
+                )
+            )
+            if task is None:
+                proposal = await session.scalar(
+                    select(m.TaskProposalModel).where(
+                        m.TaskProposalModel.team_id == team.id,
+                        m.TaskProposalModel.source_message_id == replied.id,
+                    )
+                )
+                if proposal is not None:
+                    task = await session.scalar(
+                        select(m.TaskModel).where(
+                            m.TaskModel.created_from_proposal_id == proposal.id
+                        )
+                    )
     if task is None:
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind="low_confidence",
+                status="pending",
+                reason="status_update_without_task_context",
+                raw_text=event.text,
+                semantic_payload=parsed,
+                confidence=float(parsed.get("confidence") or 0.0),
+            )
+        )
         await session.commit()
         return ActionsResponse(actions=[])
 
@@ -1067,7 +1486,7 @@ def _parse_dt(value, timezone: str = "UTC"):
     return parsed.astimezone(UTC)
 
 
-def _display_name_from_event(event: TelegramMessageEvent) -> str:
+def _display_name_from_event(event: TelegramMessageEvent | TelegramCommandEvent) -> str:
     parts = [part for part in (event.sender.first_name, event.sender.last_name) if part]
     return " ".join(parts) or event.sender.username or f"user{event.sender.id}"
 
@@ -1141,6 +1560,26 @@ async def ingest_command(
     if command == "settings":
         async with container.session_factory() as session:
             return await open_settings(session, chat_id)
+
+    if command == "task":
+        task_text = " ".join(event.args).strip()
+        if not task_text:
+            return _text(
+                chat_id,
+                "Формат: /task @username подготовить отчёт до завтра 18:00",
+            )
+        mode = (
+            InteractionMode.REPLY_TASK_COMMAND
+            if event.reply_to_message_id is not None
+            else InteractionMode.EXPLICIT_TASK_COMMAND
+        )
+        response = await _try_v2_semantic_message(
+            event,
+            container,
+            interaction_mode=mode,
+            semantic_text=task_text,
+        )
+        return response or _text(chat_id, "Команда /task доступна в привязанном чате команды.")
 
     if command in {"leaderboard", "rating", "top"}:
         async with container.session_factory() as session:

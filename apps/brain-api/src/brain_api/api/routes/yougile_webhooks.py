@@ -81,10 +81,20 @@ async def receive_yougile_webhook(
         return {"accepted": True, "ignored": "outbound_echo"}
 
     repo = YouGileMappingRepo(session, team_id)
-    mapping = await repo.find_by_yougile("task", yougile_id)
-    task = (
-        await session.get(m.TaskModel, mapping.local_id) if mapping and mapping.local_id else None
+    link = await session.scalar(
+        select(m.ExternalTaskLinkModel).where(
+            m.ExternalTaskLinkModel.provider == "yougile",
+            m.ExternalTaskLinkModel.external_task_id == yougile_id,
+        )
     )
+    if link is not None and link.team_id != team_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "external task is already linked to another team",
+        )
+    mapping = await repo.find_by_yougile("task", yougile_id)
+    local_id = link.task_id if link is not None else mapping.local_id if mapping else None
+    task = await session.get(m.TaskModel, local_id) if local_id else None
     created = task is None
     if task is None:
         task = await _create_local_task(session, team_id, config, task_data)
@@ -104,6 +114,15 @@ async def receive_yougile_webhook(
             reason=f"Закрыл задачу {task.public_id} в YouGile",
             idempotency_key=f"task_completed:{task.id}",
         )
+    link = await _upsert_external_link(
+        session,
+        team_id=team_id,
+        task=task,
+        link=link,
+        config=config,
+        data=task_data,
+        yougile_id=yougile_id,
+    )
     await repo.upsert("task", yougile_id, local_id=task.id, payload=task_data)
     repo.log(
         direction="inbound",
@@ -158,11 +177,52 @@ async def _create_local_task(
         priority="medium",
         assignee_id=await _local_assignee(session, team_id, data),
         deadline=_deadline_from_yougile(data.get("deadline")),
-        source="manual",
+        source="yougile_import",
         last_status_update_at=datetime.now(UTC),
     )
     session.add(task)
     return task
+
+
+async def _upsert_external_link(
+    session: AsyncSession,
+    *,
+    team_id: UUID,
+    task: m.TaskModel,
+    link: m.ExternalTaskLinkModel | None,
+    config: dict[str, Any],
+    data: dict[str, Any],
+    yougile_id: str,
+) -> m.ExternalTaskLinkModel:
+    now = datetime.now(UTC)
+    board_id = str(data.get("boardId") or config.get("default_board_id") or "")
+    if not board_id:
+        selected_board = await session.scalar(
+            select(m.YouGileBoardModel).where(
+                m.YouGileBoardModel.team_id == team_id,
+                m.YouGileBoardModel.is_selected.is_(True),
+            )
+        )
+        board_id = selected_board.external_id if selected_board else ""
+    if link is None:
+        link = m.ExternalTaskLinkModel(
+            team_id=team_id,
+            task_id=task.id,
+            provider="yougile",
+            external_board_id=board_id,
+            external_task_id=yougile_id,
+        )
+        session.add(link)
+    else:
+        link.task_id = task.id
+        if board_id:
+            link.external_board_id = board_id
+    link.external_column_id = str(data.get("columnId") or "") or link.external_column_id
+    link.sync_status = "synced"
+    link.last_error = None
+    link.last_synced_at = now
+    link.raw_payload = data
+    return link
 
 
 def _apply_task_payload(

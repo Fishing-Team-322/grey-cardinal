@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from brain_api.infrastructure.db import models as m
@@ -53,6 +54,20 @@ async def discover_yougile_workspace(
         yc = client or make_client(api_key, api_base_url)
         repo = YouGileMappingRepo(session, team_id)
         config = dict(team.board_config or {})
+        connection = await session.scalar(
+            select(m.YouGileConnectionModel).where(
+                m.YouGileConnectionModel.team_id == team_id
+            )
+        )
+        if connection is None:
+            connection = m.YouGileConnectionModel(
+                team_id=team_id,
+                external_company_id=str(config.get("yougile_company_id") or ""),
+                company_name=config.get("yougile_company_name"),
+                status="connected",
+            )
+            session.add(connection)
+            await session.flush()
 
         try:
             projects = await yc.list_projects()
@@ -83,11 +98,52 @@ async def discover_yougile_workspace(
             boards = await yc.list_boards(project_id=project_id)
             for b in boards:
                 await repo.upsert("board", str(b["id"]), payload=b)
+                board_row = await session.scalar(
+                    select(m.YouGileBoardModel).where(
+                        m.YouGileBoardModel.team_id == team_id,
+                        m.YouGileBoardModel.external_id == str(b["id"]),
+                    )
+                )
+                if board_row is None:
+                    board_row = m.YouGileBoardModel(
+                        team_id=team_id,
+                        connection_id=connection.id,
+                        external_id=str(b["id"]),
+                        name=str(b.get("title") or b.get("name") or "Без названия"),
+                    )
+                    session.add(board_row)
+                    await session.flush()
+                else:
+                    board_row.name = str(b.get("title") or b.get("name") or board_row.name)
+                    board_row.raw_payload = b
+                    board_row.synced_at = datetime.now(UTC)
                 all_boards.append(b)
                 stats["boards"] += 1
                 columns = await yc.list_columns(board_id=str(b["id"]))
-                for col in columns:
+                for position, col in enumerate(columns):
                     await repo.upsert("column", str(col["id"]), payload=col)
+                    column_row = await session.scalar(
+                        select(m.YouGileColumnModel).where(
+                            m.YouGileColumnModel.board_id == board_row.id,
+                            m.YouGileColumnModel.external_id == str(col["id"]),
+                        )
+                    )
+                    if column_row is None:
+                        column_row = m.YouGileColumnModel(
+                            board_id=board_row.id,
+                            external_id=str(col["id"]),
+                            name=str(col.get("title") or col.get("name") or "Без названия"),
+                            mapped_status=_status_for_column(col, position),
+                            position=position,
+                            raw_payload=col,
+                        )
+                        session.add(column_row)
+                    else:
+                        column_row.name = str(
+                            col.get("title") or col.get("name") or column_row.name
+                        )
+                        column_row.position = position
+                        column_row.raw_payload = col
                     stats["columns"] += 1
                     tasks = await yc.list_tasks(column_id=str(col["id"]))
                     for t in tasks:
@@ -99,6 +155,21 @@ async def discover_yougile_workspace(
         ]
         if primary_boards and not config.get("default_board_id"):
             config["default_board_id"] = str(primary_boards[0]["id"])
+        selected_external_id = str(config.get("default_board_id") or "")
+        board_rows = list(
+            await session.scalars(
+                select(m.YouGileBoardModel).where(m.YouGileBoardModel.team_id == team_id)
+            )
+        )
+        existing_selected = next((row for row in board_rows if row.is_selected), None)
+        if not selected_external_id and existing_selected is not None:
+            selected_external_id = existing_selected.external_id
+            config["default_board_id"] = selected_external_id
+        if not selected_external_id and len(board_rows) == 1:
+            selected_external_id = board_rows[0].external_id
+            config["default_board_id"] = selected_external_id
+        for board_row in board_rows:
+            board_row.is_selected = board_row.external_id == selected_external_id
         if config.get("default_board_id"):
             _ensure_default_columns(
                 config,
@@ -190,3 +261,20 @@ async def _map_users(session, repo: YouGileMappingRepo, team_id: UUID, users: li
     for u in users:
         local_id = email_to_local.get((u.get("email") or "").lower())
         await repo.upsert("user", str(u["id"]), local_id=local_id, payload=u)
+
+
+def _status_for_column(column: dict[str, Any], position: int) -> str | None:
+    title = str(column.get("title") or column.get("name") or "").strip().lower()
+    aliases = {
+        "backlog": {"backlog", "бэклог"},
+        "todo": {"todo", "to do", "к выполнению", "сделать"},
+        "in_progress": {"in progress", "doing", "в работе"},
+        "blocked": {"blocked", "заблокировано"},
+        "review": {"review", "проверка", "на проверке"},
+        "done": {"done", "готово", "completed"},
+    }
+    for status, names in aliases.items():
+        if title in names:
+            return status
+    fallback = ("todo", "in_progress", "done")
+    return fallback[position] if position < len(fallback) else None

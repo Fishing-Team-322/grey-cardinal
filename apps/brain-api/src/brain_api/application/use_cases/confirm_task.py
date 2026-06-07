@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import html
 from uuid import UUID
 
 from brain_api.application.config import AppConfig
 from brain_api.application.ports import BoardGateway, EventPublisher, UnitOfWork
-from brain_api.application.rendering import render_task_created
+from brain_api.application.rendering import format_telegram_mention, render_task_created
 from brain_api.application.use_cases._shared import create_task_from_proposal
-from brain_api.domain.entities import Task
+from brain_api.domain.entities import Task, User
 from brain_api.domain.enums import ConfirmationStatus
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
     EditMessageAction,
+    SendMessageAction,
 )
 
 
@@ -49,7 +51,10 @@ class ConfirmTask:
             await uow.commit()
             if task is None:
                 return _just_answer(callback_query_id, "Задача уже создана")
-            return _created_actions(task, callback_query_id, chat_id, message_id, self._config)
+            assignee = await uow.users.get(task.assignee_id) if task.assignee_id else None
+            return _created_actions(
+                task, callback_query_id, chat_id, message_id, self._config, assignee=assignee
+            )
 
         if confirmation.status in (ConfirmationStatus.rejected, ConfirmationStatus.expired):
             await uow.commit()
@@ -72,8 +77,15 @@ class ConfirmTask:
         )
 
         await uow.commit()
+        assignee = await uow.users.get(task.assignee_id) if task.assignee_id else None
         return _created_actions(
-            task, callback_query_id, chat_id, message_id, self._config, provider_label
+            task,
+            callback_query_id,
+            chat_id,
+            message_id,
+            self._config,
+            provider_label,
+            assignee,
         )
 
 
@@ -90,11 +102,42 @@ def _created_actions(
     message_id: int,
     config: AppConfig,
     provider_label: str | None = None,
+    assignee: User | None = None,
 ) -> ActionsResponse:
     text = render_task_created(task, provider_label, config.timezone)
+    parse_mode = None
+    if assignee is not None:
+        plain_assignee = task.assignee_text or assignee.display_name
+        mention = format_telegram_mention(
+            assignee.display_name,
+            assignee.telegram_username,
+            assignee.telegram_user_id,
+        )
+        if mention.startswith("<a "):
+            text = html.escape(text).replace(html.escape(plain_assignee), mention, 1)
+            parse_mode = "HTML"
+        else:
+            text = text.replace(plain_assignee, mention, 1)
+    actions = [
+        AnswerCallbackAction(callback_query_id=callback_query_id, text="Задача создана"),
+        EditMessageAction(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            parse_mode=parse_mode,
+        ),
+    ]
+    if assignee is not None and assignee.telegram_user_id is not None:
+        actions.append(
+            SendMessageAction(
+                chat_id=assignee.telegram_user_id,
+                text=(
+                    f"Вам назначена задача {task.public_id}\n\n"
+                    f"{task.title}\n"
+                    f"Дедлайн: {task.deadline.isoformat() if task.deadline else 'не указан'}"
+                ),
+            )
+        )
     return ActionsResponse(
-        actions=[
-            AnswerCallbackAction(callback_query_id=callback_query_id, text="Задача создана"),
-            EditMessageAction(chat_id=chat_id, message_id=message_id, text=text),
-        ]
+        actions=actions
     )

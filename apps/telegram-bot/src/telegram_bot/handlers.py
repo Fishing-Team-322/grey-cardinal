@@ -9,6 +9,7 @@ from grey_cardinal_contracts import (
     TelegramCallbackEvent,
     TelegramChatInfo,
     TelegramCommandEvent,
+    TelegramEntity,
     TelegramMessageEvent,
     TelegramMessageRef,
     TelegramSender,
@@ -39,6 +40,29 @@ def _chat(raw: dict[str, Any]) -> TelegramChatInfo:
     )
 
 
+def _entities(message: dict[str, Any]) -> list[TelegramEntity]:
+    return [
+        TelegramEntity(
+            type=str(item.get("type") or ""),
+            offset=int(item.get("offset") or 0),
+            length=int(item.get("length") or 0),
+            user=_sender(item["user"]) if item.get("user") else None,
+        )
+        for item in (message.get("entities") or [])
+    ]
+
+
+def _reply(message: dict[str, Any]) -> dict[str, Any]:
+    reply = message.get("reply_to_message") or {}
+    reply_sender = reply.get("from") or reply.get("sender_chat")
+    return {
+        "reply_to_message_id": reply.get("message_id"),
+        "reply_to_sender": _sender(reply_sender) if reply_sender else None,
+        "reply_to_text": reply.get("text") or reply.get("caption"),
+        "message_thread_id": message.get("message_thread_id"),
+    }
+
+
 def build_message_event(update: dict[str, Any], message: dict[str, Any]) -> TelegramMessageEvent:
     sender_raw = message.get("from") or message.get("sender_chat") or {}
     return TelegramMessageEvent(
@@ -48,6 +72,8 @@ def build_message_event(update: dict[str, Any], message: dict[str, Any]) -> Tele
         sender=_sender(sender_raw),
         text=message.get("text", ""),
         date=_ts(message.get("date")),
+        entities=_entities(message),
+        **_reply(message),
         raw=update,
     )
 
@@ -65,6 +91,8 @@ def build_command_event(update: dict[str, Any], message: dict[str, Any]) -> Tele
         args=args,
         text=text,
         date=_ts(message.get("date")),
+        entities=_entities(message),
+        **_reply(message),
         raw=update,
     )
 

@@ -28,6 +28,22 @@ EDIT_STUB_TEXT = (
 )
 
 
+def format_telegram_mention(
+    display_name: str,
+    telegram_username: str | None = None,
+    telegram_user_id: int | None = None,
+) -> str:
+    """Prefer an @username, then a safe HTML text mention, then plain display name."""
+    if telegram_username:
+        return f"@{telegram_username.lstrip('@')}"
+    if telegram_user_id:
+        safe_name = (
+            display_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+        return f'<a href="tg://user?id={telegram_user_id}">{safe_name}</a>'
+    return display_name
+
+
 def _local(dt: datetime, timezone: str) -> datetime:
     tz = ZoneInfo(timezone)
     if dt.tzinfo is None:

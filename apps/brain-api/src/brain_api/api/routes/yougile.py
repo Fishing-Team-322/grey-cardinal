@@ -284,6 +284,23 @@ async def yougile_status(
         ).rate_limit_remaining
     except Exception:  # noqa: BLE001 — status must not fail on rate-limit probe
         pass
+    selected_board = await session.scalar(
+        select(m.YouGileBoardModel).where(
+            m.YouGileBoardModel.team_id == team_id,
+            m.YouGileBoardModel.is_selected.is_(True),
+        )
+    )
+    sync_errors = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(m.ExternalTaskLinkModel)
+            .where(
+                m.ExternalTaskLinkModel.team_id == team_id,
+                m.ExternalTaskLinkModel.sync_status.in_(["error", "conflict"]),
+            )
+        )
+        or 0
+    )
     return {
         "connected": True,
         "company": {
@@ -292,7 +309,13 @@ async def yougile_status(
         },
         "last_synced_at": config.get("synced_at"),
         "primary_project": primary,
+        "selected_board": (
+            {"id": selected_board.external_id, "name": selected_board.name}
+            if selected_board
+            else None
+        ),
         "stats": stats,
+        "sync_errors": sync_errors,
         "rate_limit_remaining": remaining,
     }
 

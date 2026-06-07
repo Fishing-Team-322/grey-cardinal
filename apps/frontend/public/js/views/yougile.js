@@ -1,11 +1,14 @@
 import { api } from "../api.js";
 import { bindForm, currentTeam, errorMessage, escapeHtml, setTopbar, toast } from "../view-utils.js";
 
-export default async function yougileView(root) {
+export default async function yougileView(root, params = {}) {
   setTopbar("YouGile");
   const content = root.querySelector("#yougile-content");
   const managed = window.gcCurrentUser.teams?.filter((team) => team.role === "manager") || [];
-  let team = currentTeam({ teams: managed }, new URLSearchParams(location.search).get("team"));
+  let team = currentTeam(
+    { teams: managed },
+    params.teamId || new URLSearchParams(location.search).get("team"),
+  );
   if (!team) {
     content.innerHTML = '<div class="note warn">Для настройки YouGile нужна роль руководителя команды.</div>';
     return;
@@ -19,7 +22,7 @@ export default async function yougileView(root) {
   async function loadStatus() {
     content.innerHTML = '<div class="view-loading">Проверяем подключение...</div>';
     const status = await api.yougile.status(team.id).catch(() => ({ connected: false }));
-    if (status.connected) renderConnected(content, team, status, loadStatus);
+    if (status.connected) await renderConnected(content, team, status, loadStatus);
     else renderLogin(content, team, loadStatus);
   }
   await loadStatus();
@@ -67,14 +70,53 @@ async function connect(content, team, token, companyId, reload) {
   }
 }
 
-function renderConnected(content, team, status, reload) {
+async function renderConnected(content, team, status, reload) {
   const stats = status.stats || {};
+  const [boards, events] = await Promise.all([
+    api.yougile.mirrorBoards(team.id).catch(() => []),
+    api.yougile.syncEvents(team.id).catch(() => []),
+  ]);
   content.innerHTML = `<div class="grid g4">
     <div class="stat"><div class="stat-label">Проектов</div><div class="stat-value mono">${stats.projects || 0}</div></div>
     <div class="stat"><div class="stat-label">Досок</div><div class="stat-value mono">${stats.boards || 0}</div></div>
     <div class="stat"><div class="stat-label">Колонок</div><div class="stat-value mono">${stats.columns || 0}</div></div>
     <div class="stat"><div class="stat-label">Задач</div><div class="stat-value mono">${stats.tasks || 0}</div></div>
-  </div><div class="card card-pad mt-20"><div class="card-head"><div class="card-title">Подключено: ${escapeHtml(status.company?.name || team.name)}</div><span class="pill ok"><span class="dot"></span>connected</span></div><div class="dim">Последняя синхронизация: ${escapeHtml(status.last_synced_at || "выполняется")}</div><div class="flex gap-8 mt-16"><button class="btn btn-primary" id="yougile-sync">Синхронизировать</button><button class="btn btn-ghost" id="yougile-disconnect">Отключить</button></div></div>`;
+  </div>
+  <section class="integration-band mt-20">
+    <div class="card-head"><div><div class="card-title">Подключено: ${escapeHtml(status.company?.name || team.name)}</div><div class="dim">Последняя синхронизация: ${escapeHtml(status.last_synced_at || "выполняется")}</div></div><span class="pill ${status.sync_errors ? "err" : "ok"}"><span class="dot"></span>${status.sync_errors ? `${status.sync_errors} ошибок` : "connected"}</span></div>
+    <div class="flex gap-8"><button class="btn btn-primary" id="yougile-sync">Синхронизировать</button><button class="btn btn-ghost" id="yougile-disconnect">Отключить</button></div>
+  </section>
+  <section class="integration-band mt-20">
+    <div class="card-head"><div><div class="card-title">Рабочая доска</div><div class="dim">Выберите board и сопоставьте колонки со статусами Grey Cardinal.</div></div></div>
+    <label>Board<select class="input mt-6" id="mirror-board">${boards.map((board) => `<option value="${board.id}" ${board.is_selected ? "selected" : ""}>${escapeHtml(board.name)}</option>`).join("")}</select></label>
+    <div id="column-map" class="column-map mt-16"></div>
+    <div class="flex gap-8 mt-16"><button class="btn btn-primary" id="save-board">Сохранить mapping</button><button class="btn btn-ghost" id="import-board">Импортировать задачи</button></div>
+    <div id="import-result" class="dim mt-12"></div>
+  </section>
+  <section class="integration-band mt-20">
+    <div class="card-title">Последние sync-события</div>
+    <div class="sync-log mt-12">${events.slice(0, 20).map((event) => `<div><span class="mono">${new Date(event.created_at).toLocaleString("ru-RU")}</span><span>${escapeHtml(event.direction)} · ${escapeHtml(event.action)}</span><span class="${event.status === "error" ? "accent-text" : "dim"}">${escapeHtml(event.error || event.status)}</span></div>`).join("") || '<div class="dim">Событий пока нет.</div>'}</div>
+  </section>`;
+  const boardSelect = content.querySelector("#mirror-board");
+  const columnMap = content.querySelector("#column-map");
+  const statuses = ["", "backlog", "todo", "in_progress", "blocked", "review", "done"];
+  const renderColumns = () => {
+    const board = boards.find((item) => item.id === boardSelect.value);
+    columnMap.innerHTML = (board?.columns || []).map((column) => `<div class="column-map-row"><span>${escapeHtml(column.name)}</span><select class="input" data-column="${column.id}">${statuses.map((value) => `<option value="${value}" ${value === (column.mapped_status || "") ? "selected" : ""}>${value || "Не сопоставлено"}</option>`).join("")}</select></div>`).join("");
+  };
+  boardSelect.onchange = renderColumns;
+  renderColumns();
+  content.querySelector("#save-board").onclick = async () => {
+    const mappings = Object.fromEntries([...columnMap.querySelectorAll("[data-column]")].map((select) => [select.dataset.column, select.value || null]));
+    await api.yougile.selectBoard(team.id, boardSelect.value, mappings);
+    toast("Доска и колонки сохранены");
+    await reload();
+  };
+  content.querySelector("#import-board").onclick = async () => {
+    const result = await api.yougile.importBoard(team.id);
+    content.querySelector("#import-result").textContent = `Импортировано: ${result.imported_tasks}, обновлено: ${result.updated_tasks}, пропущено: ${result.skipped_tasks}`;
+    toast("Импорт завершён");
+  };
   content.querySelector("#yougile-sync").onclick = async () => { await api.yougile.syncNow(team.id); toast("Синхронизация запущена"); };
   content.querySelector("#yougile-disconnect").onclick = async () => { await api.yougile.disconnect(team.id); await reload(); };
 }

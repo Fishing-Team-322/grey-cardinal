@@ -13,6 +13,7 @@ from brain_api.api.routes import (
     agents,
     daemon,
     debug,
+    grey_board,
     health,
     internal_audio,
     internal_telegram,
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(agents.router)
     app.include_router(daemon.router)
     app.include_router(debug.router)
+    app.include_router(grey_board.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
     app.include_router(meetings.router)

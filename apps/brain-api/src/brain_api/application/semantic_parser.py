@@ -54,6 +54,9 @@ class SemanticMessageInput:
     now: datetime
     sender_display_name: str | None = None
     team_members: list[str] = field(default_factory=list)
+    interaction_mode: str = "AUTO_BACKGROUND"
+    reply_to_text: str | None = None
+    reply_to_sender_display_name: str | None = None
 
 
 class SemanticParseFailed(RuntimeError):
@@ -112,7 +115,7 @@ class SemanticMessageParser:
                 payload, run.result.kind, fallback_used=False,
                 retry_count=run.retry_count, validation_error=run.validation_error,
             )
-            return self._merge_with_heuristic(payload, run.result.to_contract_dict())
+            return run.result.to_contract_dict()
 
         # 3. Fallback с ретраями (только если primary не справился).
         if resolved.fallback is not None:
@@ -124,7 +127,7 @@ class SemanticMessageParser:
                     payload, run.result.kind, fallback_used=True,
                     retry_count=run.retry_count, validation_error=run.validation_error,
                 )
-                return self._merge_with_heuristic(payload, run.result.to_contract_dict())
+                return run.result.to_contract_dict()
 
         # 4. Оба провайдера не дали валидного ответа — controlled failure.
         logger.warning(
@@ -205,24 +208,6 @@ class SemanticMessageParser:
             timezone=payload.team_timezone,
         )
 
-    def _merge_with_heuristic(self, payload: SemanticMessageInput, llm_result: dict) -> dict:
-        """Маленькие/локальные LLM часто помечают явные задачи/созвоны как noise.
-        Если LLM сказал noise/unknown/question, а эвристика уверенно видит
-        задачу или созвон — берём эвристику.
-        """
-        kind = llm_result.get("kind")
-        if kind not in ("noise", "unknown", "question"):
-            return llm_result
-        heur = self._heuristic(payload)
-        useful = ("task_candidate", "meeting_candidate", "status_update")
-        if heur["kind"] in useful and heur["confidence"] >= 0.6:
-            logger.info(
-                "LLM=%s overridden by heuristic=%s (team_id=%s)",
-                kind, heur["kind"], payload.team_id,
-            )
-            return heur
-        return llm_result
-
     def _build_prompt(self, payload: SemanticMessageInput) -> str:
         return build_semantic_prompt(
             message_text=payload.message_text,
@@ -230,6 +215,9 @@ class SemanticMessageParser:
             timezone=payload.team_timezone,
             sender_display_name=payload.sender_display_name,
             team_members=payload.team_members,
+            interaction_mode=payload.interaction_mode,
+            reply_to_text=payload.reply_to_text,
+            reply_to_sender_display_name=payload.reply_to_sender_display_name,
         )
 
     def _log_metrics(

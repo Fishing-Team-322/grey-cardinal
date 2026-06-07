@@ -30,6 +30,7 @@ class FakeYouGile:
             "column": [],
             "task": [],
             "webhook": [],
+            "task_update": [],
         }
         self.rate_limit_remaining = 50
 
@@ -89,7 +90,9 @@ class FakeYouGile:
         return t
 
     async def update_task(self, task_id, **fields: Any):
-        return {"id": task_id, **fields}
+        update = {"id": task_id, **fields}
+        self.created["task_update"].append(update)
+        return update
 
     async def create_webhook(self, url, event):  # noqa: ANN001
         wh = {"id": f"wh-{len(self.created['webhook']) + 1}", "url": url, "event": event}
