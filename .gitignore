@@ -70,4 +70,5 @@ apps/frontend/public/downloads/*.exe
 apps/frontend/public/downloads/*.msi
 apps/frontend/public/downloads/*.zip
 !apps/frontend/public/downloads/GreyCardinalAgentSetup.exe
+!apps/frontend/public/downloads/GreyCardinalAgent-x64.msi
 proriv/

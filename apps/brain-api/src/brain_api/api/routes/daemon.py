@@ -34,6 +34,7 @@ from brain_api.application.rendering import proposal_keyboard
 from brain_api.application.semantic_parser import SemanticMessageInput
 from brain_api.config import get_settings
 from brain_api.container import Container
+from brain_api.domain.enums import TaskSource
 from brain_api.infrastructure.db import models as m
 
 logger = logging.getLogger(__name__)
@@ -224,7 +225,7 @@ async def daemon_v2_upload(
     if not text:
         return {"ok": True, "transcript": "", "proposal_created": False}
 
-    result = await ingest_team_text(container, team_id, text, source="daemon_audio")
+    result = await ingest_team_text(container, team_id, text, source=TaskSource.meeting_transcript)
     return {"ok": True, "transcript": text[:200], **result}
 
 
@@ -250,7 +251,9 @@ async def _transcribe_audio(content: bytes) -> str:
         return ""
 
 
-async def ingest_team_text(container: Container, team_id: UUID, text: str, source: str) -> dict:
+async def ingest_team_text(
+    container: Container, team_id: UUID, text: str, source: TaskSource
+) -> dict:
     """Прогнать текст через v2-семантику команды и при task_candidate создать
     proposal + отправить его в Telegram-чат команды с кнопками подтверждения."""
     from brain_api.api.routes.internal_telegram import (
@@ -300,7 +303,7 @@ async def ingest_team_text(container: Container, team_id: UUID, text: str, sourc
             return {"kind": kind, "proposal_created": False, "duplicate": duplicate.public_id}
 
         proposal = m.TaskProposalModel(
-            team_id=team.id, source=source, title=title, description=task.get("description"),
+            team_id=team.id, source=source.value, title=title, description=task.get("description"),
             assignee_text=assignee_text, assignee_id=assignee.id if assignee else None,
             deadline=deadline, deadline_timezone=team.timezone,
             priority=task.get("priority") or "medium", confidence=conf,
