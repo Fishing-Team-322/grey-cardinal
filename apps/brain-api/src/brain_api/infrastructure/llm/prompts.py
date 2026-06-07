@@ -69,6 +69,33 @@ SEMANTIC_SYSTEM_PROMPT = (
 )
 
 
+def build_semantic_prompt(
+    message_text: str,
+    now: datetime,
+    timezone: str,
+    sender_display_name: str | None = None,
+    team_members: list[str] | None = None,
+) -> str:
+    """Единый промпт semantic-классификатора (используется и в проде, и в eval).
+
+    Контекст содержит team_timezone/now/sender_display_name/team_members, как
+    требует ТЗ, чтобы модель верно интерпретировала даты и исполнителей.
+    """
+    context = {
+        "team_timezone": timezone,
+        "now": now.isoformat(),
+        "sender_display_name": sender_display_name,
+        "team_members": team_members or [],
+    }
+    return (
+        f"{SEMANTIC_SYSTEM_PROMPT}\n\n"
+        "Контекст (JSON):\n"
+        f"{json.dumps(context, ensure_ascii=False)}\n\n"
+        "Сообщение для классификации:\n"
+        f"{message_text}"
+    )
+
+
 def build_user_prompt(
     text: str,
     now: datetime,

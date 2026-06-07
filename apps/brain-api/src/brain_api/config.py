@@ -140,9 +140,8 @@ class Settings(BaseSettings):
             return False
         if not (self.llm_fallback_base_url and self.llm_fallback_model):
             return False
-        if self.llm_fallback_provider == "external_api" and not self.llm_fallback_api_key:
-            return False
-        return True
+        needs_key = self.llm_fallback_provider == "external_api"
+        return not (needs_key and not self.llm_fallback_api_key)
 
     @property
     def llm_enabled(self) -> bool:
@@ -152,7 +151,9 @@ class Settings(BaseSettings):
             return bool(self.effective_llm_base_url and self.effective_llm_model)
         if self.llm_provider == "external_api":
             return bool(
-                self.effective_llm_base_url and self.effective_llm_api_key and self.effective_llm_model
+                self.effective_llm_base_url
+                and self.effective_llm_api_key
+                and self.effective_llm_model
             )
         return False
 

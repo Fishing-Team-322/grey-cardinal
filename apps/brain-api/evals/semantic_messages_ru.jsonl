@@ -1,0 +1,57 @@
+{"text":"Петя, подготовь оплату до четверга","expected_kind":"task_candidate"}
+{"text":"Нужно срочно пофиксить баг с авторизацией на проде","expected_kind":"task_candidate"}
+{"text":"Оля, сделай макет лендинга к понедельнику","expected_kind":"task_candidate"}
+{"text":"Давайте обновим документацию по API до конца недели","expected_kind":"task_candidate"}
+{"text":"Подготовь отчёт по продажам за май и пришли мне","expected_kind":"task_candidate"}
+{"text":"Надо задеплоить новую версию сегодня вечером","expected_kind":"task_candidate"}
+{"text":"Серёж, свяжись с подрядчиком и уточни сроки поставки","expected_kind":"task_candidate"}
+{"text":"Проверь, пожалуйста, договор с юристом до завтра","expected_kind":"task_candidate"}
+{"text":"Нужно настроить бэкапы базы данных на следующей неделе","expected_kind":"task_candidate"}
+{"text":"Маша, выстави счёт клиенту ООО Ромашка","expected_kind":"task_candidate"}
+{"text":"Возьми на себя ревью пулреквеста по платежам","expected_kind":"task_candidate"}
+{"text":"Допиши тесты на модуль уведомлений до пятницы","expected_kind":"task_candidate"}
+{"text":"Закажи новые ноутбуки для отдела дизайна","expected_kind":"task_candidate"}
+{"text":"Обнови сертификат SSL, он истекает через неделю","expected_kind":"task_candidate"}
+{"text":"Нужно подготовить презентацию для инвесторов к среде","expected_kind":"task_candidate"}
+{"text":"Давайте завтра созвонимся в 18:00","expected_kind":"meeting_candidate"}
+{"text":"Предлагаю встретиться в понедельник в 11 обсудить роадмап","expected_kind":"meeting_candidate"}
+{"text":"Созвон по проекту перенесём на четверг 15:30","expected_kind":"meeting_candidate"}
+{"text":"Кто свободен сегодня в 16:00 для короткого митинга?","expected_kind":"meeting_candidate"}
+{"text":"Давайте назначим ретро на пятницу после обеда","expected_kind":"meeting_candidate"}
+{"text":"Встреча с заказчиком завтра в 10 утра в зуме","expected_kind":"meeting_candidate"}
+{"text":"Предлагаю собраться на планёрку в 9:30 завтра","expected_kind":"meeting_candidate"}
+{"text":"Давай созвонимся через час обсудить правки","expected_kind":"meeting_candidate"}
+{"text":"проверил интеграцию, всё готово","expected_kind":"daily_report"}
+{"text":"За сегодня закрыл три задачи по верстке и поправил баги","expected_kind":"daily_report"}
+{"text":"Сделал ревью, смержил ветку, задеплоил на стейдж","expected_kind":"daily_report"}
+{"text":"Итоги дня: настроил CI, осталось добавить линтер","expected_kind":"daily_report"}
+{"text":"Готово, выкатил релиз 2.1 в прод, мониторю метрики","expected_kind":"daily_report"}
+{"text":"Сегодня доделал отчёт и отправил его клиенту","expected_kind":"daily_report"}
+{"text":"Закончил рефакторинг модуля оплат, тесты зелёные","expected_kind":"daily_report"}
+{"text":"За день разобрал бэклог и обновил доску в YouGile","expected_kind":"daily_report"}
+{"text":"я завтра на больничном","expected_kind":"absence_notice"}
+{"text":"Буду в отпуске с 10 по 17 июня","expected_kind":"absence_notice"}
+{"text":"Сегодня работаю из дома, плохо себя чувствую","expected_kind":"absence_notice"}
+{"text":"Отпрошусь завтра на полдня, надо к врачу","expected_kind":"absence_notice"}
+{"text":"Меня не будет в пятницу, семейные дела","expected_kind":"absence_notice"}
+{"text":"Ушёл на обед, вернусь через час","expected_kind":"absence_notice"}
+{"text":"Взял отгул в понедельник","expected_kind":"status_update"}
+{"text":"Начал работать над задачей по платежам","expected_kind":"status_update"}
+{"text":"Задача по лендингу в работе, закончу к вечеру","expected_kind":"status_update"}
+{"text":"Я застрял на интеграции, нужна помощь по API","expected_kind":"status_update"}
+{"text":"Перевёл карточку с дизайном в ревью","expected_kind":"status_update"}
+{"text":"Жду ответ от заказчика, пока не могу продолжить","expected_kind":"status_update"}
+{"text":"А как мы будем хранить токены пользователей?","expected_kind":"question"}
+{"text":"Кто отвечает за деплой на прод?","expected_kind":"question"}
+{"text":"Можете подсказать, где лежит документация по YouGile?","expected_kind":"question"}
+{"text":"Какой дедлайн у задачи по отчётам?","expected_kind":"question"}
+{"text":"ок","expected_kind":"noise"}
+{"text":"спасибо","expected_kind":"noise"}
+{"text":"+","expected_kind":"noise"}
+{"text":"принял","expected_kind":"noise"}
+{"text":"👍","expected_kind":"noise"}
+{"text":"да","expected_kind":"noise"}
+{"text":"ахаха ну вы даёте","expected_kind":"noise"}
+{"text":"кстати видели какой вчера был матч","expected_kind":"noise"}
+{"text":"ну такое себе если честно","expected_kind":"unknown"}
+{"text":"да, сделаю сегодня","expected_kind":"status_update"}

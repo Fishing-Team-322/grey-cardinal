@@ -7,7 +7,7 @@ UX: все взаимодействия через inline-кнопки. Кома
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -719,6 +719,14 @@ async def _try_v2_semantic_message(
         session.add(message)
         await session.flush()
 
+        member_names = list(
+            await session.scalars(
+                select(m.UserModel.display_name)
+                .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                .where(m.TeamMemberModel.team_id == team.id)
+            )
+        )
+
         try:
             parsed = await container.semantic_parser.parse(
                 SemanticMessageInput(
@@ -727,6 +735,8 @@ async def _try_v2_semantic_message(
                     sender_user_id=sender.id,
                     team_timezone=team.timezone,
                     now=now,
+                    sender_display_name=sender.display_name,
+                    team_members=member_names,
                 )
             )
         except Exception as exc:
@@ -1048,6 +1058,7 @@ def _parse_dt(value, timezone: str = "UTC"):
     except ValueError:
         return None
     if parsed.tzinfo is None:
+        tz: tzinfo
         try:
             tz = ZoneInfo(timezone)
         except Exception:

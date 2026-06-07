@@ -9,7 +9,9 @@ from brain_api.application.semantic_parser import SemanticMessageInput, Semantic
 class _Provider:
     config = type("Config", (), {"max_retries": 0})()
 
-    async def complete_json(self, prompt: str, schema_name: str) -> dict:
+    async def complete_json(
+        self, prompt: str, schema_name: str, *, json_schema: dict | None = None
+    ) -> dict:
         assert schema_name == "semantic_message_v2"
         assert "Europe/Moscow" in prompt
         return {
@@ -22,6 +24,11 @@ class _Provider:
 class _Factory:
     async def for_team(self, team_id):
         return _Provider()
+
+    async def resolve_for_team(self, team_id):
+        from brain_api.infrastructure.llm.providers import ResolvedLLM
+
+        return ResolvedLLM(primary=_Provider(), fallback=None)
 
 
 @pytest.mark.asyncio

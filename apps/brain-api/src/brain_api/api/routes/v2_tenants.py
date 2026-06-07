@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import secrets
 import string
-import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -23,6 +22,7 @@ from brain_api.api.rbac import (
     require_team_role,
 )
 from brain_api.api.routes.accounts import CurrentUser, get_db
+from brain_api.application.llm.health import llm_health_report
 from brain_api.application.use_cases.member_reports import member_report_payload
 from brain_api.application.use_cases.team_gamification import (
     gamification_profile_payload,
@@ -1176,31 +1176,15 @@ async def team_llm_health(
 ) -> dict:
     ctx = await build_tenant_context(current_user.id, session)
     require_team_role(ctx, team_id, "manager")
-    started = time.perf_counter()
     try:
-        provider = await container.llm_provider_factory.for_team(team_id)
-        data = await provider.complete_json(
-            'Верни JSON {"ok": true, "kind": "healthcheck"} без markdown.',
-            schema_name="healthcheck",
-        )
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        config = getattr(provider, "config", None)
-        if data.get("ok") is not True or data.get("kind") != "healthcheck":
-            raise ValueError("LLM returned unexpected health JSON")
-        return {
-            "status": "ok",
-            "provider": getattr(config, "provider", None),
-            "model": getattr(config, "model", None),
-            "latency_ms": latency_ms,
-        }
-    except Exception as exc:
-        config = getattr(locals().get("provider", None), "config", None)
+        resolved = await container.llm_provider_factory.resolve_for_team(team_id)
+    except Exception as exc:  # noqa: BLE001 — провайдер не настроен для команды
         return {
             "status": "error",
-            "provider": getattr(config, "provider", None),
-            "model": getattr(config, "model", None),
-            "message": str(exc),
+            "primary": {"error": "not_configured", "message": str(exc)},
+            "fallback": {"enabled": container.settings.fallback_configured},
         }
+    return await llm_health_report(resolved)
 
 
 class BotSettingsRequest(BaseModel):

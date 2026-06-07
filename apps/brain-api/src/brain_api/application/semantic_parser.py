@@ -17,7 +17,6 @@ Pipeline:
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,7 +27,7 @@ from pydantic import ValidationError
 from brain_api.application.llm.noise_prefilter import NoisePreFilter
 from brain_api.application.llm.schema import SemanticParseResult, semantic_json_schema
 from brain_api.infrastructure.llm.errors import LLMError
-from brain_api.infrastructure.llm.prompts import SEMANTIC_SYSTEM_PROMPT
+from brain_api.infrastructure.llm.prompts import build_semantic_prompt
 from brain_api.infrastructure.llm.providers import LLMProvider, ResolvedLLM
 
 logger = logging.getLogger(__name__)
@@ -59,6 +58,15 @@ class SemanticMessageInput:
 
 class SemanticParseFailed(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _ProviderRun:
+    """Итог одного прогона провайдера (с ретраями) для метрик."""
+
+    result: SemanticParseResult | None
+    retry_count: int
+    validation_error: bool
 
 
 class SemanticMessageParser:
@@ -98,25 +106,35 @@ class SemanticMessageParser:
         prompt = self._build_prompt(payload)
 
         # 2. Primary с ретраями.
-        result = await self._run_provider(resolved.primary, prompt, payload, "primary")
-        if result is not None:
-            return self._merge_with_heuristic(payload, result.to_contract_dict())
+        run = await self._run_provider(resolved.primary, prompt, payload, "primary")
+        if run.result is not None:
+            self._log_metrics(
+                payload, run.result.kind, fallback_used=False,
+                retry_count=run.retry_count, validation_error=run.validation_error,
+            )
+            return self._merge_with_heuristic(payload, run.result.to_contract_dict())
 
         # 3. Fallback с ретраями (только если primary не справился).
         if resolved.fallback is not None:
-            result = await self._run_provider(
+            run = await self._run_provider(
                 resolved.fallback, prompt, payload, "fallback"
             )
-            if result is not None:
-                self._log_metrics(payload, result.kind, fallback_used=True)
-                return self._merge_with_heuristic(payload, result.to_contract_dict())
+            if run.result is not None:
+                self._log_metrics(
+                    payload, run.result.kind, fallback_used=True,
+                    retry_count=run.retry_count, validation_error=run.validation_error,
+                )
+                return self._merge_with_heuristic(payload, run.result.to_contract_dict())
 
         # 4. Оба провайдера не дали валидного ответа — controlled failure.
         logger.warning(
             "Semantic parse failed for team_id=%s (primary+fallback exhausted)",
             payload.team_id,
         )
-        self._log_metrics(payload, "semantic_parse_failed", fallback_used=True, error=True)
+        self._log_metrics(
+            payload, "semantic_parse_failed", fallback_used=True, error=True,
+            retry_count=run.retry_count, validation_error=run.validation_error,
+        )
         return {
             "kind": "semantic_parse_failed",
             "confidence": 0.0,
@@ -141,16 +159,21 @@ class SemanticMessageParser:
         prompt: str,
         payload: SemanticMessageInput,
         role: str,
-    ) -> SemanticParseResult | None:
+    ) -> _ProviderRun:
         max_retries = getattr(getattr(provider, "config", None), "max_retries", 2) or 0
         json_schema = semantic_json_schema()
         last_error: Exception | None = None
+        validation_error = False
         for attempt in range(max_retries + 1):
             try:
                 raw = await provider.complete_json(
                     prompt, "semantic_message_v2", json_schema=json_schema
                 )
-                return SemanticParseResult.model_validate(raw)
+                return _ProviderRun(
+                    result=SemanticParseResult.model_validate(raw),
+                    retry_count=attempt,
+                    validation_error=validation_error,
+                )
             except LLMError as exc:
                 # Сетевые/HTTP/JSON ошибки провайдера — ретраим, затем fallback.
                 last_error = exc
@@ -160,6 +183,7 @@ class SemanticMessageParser:
                 )
             except ValidationError as exc:
                 last_error = exc
+                validation_error = True
                 logger.warning(
                     "LLM %s schema validation failed (team_id=%s attempt=%s): %s",
                     role, payload.team_id, attempt + 1, exc,
@@ -168,7 +192,9 @@ class SemanticMessageParser:
             "LLM %s exhausted retries (team_id=%s): %s",
             role, payload.team_id, last_error,
         )
-        return None
+        return _ProviderRun(
+            result=None, retry_count=max_retries, validation_error=validation_error
+        )
 
     def _heuristic(self, payload: SemanticMessageInput) -> dict:
         from brain_api.application.heuristic_semantic import classify_message
@@ -185,7 +211,6 @@ class SemanticMessageParser:
         задачу или созвон — берём эвристику.
         """
         kind = llm_result.get("kind")
-        self._log_metrics(payload, str(kind), fallback_used=False)
         if kind not in ("noise", "unknown", "question"):
             return llm_result
         heur = self._heuristic(payload)
@@ -199,18 +224,12 @@ class SemanticMessageParser:
         return llm_result
 
     def _build_prompt(self, payload: SemanticMessageInput) -> str:
-        context = {
-            "team_timezone": payload.team_timezone,
-            "now": payload.now.isoformat(),
-            "sender_display_name": payload.sender_display_name,
-            "team_members": payload.team_members,
-        }
-        return (
-            f"{SEMANTIC_SYSTEM_PROMPT}\n\n"
-            "Контекст (JSON):\n"
-            f"{json.dumps(context, ensure_ascii=False)}\n\n"
-            "Сообщение для классификации:\n"
-            f"{payload.message_text}"
+        return build_semantic_prompt(
+            message_text=payload.message_text,
+            now=payload.now,
+            timezone=payload.team_timezone,
+            sender_display_name=payload.sender_display_name,
+            team_members=payload.team_members,
         )
 
     def _log_metrics(
@@ -220,8 +239,18 @@ class SemanticMessageParser:
         *,
         fallback_used: bool,
         error: bool = False,
+        retry_count: int = 0,
+        validation_error: bool = False,
     ) -> None:
+        # Безопасные структурированные метрики: НЕ логируем текст сообщения
+        # (кроме debug) и тем более API-ключи/Authorization.
         metrics_logger.info(
-            "semantic_parse team_id=%s kind=%s fallback_used=%s error=%s",
-            payload.team_id, kind, fallback_used, error,
+            "semantic_parse team_id=%s semantic_kind=%s fallback_used=%s error=%s "
+            "validation_error=%s retry_count=%s",
+            payload.team_id, kind, fallback_used, error, validation_error, retry_count,
         )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "semantic_parse text=%r (team_id=%s)",
+                payload.message_text, payload.team_id,
+            )

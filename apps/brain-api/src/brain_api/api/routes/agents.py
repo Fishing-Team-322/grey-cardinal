@@ -51,7 +51,10 @@ def _as_utc(dt: datetime) -> datetime:
 
 def _agent_view(device: m.DeviceModel, now: datetime) -> dict:
     last_seen = device.last_seen_at
-    online = bool(last_seen) and (now - _as_utc(last_seen)).total_seconds() <= ONLINE_WINDOW_SECONDS
+    online = (
+        last_seen is not None
+        and (now - _as_utc(last_seen)).total_seconds() <= ONLINE_WINDOW_SECONDS
+    )
     return {
         "agent_id": str(device.id),
         "device_name": device.device_name,

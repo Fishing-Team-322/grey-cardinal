@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -72,7 +73,9 @@ async def member_report_payload(
     on_time = [
         task
         for task in completed_with_deadline
-        if _as_utc(task.completed_at) <= _as_utc(task.deadline)
+        if task.completed_at is not None
+        and task.deadline is not None
+        and _as_utc(task.completed_at) <= _as_utc(task.deadline)
     ]
     durations = [
         max(0.0, (_as_utc(task.completed_at) - _as_utc(task.created_at)).total_seconds() / 3600)
@@ -281,7 +284,7 @@ def render_member_report(report: dict[str, Any]) -> str:
 
 
 async def _source_authors(
-    session: AsyncSession, tasks: list[m.TaskModel]
+    session: AsyncSession, tasks: Sequence[m.TaskModel]
 ) -> dict[UUID | None, str | None]:
     message_ids = [task.source_message_id for task in tasks if task.source_message_id is not None]
     if not message_ids:
@@ -291,7 +294,7 @@ async def _source_authors(
         .outerjoin(m.UserModel, m.UserModel.id == m.ChatMessageModel.sender_id)
         .where(m.ChatMessageModel.id.in_(message_ids))
     )
-    return dict(rows.all())
+    return {row[0]: row[1] for row in rows.all()}
 
 
 def _task_payload(

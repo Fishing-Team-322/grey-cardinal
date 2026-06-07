@@ -104,7 +104,7 @@ async def handle_task_status_callback(container, data: str, event) -> ActionsRes
             result = await UpdateTaskStatus(
                 uow, container.board, container.event_publisher, container.config
             ).execute(command, [str(task_id)], event.message.chat_id)
-        text = result.actions[0].text if result.actions else "Статус обновлён"
+        text = (result.actions[0].text if result.actions else None) or "Статус обновлён"
         return ActionsResponse(actions=[_ans(cq, "Готово"), _edit(event, text)])
 
     if action == CB_TS_REASON:
