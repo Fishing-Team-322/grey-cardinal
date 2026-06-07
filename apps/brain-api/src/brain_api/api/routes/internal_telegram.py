@@ -749,6 +749,7 @@ async def _try_v2_semantic_message(
             message_thread_id=event.message_thread_id,
             text=event.text,
             raw_json=event.raw or {},
+            message_thread_id=event.message_thread_id,
         )
         session.add(message)
         await session.flush()

@@ -93,6 +93,7 @@ class ChatMessage:
     text: str
     sender_id: UUID | None = None
     raw_json: dict[str, Any] = field(default_factory=dict)
+    message_thread_id: int | None = None
     created_at: datetime | None = None
 
 

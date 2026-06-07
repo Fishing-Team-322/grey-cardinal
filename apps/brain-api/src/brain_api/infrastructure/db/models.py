@@ -177,6 +177,7 @@ class ChatMessageModel(TimestampMixin, Base):
     message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     raw_json: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
+    message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class TaskProposalModel(TimestampMixin, Base):
@@ -234,6 +235,11 @@ class TaskModel(TimestampMixin, Base):
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deadline_timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
     source_message_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("chat_messages.id"), nullable=True
     )
@@ -706,6 +712,180 @@ class YouGileSyncLogModel(Base):
     )
 
 
+class YouGileConnectionModel(TimestampMixin, Base):
+    __tablename__ = "yougile_connections"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="yougile")
+    credentials_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class YouGileWorkspaceModel(Base):
+    __tablename__ = "yougile_workspaces"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "external_id", name="uq_yougile_workspace_external"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("yougile_connections.id"), nullable=False
+    )
+    external_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class YouGileProjectModel(Base):
+    __tablename__ = "yougile_projects"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "external_id", name="uq_yougile_project_external"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("yougile_connections.id"), nullable=False
+    )
+    workspace_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("yougile_workspaces.id"), nullable=True
+    )
+    external_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class YouGileBoardModel(Base):
+    __tablename__ = "yougile_boards"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "external_id", name="uq_yougile_board_external"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("yougile_connections.id"), nullable=False
+    )
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("yougile_projects.id"), nullable=True
+    )
+    external_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class YouGileColumnModel(Base):
+    __tablename__ = "yougile_columns"
+    __table_args__ = (
+        UniqueConstraint("board_id", "external_id", name="uq_yougile_column_external"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    board_id: Mapped[UUID] = mapped_column(ForeignKey("yougile_boards.id"), nullable=False)
+    external_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    mapped_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExternalTaskLinkModel(Base):
+    __tablename__ = "external_task_links"
+    __table_args__ = (
+        UniqueConstraint("provider", "external_task_id", name="uq_external_task_provider_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    external_board_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_column_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_task_id: Mapped[str] = mapped_column(Text, nullable=False)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_status: Mapped[str] = mapped_column(Text, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class SyncEventModel(Base):
+    __tablename__ = "sync_events"
+    __table_args__ = (
+        Index("ix_sync_events_team_created", "team_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AiInboxItemModel(TimestampMixin, Base):
+    __tablename__ = "ai_inbox_items"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    item_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    parsed_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    proposed_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linked_task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    decided_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentRecommendationModel(TimestampMixin, Base):
+    __tablename__ = "agent_recommendations"
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID | None] = mapped_column(ForeignKey("companies.id"), nullable=True)
+    team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+    action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class TelegramTopicBindingModel(TimestampMixin, Base):
+    __tablename__ = "telegram_topic_bindings"
+    __table_args__ = (
+        UniqueConstraint("telegram_chat_id", "message_thread_id", name="uq_telegram_topic_binding"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    telegram_chat_id: Mapped[UUID] = mapped_column(ForeignKey("telegram_chats.id"), nullable=False)
+    message_thread_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    board_id: Mapped[UUID | None] = mapped_column(ForeignKey("yougile_boards.id"), nullable=True)
+    source_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 V2TelegramChatModel = TelegramChatModel
 V2TaskModel = TaskModel
 V2TaskProposalModel = TaskProposalModel
@@ -769,6 +949,7 @@ class AbsencePeriodModel(TimestampMixin, Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source_message_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    delegate_to_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 V2BoardCardModel = BoardCardModel

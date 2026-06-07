@@ -555,6 +555,44 @@ h3 { font-size: 22px; }
 .kanban { display:grid; grid-template-columns:repeat(3,minmax(220px,1fr)); gap:12px; overflow:auto; }
 .kanban-col { min-height:260px; padding:14px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r); }
 .sidebar .role-chip { text-decoration:none; }
+.page-wide { max-width: 1500px; }
+.grey-cockpit { display:grid; grid-template-columns: 170px minmax(0,1fr) 300px; gap:16px; align-items:start; }
+.board-switcher { position:sticky; top:84px; display:grid; gap:6px; padding:10px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
+.board-switcher a { padding:9px 10px; border-radius:8px; color:var(--text-dim); font-weight:600; }
+.board-switcher a.active, .board-switcher a:hover { background:var(--accent-soft); color:var(--text); }
+.board-main { min-width:0; display:grid; gap:14px; }
+.healthbar { display:flex; flex-wrap:wrap; gap:8px; padding:12px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
+.agent-board { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(260px,1fr); gap:12px; overflow-x:auto; padding-bottom:8px; }
+.agent-col { min-height:560px; padding:12px; border:1px solid var(--line); border-radius:var(--r); background:var(--bg-2); }
+.agent-col-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; color:var(--text-dim); }
+.task-evidence-card { padding:13px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.task-meta { margin-top:7px; color:var(--text-dim); font-size:13px; }
+.evidence-line { display:grid; grid-template-columns:auto 1fr auto 1fr; gap:6px 8px; margin-top:10px; font-size:12px; color:var(--text-faint); }
+.evidence-line b { color:var(--text-dim); }
+.signal-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.signal-list span { padding:3px 7px; border-radius:7px; border:1px solid rgba(217,164,65,.3); color:#f0cd88; background:var(--warn-bg); font-size:12px; }
+.source-text { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text-dim); }
+.agent-log { display:grid; gap:5px; margin-top:8px; font-size:12px; color:var(--text-dim); }
+.agent-log span { color:var(--text-faint); margin-right:8px; font-family:'JetBrains Mono',monospace; }
+.card-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.agent-rail { position:sticky; top:84px; display:grid; gap:10px; padding:12px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
+.rail-title { font-weight:700; }
+.recommendation { padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--bg-2); }
+.recommendation.high { border-color:rgba(229,72,77,.35); }
+.recommendation.medium { border-color:rgba(217,164,65,.35); }
+.recommendation p { margin:8px 0 10px; color:var(--text-dim); font-size:13px; }
+.inbox-list { display:grid; gap:12px; max-width:900px; }
+.json-box { margin-top:12px; padding:12px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text-dim); overflow:auto; }
+.setup-steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+.board-row { width:100%; display:flex; justify-content:space-between; gap:10px; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); text-align:left; }
+.board-row.selected { border-color:var(--accent-line); background:var(--accent-soft); }
+.event-list { display:grid; gap:8px; color:var(--text-dim); }
+.org-map { display:grid; gap:14px; }
+.org-root { width:max-content; padding:16px 20px; border:1px solid var(--accent-line); border-radius:8px; background:var(--accent-soft); font-weight:800; }
+.org-team { display:grid; grid-template-columns:1.5fr repeat(3,1fr); gap:12px; align-items:center; padding:14px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.org-team.green { border-color:rgba(63,182,96,.35); }
+.org-team.yellow { border-color:rgba(217,164,65,.35); }
+.org-team.red { border-color:rgba(229,72,77,.45); }
 @media (max-width:720px) {
   .shell { display:block; }
   .sidebar {
@@ -577,4 +615,8 @@ h3 { font-size: 22px; }
   .topbar { position:sticky; height:60px; padding:10px 16px; }
   .page { padding:20px 16px; }
   .kanban { grid-template-columns:1fr; }
+  .grey-cockpit { grid-template-columns:1fr; }
+  .board-switcher, .agent-rail { position:static; }
+  .agent-board { grid-auto-flow:row; grid-auto-columns:auto; }
+  .org-team { grid-template-columns:1fr; }
 }

@@ -76,6 +76,12 @@ export const api = {
     overview(id) {
       return request("GET", `/api/companies/${id}/overview`);
     },
+    map(id) {
+      return request("GET", `/api/companies/${id}/map`);
+    },
+    recommendations(id) {
+      return request("GET", `/api/companies/${id}/recommendations`);
+    },
   },
   teams: {
     create(companyId, name, timezone) {

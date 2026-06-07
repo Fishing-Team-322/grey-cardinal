@@ -10,6 +10,9 @@
     daemon: '<path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8"/>',
     deploy: '<path d="M4 17l6-6-6-6M12 19h8"/>',
     cog: '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/>',
+    board: '<path d="M3 5h18M7 5v14M14 5v14M3 19h18M3 5v14h18V5"/>',
+    inbox: '<path d="M4 4h16l2 10h-5a5 5 0 0 1-10 0H2zM8 4l-2 10M16 4l2 10"/>',
+    map: '<path d="M12 3v6M6 13h12M6 13v6M18 13v6M4 19h4M10 9h4M16 19h4"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
     board: '<path d="M3 3h7v18H3zM14 3h7v10h-7zM14 17h7v4h-7z"/>',
@@ -72,6 +75,36 @@
         ${item("/app/integrations/daemon", "daemon", "Daemon", "/app/integrations/daemon", ["director", "manager", "employee"])}
       </div>
       <div class="sidebar-foot">${item("/app/deploy", "deploy", "Деплой", "/app/deploy", ["director"])}</div>`;
+  };
+
+  const extendSidebar = (sidebar, user, role, item) => {
+    const teamId = user.teams?.[0]?.id;
+    const companyId = user.companies?.[0]?.id;
+    const firstGroup = sidebar.querySelector(".nav-group");
+    if (firstGroup && teamId) {
+      firstGroup.insertAdjacentHTML("beforeend", `
+        ${item("/app/teams/:id/board", "board", "Grey Board", `/app/teams/${teamId}/board`, ["director", "manager", "employee"])}
+        ${item("/app/teams/:id/ai-inbox", "inbox", "AI Inbox", `/app/teams/${teamId}/ai-inbox`, ["director", "manager"])}
+        ${item("/app/teams/:id/setup", "cog", "Setup Wizard", `/app/teams/${teamId}/setup`, ["director", "manager"])}
+        ${item("/app/teams/:id/yougile", "plug", "YouGile Sync", `/app/teams/${teamId}/yougile`, ["director", "manager"])}
+        ${item("/app/teams/:id/people", "team", "People", `/app/teams/${teamId}/people`, ["director", "manager", "employee"])}
+      `);
+    }
+    if (firstGroup && companyId) {
+      firstGroup.insertAdjacentHTML("beforeend", item("/app/companies/:id/map", "map", "Team Map", `/app/companies/${companyId}/map`, ["director"]));
+    }
+  };
+
+  const originalSidebar = window.gcSidebar;
+  window.gcSidebar = (user, role) => {
+    originalSidebar(user, role);
+    const sidebar = document.querySelector(".sidebar");
+    if (!sidebar) return;
+    const item = (pattern, icon, label, href, roles) =>
+      roles.includes(role)
+        ? `<a class="nav-item" data-route="${pattern}" href="${href}">${window.gcIcon(icon)}<span>${label}</span></a>`
+        : "";
+    extendSidebar(sidebar, user, role, item);
   };
 
   function firstTeam(user) {
