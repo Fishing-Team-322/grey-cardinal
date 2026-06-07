@@ -9,6 +9,9 @@
     }
 
     handle /downloads/* {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        header Content-Disposition "attachment"
+        header Content-Type "application/octet-stream"
         file_server
     }
 
