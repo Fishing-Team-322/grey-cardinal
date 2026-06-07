@@ -205,7 +205,6 @@ async def handle_pending_meeting_time(
 
     team = await session.get(m.TeamModel, meeting.team_id)
     meeting.scheduled_at = scheduled
-    meeting.started_at = scheduled
     meta = dict(meeting.metadata_json or {})
     meta.pop("awaiting_time_from", None)
     meeting.metadata_json = meta

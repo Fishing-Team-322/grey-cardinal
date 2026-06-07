@@ -32,6 +32,7 @@ from brain_api.application.rendering import (
     proposal_keyboard,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
+from brain_api.application.task_status_service import TaskStatusService
 from brain_api.application.telemost_intent import detect_call_intent
 from brain_api.application.use_cases import yandex_telemost as telemost_svc
 from brain_api.application.use_cases.confirm_task import ConfirmTask
@@ -79,9 +80,10 @@ from brain_api.application.use_cases.team_settings import (
     is_settings_callback,
     open_settings,
 )
-from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.config import get_settings
 from brain_api.container import Container
+from brain_api.domain.enums import TaskStatus
+from brain_api.domain.services import format_public_id, parse_public_id, status_for_command
 from brain_api.infrastructure.db import models as m
 from brain_api.integrations.yandex_telemost import YandexTelemostError
 from grey_cardinal_contracts import (
@@ -234,6 +236,11 @@ _YOUGILE_SETUP_TEXT = (
     "Ключ API будет получен и зашифрован автоматически."
 )
 
+_UNBOUND_TEAM_TEXT = (
+    "Этот чат ещё не привязан к команде Grey Cardinal.\n"
+    "Создайте bind-code в кабинете команды и выполните /bind_team CODE."
+)
+
 
 class TelegramLinkRequest(BaseModel):
     code: str
@@ -308,23 +315,21 @@ async def bind_team_chat(
     now = datetime.now(UTC)
     code = payload.code.strip().upper()
     async with container.session_factory() as session:
-        teams = (await session.execute(select(m.TeamModel))).scalars().all()
-        team = None
-        for candidate in teams:
-            config = candidate.board_config or {}
-            if str(config.get("telegram_bind_code", "")).upper() != code:
-                continue
-            expires_raw = config.get("telegram_bind_expires_at")
-            if expires_raw:
-                expires_at = datetime.fromisoformat(str(expires_raw))
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=UTC)
-                if expires_at < now:
-                    return _text(payload.chat_id, "Код привязки чата истёк. Создай новый код.")
-            team = candidate
-            break
-        if team is None:
+        bind_code = await session.scalar(
+            select(m.TelegramTeamBindCodeModel).where(m.TelegramTeamBindCodeModel.code == code)
+        )
+        if bind_code is None:
             return _text(payload.chat_id, "Код привязки команды не найден.")
+        expires_at = bind_code.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at < now:
+            return _text(payload.chat_id, "Код привязки чата истёк. Создай новый код.")
+        if bind_code.used_at is not None:
+            return _text(payload.chat_id, "Код привязки чата уже использован.")
+        team = await session.get(m.TeamModel, bind_code.team_id)
+        if team is None:
+            return _text(payload.chat_id, "Команда для этого кода не найдена.")
 
         linker = None
         if payload.linked_by_tg_user_id is not None:
@@ -334,10 +339,7 @@ async def bind_team_chat(
                 )
             )
         team.tg_chat_id = payload.tg_chat_id
-        config = dict(team.board_config or {})
-        config.pop("telegram_bind_code", None)
-        config.pop("telegram_bind_expires_at", None)
-        team.board_config = config
+        bind_code.used_at = now
         chat = await session.scalar(
             select(m.TelegramChatModel).where(
                 m.TelegramChatModel.telegram_chat_id == payload.tg_chat_id
@@ -359,7 +361,7 @@ async def bind_team_chat(
             chat.title = payload.title
             chat.linked_by = linker.id if linker else chat.linked_by
             chat.linked_at = now
-        session.add(team)
+        session.add_all([team, bind_code])
         await session.commit()
 
     return _text(payload.chat_id, "✅ Чат привязан к команде Grey Cardinal.")
@@ -504,15 +506,36 @@ async def ingest_callback(
 
     if data in (CB_MODE_CONFIRM, CB_MODE_AUTO):
         required = data == CB_MODE_CONFIRM
-        async with container.make_uow() as uow:
-            project = await uow.projects.ensure_default(container.config.default_workspace_name)
-            chat = await uow.chats.get_by_telegram_id(chat_id)
-            if chat is None:
-                await uow.chats.upsert(chat_id, "supergroup", None, project.id)
-            else:
-                await uow.chats.upsert(chat_id, chat.type, chat.title, project.id)
-            await uow.chats.set_confirmation_required(chat_id, required)
-            await uow.commit()
+        if not hasattr(container, "session_factory"):
+            async with container.make_uow() as uow:
+                project = await uow.projects.ensure_default(container.config.default_workspace_name)
+                chat = await uow.chats.get_by_telegram_id(chat_id)
+                if chat is None:
+                    await uow.chats.upsert(chat_id, "supergroup", None, project.id)
+                else:
+                    await uow.chats.upsert(chat_id, chat.type, chat.title, project.id)
+                await uow.chats.set_confirmation_required(chat_id, required)
+                await uow.commit()
+            mode_text = (
+                "✅ Режим включён: задачи создаются после подтверждения в чате."
+                if required
+                else "✅ Режим включён: задачи создаются сразу, без сообщений в чат."
+            )
+            return _edit_with_kb(
+                chat_id,
+                msg_id,
+                cq_id,
+                f"{mode_text}\n\nЯ уже мониторю чат.",
+                _main_menu_kb(is_group=True),
+            )
+        async with container.session_factory() as session:
+            chat = await session.scalar(
+                select(m.TelegramChatModel).where(m.TelegramChatModel.telegram_chat_id == chat_id)
+            )
+            if chat is None or chat.team_id is None:
+                return _edit_with_kb(chat_id, msg_id, cq_id, _UNBOUND_TEAM_TEXT, _back_kb())
+            chat.task_confirmation_required = required
+            await session.commit()
         mode_text = (
             "✅ Режим включён: задачи создаются после подтверждения в чате."
             if required
@@ -536,19 +559,11 @@ async def ingest_callback(
         return _edit_with_kb(chat_id, msg_id, cq_id, _YOUGILE_SETUP_TEXT, _back_kb())
 
     if data == CB_BIND_CHAT:
-        async with container.make_uow() as uow:
-            project = await uow.projects.ensure_default(container.config.default_workspace_name)
-            await uow.chats.upsert(chat_id, "group", None, project.id)
-            bound_chat = await uow.chats.get_by_telegram_id(chat_id)
-            if bound_chat is None:
-                raise RuntimeError("chat binding failed")
-            await uow.projects.set_default_chat(project.id, bound_chat.id)
-            await uow.commit()
         return _edit_with_kb(
             chat_id,
             msg_id,
             cq_id,
-            "✅ Чат привязан к workspace!\nТеперь я буду следить за сообщениями здесь.",
+            _UNBOUND_TEAM_TEXT,
             _back_kb(),
         )
 
@@ -1357,9 +1372,7 @@ async def _route_v2_absence(session, team, sender, message, parsed, event):
 async def _route_v2_status_update(session, container, team, sender, message, parsed, event):
     """Сотрудник пишет статус в чат («приступаю» / «готово» / «застрял») →
     меняем статус задачи, двигаем карточку на доске и подтверждаем в чате."""
-    from brain_api.domain.enums import TaskStatus
 
-    now = datetime.now(UTC)
     detected = (parsed.get("daily_report") or {}).get("detected_status")
     if detected not in {"done", "in_progress", "blocked"}:
         await session.commit()
@@ -1418,46 +1431,33 @@ async def _route_v2_status_update(session, container, team, sender, message, par
         return ActionsResponse(actions=[])
 
     was_done = task.status == "done"
-    task.status = detected
-    task.last_status_update_at = now
-    if detected == "done":
-        task.completed_at = now
-        if not was_done:
-            await grant_team_xp(
-                session,
-                user_id=task.assignee_id or sender.id,
-                team_id=team.id,
-                task_id=task.id,
-                kind="task_completed",
-                points=TASK_COMPLETED_XP,
-                reason=f"Закрыл задачу {task.public_id}",
-                idempotency_key=f"task_completed:{task.id}",
-            )
-
-    board_ok = True
-    card = await session.scalar(
-        select(m.BoardCardModel).where(m.BoardCardModel.task_id == task.id)
+    sync = await TaskStatusService(container.board_mirror).update_status(
+        task.id,
+        TaskStatus(detected),
+        actor_id=sender.id,
+        action="daily_report_status_update",
     )
-    if card is not None:
-        try:
-            if detected == "done":
-                await container.board.close_card(card.external_card_id)
-            else:
-                await container.board.move_card(card.external_card_id, TaskStatus(detected))
-        except Exception as exc:  # noqa: BLE001 — ошибка доски не должна терять статус
-            board_ok = False
-            logger.warning("board move failed for %s: %s", task.public_id, exc)
+    if detected == "done" and not was_done:
+        await grant_team_xp(
+            session,
+            user_id=task.assignee_id or sender.id,
+            team_id=team.id,
+            task_id=task.id,
+            kind="task_completed",
+            points=TASK_COMPLETED_XP,
+            reason=f"Закрыл задачу {task.public_id}",
+            idempotency_key=f"task_completed:{task.id}",
+        )
     await session.commit()
 
     labels = {"in_progress": "🔄 В работе", "done": "✅ Готово", "blocked": "⛔ Заблокирована"}
     text = f"{task.public_id} {task.title}\n→ {labels[detected]}"
-    if card is not None:
-        text += (
-            "\n(карточка на доске обновлена)" if board_ok
-            else "\n(доску синхронизировать не удалось)"
-        )
+    text += (
+        "\n(карточка на доске обновлена)"
+        if sync.sync_status != "error"
+        else f"\n(доску синхронизировать не удалось: {sync.sync_error})"
+    )
     return _text(event.chat.id, text)
-
 
 async def _match_v2_assignee(session, team_id, assignee_text):
     if not assignee_text:
@@ -1533,23 +1533,43 @@ async def ingest_command(
 
     # ── /start — главное меню с кнопками ─────────────────────────────────
     if command == "start":
-        # Auto-bind group chat on /start
         if is_group:
-            async with container.make_uow() as uow:
-                project = await uow.projects.ensure_default(container.config.default_workspace_name)
-                await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
-                bound_chat = await uow.chats.get_by_telegram_id(chat_id)
-                if bound_chat is None:
-                    raise RuntimeError("chat binding failed")
-                await uow.projects.set_default_chat(project.id, bound_chat.id)
-                await uow.commit()
+            if not hasattr(container, "session_factory"):
+                async with container.make_uow() as uow:
+                    project = await uow.projects.ensure_default(
+                        container.config.default_workspace_name
+                    )
+                    await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
+                    bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+                    if bound_chat is None:
+                        raise RuntimeError("chat binding failed")
+                    await uow.projects.set_default_chat(project.id, bound_chat.id)
+                    await uow.commit()
+                return ActionsResponse(
+                    actions=[
+                        SendMessageAction(
+                            chat_id=chat_id,
+                            text=_WELCOME_GROUP,
+                            parse_mode="Markdown",
+                            reply_markup=_confirmation_mode_kb(),
+                        )
+                    ]
+                )
+            async with container.session_factory() as session:
+                chat = await session.scalar(
+                    select(m.TelegramChatModel).where(
+                        m.TelegramChatModel.telegram_chat_id == chat_id
+                    )
+                )
+                if chat is None or chat.team_id is None:
+                    return _text(chat_id, _UNBOUND_TEAM_TEXT)
             return ActionsResponse(
                 actions=[
                     SendMessageAction(
                         chat_id=chat_id,
                         text=_WELCOME_GROUP,
                         parse_mode="Markdown",
-                        reply_markup=_confirmation_mode_kb(),
+                        reply_markup=_main_menu_kb(is_group=True),
                     )
                 ]
             )
@@ -1701,10 +1721,9 @@ async def ingest_command(
     # ── Task status commands ──────────────────────────────────────────────
     _STATUS_COMMANDS = {"start_task", "block", "done"}
     if command in _STATUS_COMMANDS:
-        async with container.make_uow() as uow:
-            return await UpdateTaskStatus(
-                uow, container.board, container.event_publisher, container.config
-            ).execute(command, event.args, chat_id)
+        return await _handle_v2_status_command(
+            container, command, event.args, chat_id, event.sender.id
+        )
 
     # ── Meeting commands ──────────────────────────────────────────────────
     if command == "meeting_start":
@@ -1793,15 +1812,17 @@ async def ingest_command(
         )
 
     if command == "bind_chat":
-        async with container.make_uow() as uow:
-            project = await uow.projects.ensure_default(container.config.default_workspace_name)
-            await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
-            bound_chat = await uow.chats.get_by_telegram_id(chat_id)
-            if bound_chat is None:
-                raise RuntimeError("chat binding failed")
-            await uow.projects.set_default_chat(project.id, bound_chat.id)
-            await uow.commit()
-        return _text(chat_id, f"✅ Чат привязан к workspace: {project.name}")
+        if container.settings.app_env == "dev":
+            async with container.make_uow() as uow:
+                project = await uow.projects.ensure_default(container.config.default_workspace_name)
+                await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
+                bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+                if bound_chat is None:
+                    raise RuntimeError("chat binding failed")
+                await uow.projects.set_default_chat(project.id, bound_chat.id)
+                await uow.commit()
+            return _text(chat_id, f"✅ Чат привязан к dev workspace: {project.name}")
+        return _text(chat_id, _UNBOUND_TEAM_TEXT)
 
     return ActionsResponse(
         actions=[
@@ -1811,6 +1832,49 @@ async def ingest_command(
             )
         ]
     )
+
+
+async def _handle_v2_status_command(
+    container: Container,
+    command: str,
+    args: list[str],
+    chat_id: int,
+    actor_telegram_id: int,
+) -> ActionsResponse:
+    new_status = status_for_command(command)
+    if new_status is None:
+        return _text(chat_id, "Неизвестная команда изменения статуса.")
+    if not args:
+        return _text(chat_id, f"Укажи задачу, например: /{command} GC-12")
+    sequence = parse_public_id(args[0])
+    async with container.session_factory() as session:
+        chat = await session.scalar(
+            select(m.TelegramChatModel).where(m.TelegramChatModel.telegram_chat_id == chat_id)
+        )
+        if chat is None or chat.team_id is None:
+            return _text(chat_id, _UNBOUND_TEAM_TEXT)
+        statement = select(m.TaskModel).where(m.TaskModel.team_id == chat.team_id)
+        if sequence is not None:
+            statement = statement.where(m.TaskModel.public_id == format_public_id(sequence))
+        else:
+            try:
+                statement = statement.where(m.TaskModel.id == UUID(args[0]))
+            except ValueError:
+                return _text(chat_id, f"Задача {args[0]} не найдена.")
+        task = await session.scalar(statement)
+        if task is None:
+            return _text(chat_id, f"Задача {args[0]} не найдена.")
+        task_id = task.id
+    result = await TaskStatusService(container.board_mirror).update_status(
+        task_id,
+        new_status,
+        actor_id=actor_telegram_id,
+        action="telegram_status_command",
+    )
+    text = f"✅ {result.public_id} → {result.status}"
+    if result.sync_status == "error":
+        text = f"{text}\n\nYouGile sync error: {result.sync_error}"
+    return _text(chat_id, text)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ services:
     image: postgres:16-alpine
     env_file:
       - path: .env.production
-        required: false
+        required: true
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-grey_cardinal}
       POSTGRES_USER: ${POSTGRES_USER:-grey}
@@ -23,7 +23,7 @@ services:
     image: ollama/ollama:latest
     env_file:
       - path: .env.production
-        required: false
+        required: true
     expose:
       - "11434"
     volumes:
@@ -38,7 +38,7 @@ services:
         WHISPER_MODEL: ${WHISPER_MODEL:-small}
     env_file:
       - path: .env.production
-        required: false
+        required: true
     environment:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: cpu
@@ -74,7 +74,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - path: .env.production
-        required: false
+        required: true
     expose:
       - "8889"
     restart: unless-stopped
@@ -85,7 +85,7 @@ services:
       dockerfile: apps/brain-api/Dockerfile
     env_file:
       - path: .env.production
-        required: false
+        required: true
     environment:
       APP_ENV: production
       LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://ollama:11434/v1}
@@ -117,7 +117,7 @@ services:
       dockerfile: apps/telegram-bot/Dockerfile
     env_file:
       - path: .env.production
-        required: false
+        required: true
     environment:
       APP_ENV: production
       TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
@@ -144,7 +144,7 @@ services:
       dockerfile: apps/audio-worker/Dockerfile
     env_file:
       - path: .env.production
-        required: false
+        required: true
     environment:
       AUDIO_ASR_PROVIDER: ${AUDIO_ASR_PROVIDER:-http}
       ASR_SERVICE_URL: http://asr-service:8030
@@ -171,7 +171,7 @@ services:
     image: caddy:2-alpine
     env_file:
       - path: .env.production
-        required: false
+        required: true
     environment:
       DOMAIN: ${DOMAIN:-fishingteam.su}
     ports:

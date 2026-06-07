@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from brain_api.application.task_numbering import next_task_public_id
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.security.encryption import SecretCipher
 from brain_api.integrations.yougile import YouGileClient
@@ -357,12 +358,12 @@ class YouGileFullSyncService:
         board: m.YouGileBoardModel,
         column_id: str,
     ) -> m.TaskModel:
-        seq = int(await self.session.scalar(select(func.max(m.TaskModel.seq))) or 0) + 1
+        seq, public_id = await next_task_public_id(self.session, self.team_id)
         assignee_id, assignee_text = await self._assignee_from_payload(payload)
         task = m.TaskModel(
             id=uuid4(),
             seq=seq,
-            public_id=f"GC-{seq}",
+            public_id=public_id,
             team_id=self.team_id,
             title=str(payload.get("title") or "YouGile task"),
             description=payload.get("description"),
@@ -600,7 +601,7 @@ class YouGileFullSyncService:
         if row is None:
             row = m.YouGileColumnModel(id=uuid4(), board_id=board_id, external_id=external_id)
         row.name = _name(payload)
-        row.position = position
+        row.position = position or 0
         row.raw_payload = payload
         row.synced_at = synced_at
         self.session.add(row)
@@ -708,7 +709,11 @@ async def grey_board_payload(session: AsyncSession, team_id: UUID, view: str = "
             "telegram": "linked" if team and team.tg_chat_id else "not_linked",
             "yougile": "synced" if selected_board else "not_selected",
             "open_risks": sum(1 for card in cards if card["signals"]),
-            "last_sync": selected_board.synced_at.isoformat() if selected_board else None,
+            "last_sync": (
+                selected_board.synced_at.isoformat()
+                if selected_board and selected_board.synced_at
+                else None
+            ),
         },
         "groups": groups,
         "cards": cards,

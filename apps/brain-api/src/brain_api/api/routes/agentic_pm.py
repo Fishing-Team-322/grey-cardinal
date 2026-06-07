@@ -21,6 +21,7 @@ from brain_api.api.rbac import (
     require_team_role,
 )
 from brain_api.api.routes.accounts import CurrentUser, get_db
+from brain_api.application.task_numbering import next_task_public_id
 from brain_api.application.use_cases.agentic_pm import (
     YouGileFullSyncService,
     ai_inbox_payload,
@@ -332,7 +333,7 @@ async def sync_events(team_id: UUID, current_user: CurrentUser, session: AsyncSe
     return {"items": [_sync_event_payload(row) for row in rows]}
 
 
-@router.get("/api/teams/{team_id}/grey-board")
+@router.get("/api/teams/{team_id}/agentic/grey-board-legacy")
 async def grey_board(
     team_id: UUID,
     current_user: CurrentUser,
@@ -378,7 +379,7 @@ async def task_action(
     return {"ok": True, "task_id": str(task.id), "status": task.status}
 
 
-@router.get("/api/teams/{team_id}/ai-inbox")
+@router.get("/api/teams/{team_id}/agentic/ai-inbox-legacy")
 async def ai_inbox(team_id: UUID, current_user: CurrentUser, session: AsyncSession = Depends(get_db)) -> dict:
     await _require_team(session, current_user.id, team_id)
     payload = await ai_inbox_payload(session, team_id)
@@ -386,7 +387,7 @@ async def ai_inbox(team_id: UUID, current_user: CurrentUser, session: AsyncSessi
     return payload
 
 
-@router.post("/api/ai-inbox/{item_id}/approve")
+@router.post("/api/agentic-ai-inbox/{item_id}/approve")
 async def approve_inbox(item_id: UUID, current_user: CurrentUser, session: AsyncSession = Depends(get_db)) -> dict:
     item = await _inbox_item(session, item_id, current_user.id, manager=True)
     item.status = "approved"
@@ -397,7 +398,7 @@ async def approve_inbox(item_id: UUID, current_user: CurrentUser, session: Async
     return {"status": "approved"}
 
 
-@router.post("/api/ai-inbox/{item_id}/reject")
+@router.post("/api/agentic-ai-inbox/{item_id}/reject")
 async def reject_inbox(item_id: UUID, current_user: CurrentUser, session: AsyncSession = Depends(get_db)) -> dict:
     item = await _inbox_item(session, item_id, current_user.id, manager=True)
     item.status = "rejected"
@@ -408,7 +409,7 @@ async def reject_inbox(item_id: UUID, current_user: CurrentUser, session: AsyncS
     return {"status": "rejected"}
 
 
-@router.post("/api/ai-inbox/{item_id}/edit")
+@router.post("/api/agentic-ai-inbox/{item_id}/edit")
 async def edit_inbox(item_id: UUID, body: InboxEditRequest, current_user: CurrentUser, session: AsyncSession = Depends(get_db)) -> dict:
     item = await _inbox_item(session, item_id, current_user.id, manager=True)
     if body.parsed_payload is not None:
@@ -424,7 +425,7 @@ async def edit_inbox(item_id: UUID, body: InboxEditRequest, current_user: Curren
     return {"status": "edited"}
 
 
-@router.post("/api/ai-inbox/{item_id}/link-task")
+@router.post("/api/agentic-ai-inbox/{item_id}/link-task")
 async def link_inbox(item_id: UUID, body: LinkTaskRequest, current_user: CurrentUser, session: AsyncSession = Depends(get_db)) -> dict:
     item = await _inbox_item(session, item_id, current_user.id, manager=True)
     task = await session.get(m.TaskModel, body.task_id)
@@ -500,12 +501,12 @@ async def run_demo(team_id: UUID, current_user: CurrentUser, session: AsyncSessi
     await _require_team(session, current_user.id, team_id, manager=True)
     existing = await session.scalar(select(m.TaskModel).where(m.TaskModel.team_id == team_id, m.TaskModel.title == "Demo: вечерний синк Grey Cardinal"))
     if existing is None:
-        seq = int(await session.scalar(select(func.max(m.TaskModel.seq))) or 0) + 1
+        seq, public_id = await next_task_public_id(session, team_id)
         session.add(
             m.TaskModel(
                 id=uuid4(),
                 seq=seq,
-                public_id=f"GC-{seq}",
+                public_id=public_id,
                 team_id=team_id,
                 title="Demo: вечерний синк Grey Cardinal",
                 description="Проверочная задача setup wizard",

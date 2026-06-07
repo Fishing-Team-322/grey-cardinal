@@ -10,11 +10,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.api.deps import get_container
 from brain_api.api.routes.accounts import get_db
+from brain_api.application.task_numbering import next_task_public_id
 from brain_api.application.use_cases.team_gamification import TASK_COMPLETED_XP, grant_team_xp
 from brain_api.container import Container
 from brain_api.infrastructure.board.yougile import was_recent_outbound
@@ -165,11 +166,11 @@ async def _create_local_task(
     config: dict[str, Any],
     data: dict[str, Any],
 ) -> m.TaskModel:
-    seq = int(await session.scalar(select(func.max(m.TaskModel.seq))) or 0) + 1
+    seq, public_id = await next_task_public_id(session, team_id)
     task = m.TaskModel(
         id=uuid4(),
         seq=seq,
-        public_id=f"GC-{seq}",
+        public_id=public_id,
         team_id=team_id,
         title=str(data.get("title") or "YouGile task"),
         description=data.get("description"),
