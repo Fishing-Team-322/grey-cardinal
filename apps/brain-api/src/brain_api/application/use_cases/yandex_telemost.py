@@ -31,7 +31,7 @@ from brain_api.integrations.yandex_telemost import (
 
 logger = logging.getLogger(__name__)
 
-STATE_TTL_MINUTES = 15
+STATE_TTL_MINUTES = 60
 # Refresh a bit before actual expiry to avoid racing a 401 mid-request.
 _REFRESH_SKEW = timedelta(seconds=60)
 

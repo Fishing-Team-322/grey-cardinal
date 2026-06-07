@@ -180,10 +180,12 @@ async def _handle_voice(
 
     logger.info("Voice transcribed (%d chars): %s...", len(transcript), transcript[:60])
 
-    # Inject transcript as a regular message event
+    # Inject the clean transcript as a regular text message so the brain-api
+    # pipeline (task extraction + call-intent detection) sees natural text,
+    # not a decorated string. The "voice" origin is preserved in raw.update.
     synthetic_message = {
         **message,
-        "text": f"🎙 [голосовое] {transcript}",
+        "text": transcript,
     }
     msg_event = build_message_event(update, synthetic_message)
     actions = await brain.send_message_event(msg_event)

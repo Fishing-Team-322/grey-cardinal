@@ -42,6 +42,14 @@
   .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
   .link { display: inline-block; margin-top: 8px; color: #fff; background: var(--red);
     padding: 8px 14px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 13px; }
+  .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .act { flex: 1; min-width: 84px; text-align: center; padding: 7px 6px; border-radius: 9px;
+    background: #1d1d22; border: 1px solid var(--line); color: var(--txt); font-size: 12.5px;
+    font-weight: 600; cursor: pointer; }
+  .act:active { transform: scale(.97); }
+  .act.go { border-color: #14401f; color: var(--green); }
+  .act.done { border-color: var(--red); color: var(--red); }
+  .act.on { background: var(--red); color: #fff; border-color: var(--red); }
   .hidden { display: none; }
   .loader { text-align: center; padding: 50px; color: var(--muted); }
 </style>
@@ -84,7 +92,7 @@ const STATUS_RU = {todo:"К работе", in_progress:"В работе", blocke
 function renderTasks(tasks) {
   if (!tasks.length) return `<div class="empty">Активных задач нет 🖤</div>`;
   return tasks.map(t => `
-    <div class="card">
+    <div class="card" data-task="${esc(t.id)}">
       <div class="top"><span class="pid">#${esc(t.public_id)}</span>
         <span class="badge b-${esc(t.status)}">${STATUS_RU[t.status]||esc(t.status)}</span></div>
       <div class="title">${esc(t.title)}</div>
@@ -93,20 +101,55 @@ function renderTasks(tasks) {
         ${t.assignee ? `<span>👤 ${esc(t.assignee)}</span>` : ""}
         ${t.mine ? `<span class="badge b-mine">моя</span>` : ""}
       </div>
+      <div class="actions">
+        <div class="act ${t.status==='in_progress'?'on':'go'}" data-status="in_progress">▶️ В работу</div>
+        <div class="act ${t.status==='blocked'?'on':''}" data-status="blocked">⛔ Блок</div>
+        <div class="act done" data-status="done">✅ Сделал</div>
+      </div>
     </div>`).join("");
 }
 
 function renderMeetings(meetings) {
   if (!meetings.length) return `<div class="empty">Запланированных созвонов нет</div>`;
   return meetings.map(mt => `
-    <div class="card">
+    <div class="card" data-meeting="${esc(mt.id)}">
       <div class="top"><span class="pid">📹 ${esc(mt.public_id)}</span>
         <span class="badge b-in_progress">${mt.state==="scheduled"?"назначен":"предложен"}</span></div>
       <div class="title">${esc(mt.title)}</div>
       <div class="meta"><span>🕐 ${mt.scheduled_at?esc(fmtDeadline(mt.scheduled_at)):"время не задано"}</span></div>
       ${mt.join_url ? `<a class="link" href="${esc(mt.join_url)}" target="_blank">Войти в Телемост</a>` : ""}
+      <div class="actions">
+        <div class="act go" data-rsvp="yes">✅ Приду</div>
+        <div class="act" data-rsvp="maybe">🤔 Возможно</div>
+        <div class="act done" data-rsvp="no">❌ Нет</div>
+      </div>
     </div>`).join("");
 }
+
+async function post(url, body) {
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({init_data: tg?.initData || "", ...body})});
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function toast(msg) { try { tg?.HapticFeedback?.notificationOccurred?.("success"); } catch(e){}
+  if (tg?.showPopup) { try { tg.showPopup({message: msg}); return; } catch(e){} } }
+
+document.addEventListener("click", async (e) => {
+  const act = e.target.closest(".act"); if (!act) return;
+  const taskCard = e.target.closest("[data-task]");
+  const mtgCard = e.target.closest("[data-meeting]");
+  try {
+    if (taskCard && act.dataset.status) {
+      await post(`/api/tgapp/task/${taskCard.dataset.task}/status`, {status: act.dataset.status});
+      toast("Статус обновлён"); load();
+    } else if (mtgCard && act.dataset.rsvp) {
+      await post(`/api/tgapp/meeting/${mtgCard.dataset.meeting}/rsvp`, {response: act.dataset.rsvp});
+      mtgCard.querySelectorAll(".act").forEach(a => a.classList.remove("on"));
+      act.classList.add("on"); toast("Отметка сохранена");
+    }
+  } catch (err) { toast("Ошибка: " + String(err).slice(0,80)); }
+});
 
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
