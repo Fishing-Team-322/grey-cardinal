@@ -191,19 +191,34 @@ async def _handle_voice(
 
 
 async def _transcribe(audio_bytes: bytes, file_path: str) -> str:
-    """Send audio bytes to ASR service and return transcript text."""
-    # Determine file extension
-    ext = file_path.rsplit(".", 1)[-1] if "." in file_path else "ogg"
-    filename = f"voice.{ext}"
+    """Send raw audio bytes to ASR service and return transcript text.
+
+    asr-service reads ``request.body()`` and requires ``Content-Type: audio/*``
+    (it rejects multipart with 415). Telegram voice is OGG/Opus, which
+    faster-whisper decodes via ffmpeg regardless of the declared subtype.
+    The call is internal (http://asr-service) so we bypass the Telegram proxy.
+    """
+    ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else "ogg"
+    content_type = {
+        "oga": "audio/ogg",
+        "ogg": "audio/ogg",
+        "opus": "audio/ogg",
+        "mp3": "audio/mpeg",
+        "m4a": "audio/mp4",
+        "wav": "audio/wav",
+    }.get(ext, "audio/ogg")
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            files = {"file": (filename, audio_bytes, "audio/ogg")}
-            resp = await client.post(_ASR_URL, files=files)
+        async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
+            resp = await client.post(
+                _ASR_URL,
+                content=audio_bytes,
+                headers={"Content-Type": content_type},
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("text", "").strip()
-            logger.warning("ASR service returned %s", resp.status_code)
+            logger.warning("ASR service returned %s: %s", resp.status_code, resp.text[:200])
     except httpx.HTTPError as exc:
         logger.error("ASR transcription failed: %s", exc)
     return ""

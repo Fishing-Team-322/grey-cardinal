@@ -312,6 +312,7 @@ async def create_room_for_chat(
         )
 
     # Queue stub — MVP does not auto-join/record. A future worker consumes 'pending'.
+    meeting_id = None
     if join_url:
         session.add(
             m.MeetingAgentJoinJobModel(
@@ -327,11 +328,55 @@ async def create_room_for_chat(
                 status="queued" if cfg["enable_meeting_agent_auto_join"] else "pending",
             )
         )
+        # Create a scheduled Meeting so we can run a "who is coming?" RSVP poll
+        # in the chat alongside the link.
+        meeting = await _create_scheduled_meeting(
+            session,
+            team_id=team.id,
+            title=room_title,
+            join_url=join_url,
+            created_by_user_id=created_by_user_id,
+        )
+        meeting_id = meeting.id
 
     return {
         "ok": True,
         "team_id": team.id,
         "join_url": join_url,
         "conference_id": result.get("conference_id"),
+        "meeting_id": meeting_id,
         "settings": cfg,
     }
+
+
+async def _create_scheduled_meeting(
+    session,
+    *,
+    team_id: UUID,
+    title: str,
+    join_url: str,
+    created_by_user_id: UUID | None,
+):
+    """Create a minimal scheduled Meeting row for the RSVP poll (independent of UoW)."""
+    from sqlalchemy import func
+
+    now = datetime.now(UTC)
+    next_seq = (await session.scalar(select(func.max(m.MeetingModel.seq)))) or 0
+    next_seq += 1
+    meeting = m.MeetingModel(
+        seq=next_seq,
+        public_id=f"MTG-{next_seq}",
+        team_id=team_id,
+        title=title,
+        status="scheduled",
+        state="scheduled",
+        scheduled_at=now,
+        started_at=now,
+        created_by=created_by_user_id,
+        created_by_user_id=created_by_user_id,
+        external_source="yandex_telemost",
+        metadata_json={"join_url": join_url},
+    )
+    session.add(meeting)
+    await session.flush()
+    return meeting

@@ -80,7 +80,7 @@ def _confirm_keyboard(meeting_id: UUID) -> dict:
     }
 
 
-def _rsvp_keyboard(meeting_id: UUID) -> dict:
+def rsvp_keyboard(meeting_id: UUID) -> dict:
     mid = str(meeting_id)
     return {
         "inline_keyboard": [
@@ -91,6 +91,10 @@ def _rsvp_keyboard(meeting_id: UUID) -> dict:
             [{"text": "🤔 Возможно", "callback_data": f"{CB_RSVP_MAYBE}:{mid}"}],
         ]
     }
+
+
+# Backwards-compatible alias (internal callers).
+_rsvp_keyboard = rsvp_keyboard
 
 
 async def _manager_for_team(

@@ -49,6 +49,7 @@ from brain_api.application.use_cases.meeting_flow import (
     handle_meeting_callback,
     handle_pending_meeting_time,
     is_meeting_callback,
+    rsvp_keyboard,
 )
 from brain_api.application.use_cases.member_reports import (
     manager_report_from_membership,
@@ -207,17 +208,17 @@ _WELCOME_GROUP = (
 )
 
 _HELP_TEXT = (
-    "📖 *Серый Кардинал* — команды\n\n"
+    "📖 <b>Серый Кардинал</b> — команды\n\n"
     "Большинство действий — через кнопки. Дополнительные команды:\n\n"
-    "`/task @user что сделать до срока` — явно создать задачу\n"
-    "`/jira URL EMAIL TOKEN ПРОЕКТ` — подключить Jira\n"
-    "  Пример: `/jira https://team.atlassian.net user@mail.com token123 PROJ`\n\n"
-    "`/done GC\\-1` — закрыть задачу\n"
-    "`/start_task GC\\-1` — взять в работу\n"
-    "`/block GC\\-1` — заблокировать\n"
-    "`/digest` — вечерний дайджест\n"
-    "`/leaderboard` — рейтинг команды\n"
-    "`/reports` — отчёт по сотруднику для руководителя"
+    "<code>/task @user что сделать до срока</code> — явно создать задачу\n"
+    "<code>/howto тема</code> — материалы по теме\n"
+    "<code>/done GC-1</code> — закрыть задачу\n"
+    "<code>/start_task GC-1</code> — взять в работу\n"
+    "<code>/block GC-1</code> — заблокировать\n"
+    "<code>/digest</code> — вечерний дайджест\n"
+    "<code>/leaderboard</code> — рейтинг команды\n"
+    "<code>/reports</code> — отчёт по сотруднику для руководителя\n"
+    "<code>/unlink</code> — отвязать Telegram-аккаунт"
 )
 
 _JIRA_SETUP_TEXT = (
@@ -1595,13 +1596,13 @@ async def ingest_command(
     if command == "help":
         if event.args:
             async with container.session_factory() as session:
-                return _text(chat_id, await materials_for_arg(session, " ".join(event.args)))
+                return _html(chat_id, await materials_for_arg(session, " ".join(event.args)))
         return ActionsResponse(
             actions=[
                 SendMessageAction(
                     chat_id=chat_id,
                     text=_HELP_TEXT,
-                    parse_mode="MarkdownV2",
+                    parse_mode="HTML",
                     reply_markup=_back_kb(),
                 )
             ]
@@ -1811,6 +1812,9 @@ async def ingest_command(
             f"Очищено: Встреч: {result['meetings']}, реплик: {result['transcripts']}.",
         )
 
+    if command in ("unlink", "unbind", "logout"):
+        return await _handle_unlink_command(container, event, is_group)
+
     if command == "bind_chat":
         if container.settings.app_env == "dev":
             async with container.make_uow() as uow:
@@ -1832,6 +1836,52 @@ async def ingest_command(
             )
         ]
     )
+
+
+async def _handle_unlink_command(
+    container: Container,
+    event: TelegramCommandEvent,
+    is_group: bool,
+) -> ActionsResponse:
+    """Отвязать Telegram: в личке — аккаунт пользователя, в группе — чат от команды."""
+    chat_id = event.chat.id
+    async with container.session_factory() as session:
+        if is_group:
+            team = await session.scalar(
+                select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+            )
+            chat = await session.scalar(
+                select(m.TelegramChatModel).where(
+                    m.TelegramChatModel.telegram_chat_id == chat_id
+                )
+            )
+            if team is None and (chat is None or chat.team_id is None):
+                return _text(chat_id, "Этот чат и так не привязан к команде.")
+            if team is not None:
+                team.tg_chat_id = None
+            if chat is not None:
+                chat.team_id = None
+            await session.commit()
+            return _text(
+                chat_id,
+                "✅ Чат отвязан от команды. Я больше не буду собирать здесь задачи. "
+                "Чтобы привязать снова — /bind_team CODE.",
+            )
+
+        # Личка: отвязываем аккаунт пользователя.
+        user = await session.scalar(
+            select(m.UserModel).where(m.UserModel.telegram_user_id == event.sender.id)
+        )
+        if user is None or user.telegram_user_id is None:
+            return _text(chat_id, "Ваш аккаунт и так не привязан к Telegram.")
+        user.telegram_user_id = None
+        user.telegram_username = None
+        await session.commit()
+        return _text(
+            chat_id,
+            "✅ Telegram-аккаунт отвязан. Уведомления приходить не будут. "
+            "Чтобы привязать снова — откройте кабинет и нажмите «Привязать Telegram».",
+        )
 
 
 async def _handle_v2_status_command(
@@ -1996,22 +2046,31 @@ async def _handle_telemost_callback(
             ]
         )
 
-    return ActionsResponse(
-        actions=[
-            AnswerCallbackAction(callback_query_id=cq_id, text="Готово"),
-            EditMessageAction(
-                chat_id=chat_id, message_id=msg_id, text="📹 Создаю встречу в Яндекс Телемосте…"
+    actions: list = [
+        AnswerCallbackAction(callback_query_id=cq_id, text="Готово"),
+        EditMessageAction(
+            chat_id=chat_id, message_id=msg_id, text="📹 Создаю встречу в Яндекс Телемосте…"
+        ),
+        SendMessageAction(
+            chat_id=chat_id,
+            text=(
+                "✅ Создал встречу в Яндекс Телемосте\n\n"
+                f"Ссылка: {join_url}\n\n"
+                f"{_TELEMOST_NOTICE}"
             ),
+        ),
+    ]
+    # Сразу запускаем опрос «Кто придёт?» по созданной встрече.
+    meeting_id = result.get("meeting_id")
+    if meeting_id is not None:
+        actions.append(
             SendMessageAction(
                 chat_id=chat_id,
-                text=(
-                    "✅ Создал встречу в Яндекс Телемосте\n\n"
-                    f"Ссылка: {join_url}\n\n"
-                    f"{_TELEMOST_NOTICE}"
-                ),
-            ),
-        ]
-    )
+                text="📊 Кто придёт на созвон?",
+                reply_markup=rsvp_keyboard(meeting_id),
+            )
+        )
+    return ActionsResponse(actions=actions)
 
 
 def _text(chat_id: int, text: str) -> ActionsResponse:
