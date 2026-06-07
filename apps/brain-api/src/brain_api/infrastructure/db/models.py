@@ -84,6 +84,20 @@ class TelegramLinkCodeModel(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class TelegramTeamBindCodeModel(Base):
+    __tablename__ = "telegram_team_bind_codes"
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    code: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DeviceLinkCodeModel(Base):
     """One-time, time-limited code that pairs a desktop/tray agent to a user.
 
@@ -126,7 +140,7 @@ class ClientSessionModel(TimestampMixin, Base):
     workspace_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     session_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -219,10 +233,14 @@ class ConfirmationModel(TimestampMixin, Base):
 
 class TaskModel(TimestampMixin, Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        UniqueConstraint("team_id", "public_id", name="uq_task_team_public_id"),
+        UniqueConstraint("team_id", "seq", name="uq_task_team_seq"),
+    )
 
     id: Mapped[UUID] = _uuid_pk()
-    seq: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
-    public_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    public_id: Mapped[str] = mapped_column(Text, nullable=False)
     project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)

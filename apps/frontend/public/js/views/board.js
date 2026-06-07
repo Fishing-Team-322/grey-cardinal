@@ -52,9 +52,10 @@ export default async function boardView(root, params, query) {
 }
 
 function renderColumn(column) {
+  const cards = column.cards || column.tasks || [];
   return `<section class="board-column">
-    <header><span>${escapeHtml(column.title)}</span><b>${column.tasks.length}</b></header>
-    <div class="board-stack">${column.tasks.length ? column.tasks.map(renderCard).join("") : '<div class="board-empty">Нет задач</div>'}</div>
+    <header><span>${escapeHtml(column.title)}</span><b>${cards.length}</b></header>
+    <div class="board-stack">${cards.length ? cards.map(renderCard).join("") : '<div class="board-empty">Нет задач</div>'}</div>
   </section>`;
 }
 

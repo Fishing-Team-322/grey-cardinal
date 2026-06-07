@@ -21,6 +21,8 @@ from brain_api.application.agentic_tasks import (
     TaskDecisionEngine,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
+from brain_api.application.task_numbering import next_task_public_id
+from brain_api.application.task_status_service import TaskStatusService
 from brain_api.container import Container
 from brain_api.domain.enums import TaskStatus
 from brain_api.infrastructure.db import models as m
@@ -126,21 +128,59 @@ async def grey_board(
         )
         pending_inbox = [_inbox_card(item) for item in inbox_rows]
         columns.insert(0, ("ai_inbox", "AI Inbox", pending_inbox))
+    sync_error_count = sum(card["sync"]["status"] in {"error", "conflict"} for card in cards)
+    overdue_count = sum(card["risk"]["overdue"] for card in cards)
+    risk_count = sum(
+        card["risk"]["overdue"]
+        or card["risk"]["due_soon"]
+        or card["risk"]["unassigned"]
+        or card["risk"]["stale"]
+        or card["sync"]["status"] in {"error", "conflict"}
+        for card in cards
+    )
+    last_sync_at = await session.scalar(
+        select(func.max(m.SyncEventModel.created_at)).where(m.SyncEventModel.team_id == team_id)
+    )
+    latest_sync_error = await session.scalar(
+        select(m.SyncEventModel)
+        .where(m.SyncEventModel.team_id == team_id, m.SyncEventModel.status == "error")
+        .order_by(m.SyncEventModel.created_at.desc())
+        .limit(1)
+    )
+    selected_board = await session.scalar(
+        select(m.YouGileBoardModel).where(
+            m.YouGileBoardModel.team_id == team_id,
+            m.YouGileBoardModel.is_selected.is_(True),
+        )
+    )
+    yougile_health = "unconfigured"
+    if selected_board is not None:
+        yougile_health = "error" if latest_sync_error else "synced"
+    elif team.board_credentials_encrypted:
+        yougile_health = "pending"
     return {
         "team_id": str(team_id),
         "view": view,
         "generated_at": datetime.now(UTC),
-        "columns": [
-            {"key": key, "title": title, "tasks": items} for key, title, items in columns
-        ],
+        "health": {
+            "llm": "ok" if team.llm_settings_id else "warning",
+            "telegram": "linked" if team.tg_chat_id else "unlinked",
+            "yougile": yougile_health,
+            "last_sync_at": last_sync_at,
+            "open_risks": risk_count,
+            "latest_error": latest_sync_error.error if latest_sync_error else None,
+        },
         "stats": {
             "tasks": len(cards),
+            "overdue": overdue_count,
+            "risks": risk_count,
+            "sync_errors": sync_error_count,
             "ai_inbox": len(pending_inbox),
-            "sync_errors": sum(
-                card["sync"]["status"] in {"error", "conflict"} for card in cards
-            ),
-            "overdue": sum(card["risk"]["overdue"] for card in cards),
         },
+        "columns": [
+            {"id": key, "title": title, "cards": items} for key, title, items in columns
+        ],
+        "recommendations": [],
     }
 
 
@@ -156,12 +196,17 @@ async def move_task(
     if task is None or task.team_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
     await _team_access(task.team_id, current_user, session)
-    result = await container.board_mirror.move_task(task_id, body.status)
+    result = await TaskStatusService(container.board_mirror).update_status(
+        task_id,
+        body.status,
+        actor_id=current_user.id,
+        action="grey_board_status_changed",
+    )
     return {
         "task_id": str(task_id),
-        "status": body.status.value,
+        "status": result.status,
         "sync_status": result.sync_status,
-        "sync_error": result.error,
+        "sync_error": result.sync_error,
     }
 
 
@@ -264,7 +309,7 @@ async def ai_inbox(
     team_id: UUID,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_db),
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     await _team_access(team_id, current_user, session)
     rows = list(
         await session.scalars(
@@ -274,7 +319,7 @@ async def ai_inbox(
             .limit(200)
         )
     )
-    return [_inbox_payload(item) for item in rows]
+    return {"items": [_inbox_payload(item) for item in rows]}
 
 
 @router.post("/api/ai-inbox/{item_id}/approve")
@@ -296,7 +341,7 @@ async def approve_inbox(
     task = await _create_task_row(
         session,
         team_id=item.team_id,
-        title=str(payload.get("title") or item.raw_text[:120]),
+        title=str(payload.get("title") or (item.raw_text or item.source_text or "")[:120]),
         description=payload.get("description"),
         assignee_id=assignee_id,
         deadline=_parse_dt(payload.get("deadline")),
@@ -480,11 +525,11 @@ async def _create_task_row(
     source_message_id: UUID | None,
     source: str,
 ) -> m.TaskModel:
-    seq = int(await session.scalar(select(func.max(m.TaskModel.seq))) or 0) + 1
+    seq, public_id = await next_task_public_id(session, team_id)
     assignee = await session.get(m.UserModel, assignee_id) if assignee_id else None
     task = m.TaskModel(
         seq=seq,
-        public_id=f"GC-{seq}",
+        public_id=public_id,
         team_id=team_id,
         title=title,
         description=description,
@@ -693,10 +738,10 @@ def _user_payload(user: m.UserModel | None) -> dict[str, Any] | None:
 def _inbox_payload(item: m.AIInboxItemModel) -> dict[str, Any]:
     return {
         "id": str(item.id),
-        "kind": item.kind,
+        "kind": item.kind or item.item_type or "task_candidate_uncertain",
         "status": item.status,
         "reason": item.reason,
-        "raw_text": item.raw_text,
+        "raw_text": item.raw_text or item.source_text,
         "semantic": item.semantic_payload,
         "identity": item.identity_payload,
         "duplicate_task_id": (
@@ -704,7 +749,20 @@ def _inbox_payload(item: m.AIInboxItemModel) -> dict[str, Any]:
         ),
         "confidence": item.confidence,
         "created_at": item.created_at,
+        "source": {
+            "type": item.source_type or "telegram",
+            "message_id": str(item.source_message_id) if item.source_message_id else item.source_id,
+        },
+        "suggested_action": item.proposed_action or _suggested_action(item),
     }
+
+
+def _suggested_action(item: m.AIInboxItemModel) -> str:
+    if item.kind in {"needs_assignee", "task_candidate_uncertain"}:
+        return "choose_assignee"
+    if item.duplicate_task_id:
+        return "link_duplicate"
+    return "review"
 
 
 def _inbox_card(item: m.AIInboxItemModel) -> dict[str, Any]:
@@ -713,7 +771,7 @@ def _inbox_card(item: m.AIInboxItemModel) -> dict[str, Any]:
     return {
         **payload,
         "public_id": "AI",
-        "title": semantic_task.get("title") or item.raw_text[:120],
+        "title": semantic_task.get("title") or (item.raw_text or item.source_text or "")[:120],
         "description": semantic_task.get("description"),
         "is_inbox": True,
     }

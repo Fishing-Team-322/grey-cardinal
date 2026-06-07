@@ -86,6 +86,7 @@ def _device(row: m.DeviceModel) -> Device:
 
 
 def _client_session(row: m.ClientSessionModel) -> ClientSession:
+    assert row.started_at is not None
     return ClientSession(
         id=row.id,
         user_id=row.user_id,
@@ -936,12 +937,18 @@ class TaskRepositoryImpl:
         row = await self._s.get(m.TaskModel, task_id)
         return _task(row) if row else None
 
-    async def get_by_public_id(self, public_id: str) -> Task | None:
-        row = await self._s.scalar(select(m.TaskModel).where(m.TaskModel.public_id == public_id))
+    async def get_by_public_id(self, public_id: str, team_id: UUID | None = None) -> Task | None:
+        statement = select(m.TaskModel).where(m.TaskModel.public_id == public_id)
+        if team_id is not None:
+            statement = statement.where(m.TaskModel.team_id == team_id)
+        row = await self._s.scalar(statement)
         return _task(row) if row else None
 
-    async def next_sequence(self) -> int:
-        current = await self._s.scalar(select(func.max(m.TaskModel.seq)))
+    async def next_sequence(self, team_id: UUID | None = None) -> int:
+        statement = select(func.max(m.TaskModel.seq))
+        if team_id is not None:
+            statement = statement.where(m.TaskModel.team_id == team_id)
+        current = await self._s.scalar(statement)
         return (current or 0) + 1
 
     async def update(self, task: Task) -> Task:

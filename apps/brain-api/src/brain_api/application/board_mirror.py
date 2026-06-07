@@ -9,9 +9,10 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from brain_api.application.task_numbering import next_task_public_id
 from brain_api.config import Settings
 from brain_api.domain.entities import Task
 from brain_api.domain.enums import TaskStatus
@@ -59,6 +60,9 @@ class BoardMirrorService:
         self._settings = settings
         self._cipher = SecretCipher(settings.board_creds_encryption_key or "dev-key")
         self._client_factory = client_factory
+
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        return self._sf
 
     async def import_selected_board(self, team_id: UUID) -> ImportSummary:
         summary = ImportSummary()
@@ -429,10 +433,10 @@ class BoardMirrorService:
         deadline = _parse_deadline(payload.get("deadline"))
         now = datetime.now(UTC)
         if link is None:
-            seq = int(await session.scalar(select(func.max(m.TaskModel.seq))) or 0) + 1
+            seq, public_id = await next_task_public_id(session, team_id)
             task = m.TaskModel(
                 seq=seq,
-                public_id=f"GC-{seq}",
+                public_id=public_id,
                 team_id=team_id,
                 title=title,
                 description=payload.get("description"),

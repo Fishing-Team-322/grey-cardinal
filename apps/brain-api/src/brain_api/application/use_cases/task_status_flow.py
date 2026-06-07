@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from brain_api.application.task_status_service import TaskStatusService
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
 from brain_api.domain.entities import AuditLog
 from brain_api.domain.enums import TaskStatus
@@ -99,40 +100,64 @@ async def handle_task_status_callback(container, data: str, event) -> ActionsRes
         ])
 
     if action in (CB_TS_PROGRESS, CB_TS_DONE):
-        command = "start_task" if action == CB_TS_PROGRESS else "done"
-        async with container.make_uow() as uow:
-            result = await UpdateTaskStatus(
-                uow, container.board, container.event_publisher, container.config
-            ).execute(command, [str(task_id)], event.message.chat_id)
-        text = (result.actions[0].text if result.actions else None) or "Статус обновлён"
+        status = TaskStatus.in_progress if action == CB_TS_PROGRESS else TaskStatus.done
+        if not hasattr(container, "board_mirror"):
+            command = "start_task" if action == CB_TS_PROGRESS else "done"
+            async with container.make_uow() as uow:
+                legacy = await UpdateTaskStatus(
+                    uow, container.board, container.event_publisher, container.config
+                ).execute(command, [str(task_id)], event.message.chat_id)
+            text = (legacy.actions[0].text if legacy.actions else None) or "Статус обновлён"
+            return ActionsResponse(actions=[_ans(cq, "Готово"), _edit(event, text)])
+        result = await TaskStatusService(container.board_mirror).update_status(
+            task_id,
+            status,
+            actor_id=event.from_user.id,
+            action="telegram_status_callback",
+        )
+        text = f"✅ {result.public_id} → {result.status}"
+        if result.sync_status == "error":
+            text = f"{text}\n\nYouGile sync error: {result.sync_error}"
         return ActionsResponse(actions=[_ans(cq, "Готово"), _edit(event, text)])
-
     if action == CB_TS_REASON:
         code = parts[2] if len(parts) > 2 else "other"
         reason = REASONS.get(code, "Другое")
-        async with container.make_uow() as uow:
-            task = await uow.tasks.get(task_id)
-            if task is None:
-                return ActionsResponse(actions=[_ans(cq, "Задача не найдена")])
-            task.status = TaskStatus.cancelled
-            task.last_status_update_at = container.config.now()
-            await uow.tasks.update(task)
-            await uow.audit.add(
-                AuditLog(
-                    id=uuid4(),
-                    actor_type="user",
-                    actor_id=str(event.from_user.id),
-                    action="task_cancelled_by_employee",
-                    entity_type="task",
-                    entity_id=task.id,
-                    payload={"public_id": task.public_id, "reason": reason},
+        if not hasattr(container, "board_mirror"):
+            async with container.make_uow() as uow:
+                task = await uow.tasks.get(task_id)
+                if task is None:
+                    return ActionsResponse(actions=[_ans(cq, "Задача не найдена")])
+                task.status = TaskStatus.cancelled
+                task.last_status_update_at = container.config.now()
+                await uow.tasks.update(task)
+                await uow.audit.add(
+                    AuditLog(
+                        id=uuid4(),
+                        actor_type="user",
+                        actor_id=str(event.from_user.id),
+                        action="task_cancelled_by_employee",
+                        entity_type="task",
+                        entity_id=task.id,
+                        payload={"public_id": task.public_id, "reason": reason},
+                    )
                 )
-            )
-            await uow.commit()
-            public_id = task.public_id
+                await uow.commit()
+                public_id = task.public_id
+            return ActionsResponse(actions=[
+                _ans(cq, "Записал причину"),
+                _edit(event, f"🚫 {public_id} отменена.\nПричина: {reason}"),
+            ])
+        result = await TaskStatusService(container.board_mirror).update_status(
+            task_id,
+            TaskStatus.cancelled,
+            actor_id=event.from_user.id,
+            reason=reason,
+            action="task_cancelled_by_employee",
+        )
+        if not result.public_id:
+            return ActionsResponse(actions=[_ans(cq, "Задача не найдена")])
         return ActionsResponse(actions=[
             _ans(cq, "Записал причину"),
-            _edit(event, f"🚫 {public_id} отменена.\nПричина: {reason}"),
+            _edit(event, f"🚫 {result.public_id} отменена.\nПричина: {reason}"),
         ])
-
     return ActionsResponse(actions=[_ans(cq, "Неизвестное действие")])

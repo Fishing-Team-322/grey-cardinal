@@ -232,7 +232,7 @@ export const api = {
   },
   aiInbox: {
     list(teamId) {
-      return request("GET", `/api/teams/${teamId}/ai-inbox`);
+      return request("GET", `/api/teams/${teamId}/ai-inbox`).then((data) => data.items || data);
     },
     approve(itemId) {
       return request("POST", `/api/ai-inbox/${itemId}/approve`);

@@ -164,7 +164,7 @@ async def create_task_from_proposal(
 ) -> tuple[Task, str | None]:
     """Создать task + board card из proposal. Используется confirm и auto-create путём."""
     project = await uow.projects.ensure_default(config.default_workspace_name)
-    sequence = await uow.tasks.next_sequence()
+    sequence = await uow.tasks.next_sequence(proposal.team_id)
     now = config.now()
     task = Task(
         id=uuid4(),
