@@ -304,8 +304,15 @@ class LLMProviderFactory:
             timeout_seconds=self._settings.llm_fallback_timeout_seconds,
             max_retries=self._settings.llm_max_retries,
             strict_json=self._settings.llm_strict_json,
-            proxy=self._proxy_for(self._settings.llm_fallback_provider),
+            # Fallback uses its own proxy setting (default: direct), so it stays
+            # reachable when the primary's VPN proxy is down. local → never proxied.
+            proxy=self._fallback_proxy(),
         )
+
+    def _fallback_proxy(self) -> str | None:
+        if self._settings.llm_fallback_provider == "local":
+            return None
+        return self._settings.llm_fallback_proxy or None
 
     def _proxy_for(self, provider: str) -> str | None:
         """Прокси применяем только к внешним провайдерам (local/Ollama — внутри сети)."""

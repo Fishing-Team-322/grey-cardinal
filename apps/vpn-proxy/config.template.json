@@ -1,0 +1,53 @@
+{
+  "log": { "level": "warn", "timestamp": true },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "in",
+      "listen": "0.0.0.0",
+      "listen_port": 8889
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "proxy",
+      "outbounds": ["auto", "nl", "ch"],
+      "default": "auto"
+    },
+    {
+      "type": "urltest",
+      "tag": "auto",
+      "outbounds": ["nl", "ch"],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "1m0s",
+      "tolerance": 100
+    },
+    {
+      "type": "hysteria2",
+      "tag": "nl",
+      "server": "${VPN_NODE_NL_HOST}",
+      "server_port": 443,
+      "password": "${VPN_HY2_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${VPN_NODE_NL_HOST}",
+        "alpn": ["h3"]
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "ch",
+      "server": "${VPN_NODE_CH_HOST}",
+      "server_port": 443,
+      "password": "${VPN_HY2_PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "${VPN_NODE_CH_HOST}",
+        "alpn": ["h3"]
+      }
+    },
+    { "type": "direct", "tag": "direct" }
+  ],
+  "route": { "final": "proxy" }
+}

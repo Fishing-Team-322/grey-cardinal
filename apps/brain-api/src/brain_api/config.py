@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Optional outbound proxy for LLM calls (e.g. when the server IP is
     # geo-blocked by the provider). Example: http://user:pass@host:port
     llm_proxy: str = ""
+    # Proxy for the fallback provider. Empty = go DIRECT (no proxy). Kept
+    # separate so a fallback that is reachable without the VPN (e.g. OpenRouter
+    # from RU) still works when the VPN/primary proxy is down.
+    llm_fallback_proxy: str = ""
 
     # ── Fallback LLM provider (e.g. OpenRouter) ──────────────────────────
     # Activated only when the primary fails (timeout / 429 / 5xx / invalid
