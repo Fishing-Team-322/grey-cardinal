@@ -107,6 +107,18 @@ class LoginRequest(BaseModel):
         return _validate_email(v)
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def check_new_password(cls, value: str) -> str:
+        if len(value) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return value
+
+
 class UpdateProfileRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
@@ -114,6 +126,7 @@ class UpdateProfileRequest(BaseModel):
     bio: str | None = None
     photo_data_url: str | None = None
     role: str | None = None
+    timezone: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -126,6 +139,7 @@ class UserResponse(BaseModel):
     bio: str
     photo_data_url: str
     role: str
+    timezone: str | None = None
     telegram_user_id: int | None = None
     telegram_username: str | None = None
 
@@ -282,6 +296,10 @@ async def update_me(
         current_user.photo_data_url = body.photo_data_url
     if body.role is not None:
         current_user.role = body.role.strip()
+    if body.timezone is not None:
+        from brain_api.domain.v2.timezones import validate_iana_timezone
+
+        current_user.timezone = validate_iana_timezone(body.timezone)
 
     # Auto-sync display_name from first+last if not explicitly set
     if body.display_name is None and (body.first_name or body.last_name):
@@ -342,6 +360,26 @@ async def logout(response: Response) -> None:
         httponly=True,
         samesite="lax",
     )
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    if not current_user.password_hash or not verify_password(
+        body.old_password, current_user.password_hash
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Incorrect current password")
+    if body.old_password == body.new_password:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "New password must be different",
+        )
+    current_user.password_hash = hash_password(body.new_password)
+    session.add(current_user)
+    await session.commit()
 
 
 async def _unique_telegram_link_code(session: AsyncSession) -> str:

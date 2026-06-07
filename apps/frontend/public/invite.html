@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Приглашение · Grey Cardinal</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell"><div class="card card-pad-lg auth-card" id="invite-card"><div class="view-loading">Проверяем приглашение...</div></div></main>
+  <script type="module">
+    import { api } from "/js/api.js";
+    const card = document.getElementById("invite-card");
+    const token = new URLSearchParams(location.search).get("token");
+    try {
+      const invite = await api.invites.preview(token);
+      if (invite.expired || invite.uses >= invite.max_uses) throw new Error();
+      const role = { manager: "руководителя", employee: "сотрудника", director: "директора" }[invite.role] || invite.role;
+      card.innerHTML = `<div class="eyebrow">Приглашение</div><div class="page-title mt-12">Вас приглашают в Grey Cardinal</div>
+        <p class="page-desc mt-12">Роль: <b>${role}</b>. После принятия приглашения откроется рабочая команда.</p>
+        <button id="accept" class="btn btn-primary btn-block mt-24">Принять приглашение</button>
+        <div id="error" class="alert alert-error mt-12" hidden></div>`;
+      document.getElementById("accept").onclick = async () => {
+        const me = await api.auth.me().catch(() => null);
+        if (!me) {
+          location.href = `/register.html?invite=${encodeURIComponent(token)}`;
+          return;
+        }
+        try {
+          await api.invites.accept(token);
+          location.href = "/app";
+        } catch {
+          const error = document.getElementById("error");
+          error.textContent = "Не удалось принять приглашение";
+          error.hidden = false;
+        }
+      };
+    } catch {
+      card.innerHTML = '<div class="page-title">Приглашение недействительно</div><p class="page-desc mt-12">Ссылка истекла или уже была использована.</p><a class="btn btn-primary mt-24" href="/">На главную</a>';
+    }
+  </script>
+</body>
+</html>

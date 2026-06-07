@@ -1,23 +1,34 @@
 :5173 {
-	root * /srv
+    root * /usr/share/caddy
+    encode gzip
 
-	# index.html и JS-бандл не кэшируем — иначе пользователь видит старую версию
-	# фронта (напр. устаревший Telegram deep-link) после деплоя.
-	@nocache path / /index.html /js/*.js
-	header @nocache Cache-Control "no-cache, no-store, must-revalidate"
+    @assets path /styles.css /assets/* /js/* /vendor/* /partials/*
+    handle @assets {
+        header Cache-Control "no-cache"
+        file_server
+    }
 
-	header /downloads/*.exe Content-Type application/octet-stream
-	header /downloads/*.msi Content-Type application/octet-stream
-	header /downloads/*.deb Content-Type application/vnd.debian.binary-package
-	header /downloads/*.dmg Content-Type application/x-apple-diskimage
+    handle /downloads/* {
+        file_server
+    }
 
-	# Download URLs must return a real file or 404, never the SPA index.
-	handle /downloads/* {
-		file_server
-	}
+    @app path /app /app/*
+    handle @app {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        try_files {path} /app.html
+        file_server
+    }
 
-	handle {
-		try_files {path} /index.html
-		file_server
-	}
+    @html_no_ext {
+        not path *.html *.css *.js *.png *.jpg *.svg *.exe
+        not path /app /app/*
+    }
+    handle @html_no_ext {
+        try_files {path}.html {path}/index.html /index.html
+        file_server
+    }
+
+    handle {
+        file_server
+    }
 }
