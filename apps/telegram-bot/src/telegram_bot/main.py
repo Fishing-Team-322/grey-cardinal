@@ -67,6 +67,17 @@ async def lifespan(app: FastAPI):
     app.state.brain = BrainClient(settings.brain_api_base_url, settings.internal_api_token)
     logger.info("telegram-bot started (env=%s)", settings.app_env)
 
+    # Configure the mini-app menu button (best-effort, one-time on startup).
+    base = (settings.telegram_public_base_url or "").rstrip("/")
+    if base and settings.telegram_bot_token:
+        try:
+            await app.state.client.set_chat_menu_button_webapp(
+                "📱 Приложение", f"{base}/tgapp/"
+            )
+            logger.info("mini-app menu button set -> %s/tgapp/", base)
+        except Exception:
+            logger.exception("failed to set chat menu button")
+
     poll_task: asyncio.Task | None = None
     if settings.use_polling and settings.telegram_bot_token:
         poll_task = asyncio.create_task(_poll_loop(app))

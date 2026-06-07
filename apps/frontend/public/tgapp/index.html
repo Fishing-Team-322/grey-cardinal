@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Grey Cardinal</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0d0d0f; --card: #16161a; --line: #232329;
+    --txt: #ececf0; --muted: #8a8a93; --red: #ff003c; --green: #2ecc71;
+    --amber: #f1c40f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--txt);
+    font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 12px 12px 32px;
+  }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .5px; }
+  header .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 10px var(--red); }
+  .sub { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { flex: 1; text-align: center; padding: 9px; border-radius: 10px;
+    background: var(--card); color: var(--muted); border: 1px solid var(--line);
+    cursor: pointer; font-weight: 600; }
+  .tab.active { color: #fff; border-color: var(--red); background: #1c1216; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px; }
+  .card .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .pid { color: var(--red); font-weight: 700; font-size: 12px; }
+  .title { font-weight: 600; margin: 3px 0 6px; }
+  .meta { color: var(--muted); font-size: 12.5px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    border: 1px solid var(--line); }
+  .b-todo { color: var(--muted); }
+  .b-in_progress { color: var(--amber); border-color: #4a3c12; }
+  .b-blocked { color: var(--red); border-color: #4a1220; }
+  .b-mine { color: var(--green); border-color: #14401f; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+  .link { display: inline-block; margin-top: 8px; color: #fff; background: var(--red);
+    padding: 8px 14px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 13px; }
+  .hidden { display: none; }
+  .loader { text-align: center; padding: 50px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot"></span>
+    <h1>GREY CARDINAL</h1>
+    <span class="sub" id="who"></span>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="tasks" id="tab-tasks">Задачи</div>
+    <div class="tab" data-tab="meetings" id="tab-meetings">Созвоны</div>
+  </div>
+
+  <div id="loader" class="loader">Загружаю…</div>
+  <div id="view-tasks"></div>
+  <div id="view-meetings" class="hidden"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function fmtDeadline(iso) {
+  if (!iso) return "без срока";
+  const d = new Date(iso), now = new Date();
+  const days = Math.round((d.setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 864e5);
+  const t = new Date(iso).toLocaleTimeString("ru-RU", {hour:"2-digit",minute:"2-digit"});
+  if (days === 0) return "сегодня " + t;
+  if (days === 1) return "завтра " + t;
+  if (days === -1) return "вчера " + t;
+  return new Date(iso).toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit"}) + " " + t;
+}
+const STATUS_RU = {todo:"К работе", in_progress:"В работе", blocked:"Блок"};
+
+function renderTasks(tasks) {
+  if (!tasks.length) return `<div class="empty">Активных задач нет 🖤</div>`;
+  return tasks.map(t => `
+    <div class="card">
+      <div class="top"><span class="pid">#${esc(t.public_id)}</span>
+        <span class="badge b-${esc(t.status)}">${STATUS_RU[t.status]||esc(t.status)}</span></div>
+      <div class="title">${esc(t.title)}</div>
+      <div class="meta">
+        <span>⏰ ${esc(fmtDeadline(t.deadline))}</span>
+        ${t.assignee ? `<span>👤 ${esc(t.assignee)}</span>` : ""}
+        ${t.mine ? `<span class="badge b-mine">моя</span>` : ""}
+      </div>
+    </div>`).join("");
+}
+
+function renderMeetings(meetings) {
+  if (!meetings.length) return `<div class="empty">Запланированных созвонов нет</div>`;
+  return meetings.map(mt => `
+    <div class="card">
+      <div class="top"><span class="pid">📹 ${esc(mt.public_id)}</span>
+        <span class="badge b-in_progress">${mt.state==="scheduled"?"назначен":"предложен"}</span></div>
+      <div class="title">${esc(mt.title)}</div>
+      <div class="meta"><span>🕐 ${mt.scheduled_at?esc(fmtDeadline(mt.scheduled_at)):"время не задано"}</span></div>
+      ${mt.join_url ? `<a class="link" href="${esc(mt.join_url)}" target="_blank">Войти в Телемост</a>` : ""}
+    </div>`).join("");
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  $("view-tasks").classList.toggle("hidden", name !== "tasks");
+  $("view-meetings").classList.toggle("hidden", name !== "meetings");
+}
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+
+async function load() {
+  try {
+    const initData = tg?.initData || "";
+    const resp = await fetch("/api/tgapp/overview", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({init_data: initData}),
+    });
+    if (!resp.ok) throw new Error("auth " + resp.status);
+    const data = await resp.json();
+    $("loader").classList.add("hidden");
+
+    const u = data.telegram_user || {};
+    $("who").textContent = u.username ? "@" + u.username : (u.first_name || "");
+
+    if (!data.linked) {
+      $("view-tasks").innerHTML =
+        `<div class="empty">Аккаунт не привязан к Grey Cardinal.<br>
+         Откройте кабинет на fishingteam.su и привяжите Telegram,<br>либо нажмите /start у бота.</div>`;
+      return;
+    }
+    $("view-tasks").innerHTML = renderTasks(data.tasks || []);
+    $("view-meetings").innerHTML = renderMeetings(data.meetings || []);
+  } catch (e) {
+    $("loader").textContent = "Не удалось загрузить данные. Откройте приложение из бота.";
+  }
+}
+load();
+</script>
+</body>
+</html>

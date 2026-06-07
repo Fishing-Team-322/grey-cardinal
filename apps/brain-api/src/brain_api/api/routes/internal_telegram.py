@@ -156,12 +156,27 @@ def _main_menu_kb(is_group: bool = False) -> dict:
             [("📈 Отчёты по сотрудникам", CB_MENU_REPORTS)],
             [("⚙️ Настройки", CB_MENU_SETTINGS)],
         )
-    return _kb(
+    kb = _kb(
         [("📋 Мои задачи", CB_TASK_LIST), ("📊 Дайджест", CB_MENU_DIGEST)],
         [("🎙 Встречи", CB_MENU_MEETINGS), ("🏆 Лидерборд", CB_MENU_LEADERBOARD)],
         [("📈 Отчёты по сотрудникам", CB_MENU_REPORTS)],
         [("⚙️ Настройки", CB_MENU_SETTINGS)],
     )
+    app_url = _tgapp_url()
+    if app_url:
+        kb["inline_keyboard"].insert(
+            0, [{"text": "📱 Открыть приложение", "web_app": {"url": app_url}}]
+        )
+    return kb
+
+
+def _tgapp_url() -> str:
+    base = (
+        get_settings().telegram_public_base_url
+        or get_settings().public_base_url
+        or ""
+    ).rstrip("/")
+    return f"{base}/tgapp/" if base else ""
 
 
 def _confirmation_mode_kb() -> dict:

@@ -89,6 +89,19 @@ class TelegramClient:
             payload["show_alert"] = True
         await self._call("answerCallbackQuery", payload)
 
+    async def set_chat_menu_button_webapp(self, text: str, web_app_url: str) -> dict[str, Any]:
+        """Set the persistent chat menu button to open a Telegram WebApp (mini app)."""
+        return await self._call(
+            "setChatMenuButton",
+            {
+                "menu_button": {
+                    "type": "web_app",
+                    "text": text,
+                    "web_app": {"url": web_app_url},
+                }
+            },
+        )
+
     async def set_webhook(self, url: str, secret_token: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "url": url,
