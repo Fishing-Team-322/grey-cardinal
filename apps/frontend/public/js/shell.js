@@ -12,6 +12,7 @@ import meetings from "./views/meetings.js";
 import meeting from "./views/meeting.js";
 import integrations from "./views/integrations.js";
 import yougile from "./views/yougile.js";
+import llm from "./views/llm.js";
 import telegram from "./views/telegram.js";
 import daemon from "./views/daemon.js";
 import telemost from "./views/telemost.js";
@@ -71,6 +72,7 @@ async function boot() {
   Router.register("/app/leaderboard", "/partials/leaderboard.html", leaderboard);
   Router.register("/app/integrations", "/partials/integrations.html", integrations, guardFor("director", "manager"));
   Router.register("/app/integrations/yougile", "/partials/yougile.html", yougile, guardFor("director", "manager"));
+  Router.register("/app/integrations/llm", "/partials/llm.html", llm, guardFor("director", "manager"));
   Router.register("/app/integrations/telegram", "/partials/telegram.html", telegram);
   Router.register("/app/integrations/daemon", "/partials/daemon.html", daemon);
   Router.register("/app/integrations/telemost", "/partials/telemost.html", telemost, guardFor("director", "manager"));

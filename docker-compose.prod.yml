@@ -64,6 +64,21 @@ services:
       - "8888"
     restart: unless-stopped
 
+  # Outbound VPN egress for LLM traffic. The RU server IP is geo-blocked by
+  # Groq (403); sing-box dials foreign Hysteria2 exits and exposes a local
+  # mixed HTTP/SOCKS proxy on :8889. brain-api routes ONLY Groq through it via
+  # LLM_PROXY. OpenRouter fallback goes direct (reachable from RU).
+  vpn-proxy:
+    build:
+      context: apps/vpn-proxy
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env.production
+        required: false
+    expose:
+      - "8889"
+    restart: unless-stopped
+
   brain-api:
     build:
       context: .
@@ -74,6 +89,8 @@ services:
     environment:
       APP_ENV: production
       LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://ollama:11434/v1}
+      # Groq egress through the VPN proxy; OpenRouter fallback stays direct.
+      LLM_PROXY: ${LLM_PROXY:-http://vpn-proxy:8889}
       UPLOADS_DIR: /data/uploads
     expose:
       - "8000"
@@ -83,6 +100,8 @@ services:
       postgres:
         condition: service_healthy
       ollama:
+        condition: service_started
+      vpn-proxy:
         condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

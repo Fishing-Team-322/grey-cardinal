@@ -106,8 +106,13 @@ async def _check_llm(container: Container) -> dict[str, object]:
     settings = container.settings
     if not settings.llm_enabled:
         return {"ok": not settings.is_production, "provider": settings.llm_provider}
+    # Probe through the same proxy the extractor uses, so /ready reflects the
+    # real egress (Groq is geo-blocked without the VPN). local → never proxied.
+    client_kwargs: dict = {"timeout": 5.0}
+    if settings.llm_provider != "local" and settings.llm_proxy:
+        client_kwargs["proxy"] = settings.llm_proxy
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(**client_kwargs) as client:
             response = await client.get(f"{settings.effective_llm_base_url.rstrip('/')}/models")
         return {
             "ok": response.status_code < 500,

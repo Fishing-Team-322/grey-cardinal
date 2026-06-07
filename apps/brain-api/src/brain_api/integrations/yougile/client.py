@@ -46,7 +46,7 @@ class YouGileClient:
         base_url: str = DEFAULT_BASE_URL,
         rate_per_minute: int = 50,
         bucket: TokenBucket | None = None,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
         max_retries: int = 3,
         backoff_base: float = 0.5,
         sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,

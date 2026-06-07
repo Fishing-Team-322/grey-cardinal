@@ -30,7 +30,7 @@ export default async function managerView(root, params) {
 }
 
 async function render(root, team) {
-  const [meetings, telegram, yougile, agents, board, members, localTasks] = await Promise.all([
+  const [meetings, telegram, yougile, agents, board, members, localTasks, llm] = await Promise.all([
     api.meetings.list(team.id).catch(() => ({ items: [] })),
     api.teams.telegramStatus(team.id).catch(() => ({ linked: false })),
     api.yougile.status(team.id).catch(() => ({ connected: false })),
@@ -38,6 +38,7 @@ async function render(root, team) {
     loadBoard(team.id),
     api.teams.members(team.id).catch(() => ({ items: [] })),
     api.tasks.list(team.id).catch(() => ({ items: [] })),
+    api.llm.health(team.id).catch(() => ({ status: "error" })),
   ]);
   root.querySelector("#manager-content").innerHTML = `
     <div class="grid g4">
@@ -58,6 +59,7 @@ async function render(root, team) {
       <div class="card card-pad"><div class="card-head"><div class="card-title">Интеграции</div></div>
         ${integration("Telegram-чат", telegram.linked, "/app/integrations/telegram")}
         ${integration("YouGile", yougile.connected, "/app/integrations/yougile")}
+        ${integration("LLM (семантика)", llm.status === "ok", "/app/integrations/llm")}
         ${integration("Desktop Agent", agents.agents.length > 0, "/app/integrations/daemon")}
       </div>
     </div>`;

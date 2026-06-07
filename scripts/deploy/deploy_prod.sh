@@ -24,7 +24,7 @@ echo "Building images..."
 docker compose -f "$COMPOSE_FILE" build
 
 echo "Starting infrastructure..."
-docker compose -f "$COMPOSE_FILE" up -d postgres ollama asr-service tg-proxy
+docker compose -f "$COMPOSE_FILE" up -d postgres ollama asr-service tg-proxy vpn-proxy
 
 echo "Running migrations..."
 docker compose -f "$COMPOSE_FILE" run --rm brain-api alembic upgrade head

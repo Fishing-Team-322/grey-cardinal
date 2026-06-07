@@ -150,6 +150,17 @@ export const api = {
       return request("POST", `/api/teams/${teamId}/integrations/yougile/sync`);
     },
   },
+  llm: {
+    health(teamId) {
+      return request("GET", `/api/teams/${teamId}/llm/health`);
+    },
+    settings(teamId) {
+      return request("GET", `/api/teams/${teamId}/llm-settings`);
+    },
+    saveSettings(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/llm-settings`, { body });
+    },
+  },
   meetings: {
     list(teamId) {
       return request("GET", `/api/teams/${teamId}/meetings`);
