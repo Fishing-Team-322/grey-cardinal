@@ -6,10 +6,12 @@ set -eu
 : "${VPN_HY2_PASSWORD:?VPN_HY2_PASSWORD is required}"
 : "${VPN_NODE_NL_HOST:?VPN_NODE_NL_HOST is required}"
 : "${VPN_NODE_CH_HOST:?VPN_NODE_CH_HOST is required}"
+: "${VPN_DUBAI_HOST:?VPN_DUBAI_HOST is required}"
+: "${VPN_DUBAI_UUID:?VPN_DUBAI_UUID is required}"
 
-export VPN_HY2_PASSWORD VPN_NODE_NL_HOST VPN_NODE_CH_HOST
+export VPN_HY2_PASSWORD VPN_NODE_NL_HOST VPN_NODE_CH_HOST VPN_DUBAI_HOST VPN_DUBAI_UUID
 
-envsubst '${VPN_HY2_PASSWORD} ${VPN_NODE_NL_HOST} ${VPN_NODE_CH_HOST}' \
+envsubst '${VPN_HY2_PASSWORD} ${VPN_NODE_NL_HOST} ${VPN_NODE_CH_HOST} ${VPN_DUBAI_HOST} ${VPN_DUBAI_UUID}' \
   < /etc/sing-box/config.template.json \
   > /etc/sing-box/config.json
 
