@@ -36,8 +36,11 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
     telegram_public_base_url: str = ""
 
+    # ── Primary LLM provider ─────────────────────────────────────────────
+    # Production/demo strategy: external_api -> Groq (OpenAI-compatible).
     llm_provider: str = "local"
     llm_local_base_url: str = "http://ollama:11434/v1"
+    llm_local_model: str = ""
     llm_external_base_url: str = ""
     llm_external_api_key: str = ""
     llm_base_url: str = ""
@@ -46,6 +49,17 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 20
     llm_max_retries: int = 2
     llm_strict_json: bool = True
+
+    # ── Fallback LLM provider (e.g. OpenRouter) ──────────────────────────
+    # Activated only when the primary fails (timeout / 429 / 5xx / invalid
+    # JSON / schema error / unavailable). A valid noise/unknown answer is NOT
+    # a failure and never triggers the fallback.
+    llm_fallback_enabled: bool = False
+    llm_fallback_provider: str = "external_api"
+    llm_fallback_base_url: str = ""
+    llm_fallback_api_key: str = ""
+    llm_fallback_model: str = ""
+    llm_fallback_timeout_seconds: int = 12
 
     board_provider: str = "mock"
     board_creds_encryption_key: str = ""
@@ -114,14 +128,31 @@ class Settings(BaseSettings):
         return self.llm_api_key
 
     @property
+    def effective_llm_model(self) -> str:
+        if self.llm_provider == "local":
+            return self.llm_local_model or self.llm_model
+        return self.llm_model
+
+    @property
+    def fallback_configured(self) -> bool:
+        """Fallback is usable only when explicitly enabled and fully filled."""
+        if not self.llm_fallback_enabled:
+            return False
+        if not (self.llm_fallback_base_url and self.llm_fallback_model):
+            return False
+        if self.llm_fallback_provider == "external_api" and not self.llm_fallback_api_key:
+            return False
+        return True
+
+    @property
     def llm_enabled(self) -> bool:
         if self.llm_provider == "disabled":
             return False
         if self.llm_provider == "local":
-            return bool(self.effective_llm_base_url and self.llm_model)
+            return bool(self.effective_llm_base_url and self.effective_llm_model)
         if self.llm_provider == "external_api":
             return bool(
-                self.effective_llm_base_url and self.effective_llm_api_key and self.llm_model
+                self.effective_llm_base_url and self.effective_llm_api_key and self.effective_llm_model
             )
         return False
 

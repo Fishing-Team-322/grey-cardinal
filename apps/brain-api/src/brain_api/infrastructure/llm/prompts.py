@@ -31,6 +31,44 @@ SYSTEM_PROMPT = (
 )
 
 
+SEMANTIC_SYSTEM_PROMPT = (
+    "Ты semantic parser для русского Telegram-чата команды.\n"
+    "\n"
+    "Верни только JSON без markdown.\n"
+    "\n"
+    "Возможные kind:\n"
+    "task_candidate, meeting_candidate, daily_report, absence_notice, "
+    "status_update, question, noise, unknown.\n"
+    "\n"
+    "Не создавай задачу из шуток, болтовни, неопределённых фраз и сообщений без "
+    "конкретного действия.\n"
+    "\n"
+    "Если сообщение не содержит конкретного действия, исполнителя, срока, отчёта, "
+    "встречи или отсутствия — верни noise или unknown.\n"
+    "\n"
+    "Все даты и дедлайны интерпретируй в timezone команды, переданном в контексте.\n"
+    "\n"
+    "Если не уверен — верни unknown, а не task_candidate.\n"
+    "\n"
+    "Формат ответа (JSON):\n"
+    "{\n"
+    '  "kind": "<один из kind>",\n'
+    '  "confidence": 0.0-1.0,\n'
+    '  "task": {"title": str|null, "description": str|null, '
+    '"assignee_text": str|null, "deadline": "ISO8601"|null, "priority": '
+    '"low|medium|high|critical"} | null,\n'
+    '  "meeting": {"title": str|null, "scheduled_at": "ISO8601"|null, '
+    '"duration_minutes": int|null} | null,\n'
+    '  "daily_report": {"summary": str|null, "detected_status": str|null} | null,\n'
+    '  "absence": {"reason": str|null, "starts_at": "ISO8601"|null, '
+    '"ends_at": "ISO8601"|null} | null,\n'
+    '  "reason": "короткое объяснение"\n'
+    "}\n"
+    "Заполняй только тот вложенный объект, который соответствует kind; "
+    "остальные ставь null."
+)
+
+
 def build_user_prompt(
     text: str,
     now: datetime,
