@@ -46,6 +46,7 @@ class TelegramMessageEvent(BaseModel):
     sender: TelegramSender
     text: str
     date: datetime
+    message_thread_id: int | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -67,6 +68,7 @@ class TelegramCommandEvent(BaseModel):
     args: list[str] = Field(default_factory=list)
     text: str
     date: datetime
+    message_thread_id: int | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 

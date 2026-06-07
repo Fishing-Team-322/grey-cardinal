@@ -132,6 +132,7 @@ def _message(row: m.ChatMessageModel) -> ChatMessage:
         sender_id=row.sender_id,
         text=row.text,
         raw_json=row.raw_json or {},
+        message_thread_id=row.message_thread_id,
         created_at=row.created_at,
     )
 
@@ -780,6 +781,7 @@ class MessageRepositoryImpl:
             sender_id=message.sender_id,
             text=message.text,
             raw_json=message.raw_json or {},
+            message_thread_id=message.message_thread_id,
         )
         self._s.add(row)
         await self._s.flush()

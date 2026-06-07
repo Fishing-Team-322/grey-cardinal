@@ -78,6 +78,7 @@ class IngestChatMessage:
             sender_id=sender.id,
             text=event.text,
             raw_json=event.raw or {},
+            message_thread_id=event.message_thread_id,
         )
         message = await uow.messages.add(message)
 
