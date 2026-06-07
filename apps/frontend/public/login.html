@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Вход · Grey Cardinal</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <a href="/" class="auth-brand"><span id="brand"></span></a>
+    <div class="card card-pad-lg auth-card">
+      <div class="page-title">Войти</div>
+      <p class="page-desc">Продолжите работу с командами и созвонами.</p>
+      <form id="login-form" class="col gap-16 mt-24">
+        <label>Email<input class="input mt-6" type="email" name="email" required autocomplete="email"></label>
+        <label>Пароль<input class="input mt-6" type="password" name="password" required autocomplete="current-password"></label>
+        <button class="btn btn-primary btn-block" type="submit">Войти</button>
+        <div id="error" class="alert alert-error" hidden></div>
+      </form>
+      <p class="muted mt-20">Нет аккаунта? <a class="accent-text" href="/register.html">Зарегистрироваться</a></p>
+    </div>
+  </main>
+  <script src="/assets/icons.js"></script>
+  <script type="module">
+    import { api } from "/js/api.js";
+    document.getElementById("brand").innerHTML = window.gcBrand(32);
+    document.getElementById("login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      const error = document.getElementById("error");
+      try {
+        await api.auth.login(data.get("email"), data.get("password"));
+        location.href = new URLSearchParams(location.search).get("next") || "/app";
+      } catch {
+        error.textContent = "Неверный email или пароль";
+        error.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

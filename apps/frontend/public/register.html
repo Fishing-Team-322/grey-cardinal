@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Регистрация · Grey Cardinal</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <a href="/" class="auth-brand"><span id="brand"></span></a>
+    <div class="card card-pad-lg auth-card auth-card-wide">
+      <div class="page-title">Создать аккаунт</div>
+      <form id="register-form" class="col gap-16 mt-24">
+        <div class="grid g2">
+          <label>Имя<input class="input mt-6" name="first_name" required autocomplete="given-name"></label>
+          <label>Фамилия<input class="input mt-6" name="last_name" required autocomplete="family-name"></label>
+        </div>
+        <label>Логин<input class="input mt-6" name="login" minlength="3" pattern="[A-Za-z0-9_.-]+" required autocomplete="username"></label>
+        <label>Email<input class="input mt-6" type="email" name="email" required autocomplete="email"></label>
+        <label>Пароль<input class="input mt-6" type="password" name="password" minlength="6" required autocomplete="new-password"></label>
+        <button class="btn btn-primary btn-block" type="submit">Зарегистрироваться</button>
+        <div id="error" class="alert alert-error" hidden></div>
+      </form>
+      <p class="muted mt-20">Уже есть аккаунт? <a class="accent-text" id="login-link" href="/login.html">Войти</a></p>
+    </div>
+  </main>
+  <script src="/assets/icons.js"></script>
+  <script type="module">
+    import { api } from "/js/api.js";
+    document.getElementById("brand").innerHTML = window.gcBrand(32);
+    const invite = new URLSearchParams(location.search).get("invite");
+    if (invite) document.getElementById("login-link").href = `/login.html?next=${encodeURIComponent(`/invite.html?token=${invite}`)}`;
+    document.getElementById("register-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      const error = document.getElementById("error");
+      try {
+        await api.auth.register({
+          email: data.get("email"), login: data.get("login"),
+          firstName: data.get("first_name"), lastName: data.get("last_name"),
+          password: data.get("password"),
+        });
+        if (invite) await api.invites.accept(invite);
+        location.href = "/app";
+      } catch (reason) {
+        error.textContent = reason.status === 409 ? "Email или логин уже используются" : "Проверьте заполнение формы";
+        error.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

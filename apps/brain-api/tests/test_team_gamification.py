@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from brain_api.application.use_cases.team_gamification import (
     TASK_COMPLETED_XP,
     gamification_profile_payload,
@@ -11,6 +13,7 @@ from brain_api.application.use_cases.team_gamification import (
 from brain_api.infrastructure.db import models as m
 
 
+@pytest.mark.asyncio
 async def test_team_xp_is_idempotent_and_drives_profile_and_leaderboard(session_factory):
     async with session_factory() as session:
         user = m.UserModel(id=uuid4(), display_name="Closer")

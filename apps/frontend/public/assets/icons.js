@@ -1,0 +1,84 @@
+(function () {
+  const icons = {
+    company: '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6"/>',
+    team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87"/>',
+    user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>',
+    meet: '<path d="M15 10l5-3v10l-5-3v-4zM2 6h13v12H2z"/>',
+    trophy: '<path d="M6 9a6 6 0 0 0 12 0V3H6zM6 5H3v2a3 3 0 0 0 3 3M18 5h3v2a3 3 0 0 1-3 3M9 21h6M12 17v4"/>',
+    plug: '<path d="M9 2v6M15 2v6M7 8h10v3a5 5 0 0 1-10 0zM12 16v6"/>',
+    tg: '<path d="M22 3 2 11l6 2 2 7 3-4 5 4 4-17z"/>',
+    daemon: '<path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8"/>',
+    deploy: '<path d="M4 17l6-6-6-6M12 19h8"/>',
+    cog: '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  };
+  window.gcIcon = (name, width = 1.7) =>
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${icons[name] || ""}</svg>`;
+  window.gcMark = (size = 30) => `<svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none">
+    <rect x="5.5" y="5.5" width="21" height="21" rx="5" transform="rotate(45 16 16)" stroke="#C2152E" stroke-width="2"/>
+    <path d="M16 9 L23 16 L16 23 Z" fill="#C2152E"/><circle cx="13" cy="16" r="2" fill="#ECECEE"/>
+  </svg>`;
+  window.gcBrand = (size = 28) => `<a class="brand" href="/">
+    <span class="brand-mark">${window.gcMark(size)}</span>
+    <span class="brand-name"><b>Grey</b> <span>Cardinal</span></span>
+  </a>`;
+  window.gcTabs = () => {
+    document.querySelectorAll("[data-tabs]").forEach((group) => {
+      const scope = group.getAttribute("data-tabs");
+      const buttons = group.querySelectorAll("[data-tab]");
+      buttons.forEach((button) => button.addEventListener("click", () => {
+        buttons.forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.querySelectorAll(`[data-panel][data-scope="${scope}"]`).forEach((panel) => {
+          panel.style.display = panel.dataset.panel === button.dataset.tab ? "" : "none";
+        });
+      }));
+    });
+  };
+
+  window.gcSidebar = (user, role) => {
+    const sidebar = document.querySelector(".sidebar");
+    if (!sidebar) return;
+    const initials = (user.display_name || user.login || "GC")
+      .split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+    const item = (pattern, icon, label, href, roles) =>
+      roles.includes(role)
+        ? `<a class="nav-item" data-route="${pattern}" href="${href}">${window.gcIcon(icon)}<span>${label}</span></a>`
+        : "";
+    sidebar.innerHTML = `
+      <div class="sidebar-brand">${window.gcBrand(28)}<button class="sidebar-close" type="button" aria-label="Закрыть меню">${window.gcIcon("close")}</button></div>
+      <a class="role-chip" href="/app/settings">
+        <span class="av" style="background:#C2152E">${initials}</span>
+        <span class="meta grow"><b>${escapeHtml(user.display_name || user.login)}</b><span>${roleLabel(role)}</span></span>
+        ${window.gcIcon("cog")}
+      </a>
+      <div class="nav-group"><div class="nav-label">Командные центры</div>
+        ${item("/app/companies", "company", "Компании", "/app/companies", ["director"])}
+        ${item("/app/teams/:id", "team", "Команда", firstTeam(user), ["director", "manager"])}
+        ${item("/app/employee", "user", "Моя панель", "/app/employee", ["employee"])}
+      </div>
+      <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
+        ${item("/app/meetings", "meet", "Созвоны", "/app/meetings", ["director", "manager", "employee"])}
+        ${item("/app/leaderboard", "trophy", "Лидерборд", "/app/leaderboard", ["director", "manager", "employee"])}
+      </div>
+      <div class="nav-group"><div class="nav-label">Интеграции</div>
+        ${item("/app/integrations", "plug", "Обзор", "/app/integrations", ["director", "manager"])}
+        ${item("/app/integrations/telegram", "tg", "Telegram", "/app/integrations/telegram", ["director", "manager", "employee"])}
+        ${item("/app/integrations/daemon", "daemon", "Daemon", "/app/integrations/daemon", ["director", "manager", "employee"])}
+      </div>
+      <div class="sidebar-foot">${item("/app/deploy", "deploy", "Деплой", "/app/deploy", ["director"])}</div>`;
+  };
+
+  function firstTeam(user) {
+    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}` : "/app/teams";
+  }
+  function roleLabel(role) {
+    return { director: "Директор", manager: "Руководитель", employee: "Сотрудник" }[role];
+  }
+  function escapeHtml(value) {
+    return String(value || "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[char]);
+  }
+})();

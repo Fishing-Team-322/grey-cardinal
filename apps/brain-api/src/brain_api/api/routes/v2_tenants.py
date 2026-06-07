@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,6 +106,11 @@ class MeetingCreateRequest(BaseModel):
 
 class MeetingRsvpRequest(BaseModel):
     status: str
+
+
+class TaskStatusResponseRequest(BaseModel):
+    response: str
+    reason: str | None = None
 
 
 @router.post("/api/companies", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
@@ -287,6 +292,141 @@ async def get_team(
         role=ctx.team_roles.get(team.id),
         tg_chat_id=team.tg_chat_id,
     )
+
+
+@router.get("/api/teams/{team_id}/members")
+async def list_team_members(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_member(ctx, team_id)
+    rows = await session.execute(
+        select(m.UserModel, m.TeamMemberModel.role, m.TeamMemberModel.joined_at)
+        .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+        .where(m.TeamMemberModel.team_id == team_id)
+        .order_by(m.TeamMemberModel.joined_at, m.UserModel.display_name)
+    )
+    return {
+        "items": [
+            {
+                "id": str(user.id),
+                "display_name": user.display_name,
+                "email": user.email,
+                "role": role,
+                "telegram_username": user.telegram_username,
+                "telegram_linked": user.telegram_user_id is not None,
+                "joined_at": joined_at,
+            }
+            for user, role, joined_at in rows.all()
+        ]
+    }
+
+
+@router.get("/api/teams/{team_id}/tasks")
+async def list_team_tasks(
+    team_id: UUID,
+    current_user: CurrentUser,
+    status_filter: str | None = Query(default=None, alias="status"),
+    assignee: str | None = None,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_member(ctx, team_id)
+    statement = (
+        select(m.TaskModel, m.UserModel)
+        .outerjoin(m.UserModel, m.UserModel.id == m.TaskModel.assignee_id)
+        .where(m.TaskModel.team_id == team_id)
+        .order_by(m.TaskModel.created_at.desc())
+    )
+    if status_filter:
+        statement = statement.where(m.TaskModel.status == status_filter)
+    if assignee == "me":
+        statement = statement.where(m.TaskModel.assignee_id == current_user.id)
+    rows = await session.execute(statement)
+    return {"items": [_task_payload(task, user) for task, user in rows.all()]}
+
+
+@router.post("/api/tasks/{task_id}/status-response")
+async def task_status_response(
+    task_id: UUID,
+    body: TaskStatusResponseRequest,
+    current_user: CurrentUser,
+    container: Container = Depends(get_container),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    task = await session.get(m.TaskModel, task_id)
+    if task is None or task.team_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_member(ctx, task.team_id)
+    role = ctx.team_roles.get(task.team_id)
+    if role != "manager" and task.assignee_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Task is assigned to another user")
+
+    statuses = {
+        "in_progress": "in_progress",
+        "done": "done",
+        "wont_do": "cancelled",
+        "cancelled": "cancelled",
+    }
+    new_status = statuses.get(body.response)
+    if new_status is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid task response")
+    if new_status == "cancelled" and not (body.reason or "").strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Cancellation reason is required")
+
+    now = datetime.now(UTC)
+    task.status = new_status
+    task.last_status_update_at = now
+    task.completed_at = now if new_status == "done" else None
+    session.add(task)
+    session.add(
+        m.AuditLogModel(
+            id=uuid4(),
+            actor_type="user",
+            actor_id=str(current_user.id),
+            action="task_status_responded",
+            entity_type="task",
+            entity_id=task.id,
+            payload={
+                "response": body.response,
+                "reason": body.reason,
+                "status": new_status,
+                "team_id": str(task.team_id),
+            },
+        )
+    )
+    if task.assignee_id is not None:
+        from brain_api.application.use_cases.team_gamification import (
+            TASK_COMPLETED_XP,
+            grant_team_xp,
+        )
+
+        await grant_team_xp(
+            session,
+            user_id=task.assignee_id,
+            team_id=task.team_id,
+            task_id=task.id,
+            kind="task_completed" if new_status == "done" else "status_updated",
+            points=TASK_COMPLETED_XP if new_status == "done" else 2,
+            reason=f"Обновил статус {task.public_id}: {new_status}",
+            idempotency_key=f"web_status:{task.id}:{new_status}",
+        )
+    await session.commit()
+    payload = _task_payload(task, current_user if task.assignee_id == current_user.id else None)
+    await container.websocket_manager.broadcast(
+        {
+            "event": "task_status_responded",
+            "payload": {
+                **payload,
+                "team_id": str(task.team_id),
+                "reason": body.reason,
+            },
+        }
+    )
+    return payload
 
 
 @router.post("/api/companies/{company_id}/invites", status_code=status.HTTP_201_CREATED)
@@ -508,6 +648,44 @@ async def company_overview(
     }
 
 
+@router.get("/api/leaderboards/company/{company_id}")
+async def company_leaderboard(
+    company_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_company_role(ctx, company_id, "director")
+    company = await session.get(m.CompanyModel, company_id)
+    if company is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Company not found")
+    teams = (
+        await session.execute(
+            select(m.TeamModel)
+            .where(m.TeamModel.company_id == company_id)
+            .order_by(m.TeamModel.name)
+        )
+    ).scalars()
+    items = []
+    for team in teams:
+        leaderboard = await team_leaderboard_payload(session, team.id)
+        items.append(
+            {
+                "team_id": str(team.id),
+                "team_name": team.name,
+                "points": sum(item["points"] for item in leaderboard["items"]),
+                "completed_tasks": sum(
+                    item["completed_tasks"] for item in leaderboard["items"]
+                ),
+                "members": len(leaderboard["items"]),
+            }
+        )
+    items.sort(key=lambda item: (-item["points"], -item["completed_tasks"], item["team_name"]))
+    for rank, item in enumerate(items, start=1):
+        item["rank"] = rank
+    return {"company_id": str(company.id), "company_name": company.name, "items": items}
+
+
 @router.post("/api/teams/{team_id}/meetings", status_code=status.HTTP_201_CREATED)
 async def create_team_meeting(
     team_id: UUID,
@@ -569,7 +747,82 @@ async def get_v2_meeting(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Meeting not found")
     ctx = await build_tenant_context(current_user.id, session)
     require_team_member(ctx, row.team_id)
-    return _meeting_payload(row)
+    payload = _meeting_payload(row)
+    participants = await session.execute(
+        select(m.UserModel, m.MeetingRsvpModel.status)
+        .join(m.MeetingRsvpModel, m.MeetingRsvpModel.user_id == m.UserModel.id)
+        .where(m.MeetingRsvpModel.meeting_id == meeting_id)
+    )
+    transcripts = (
+        await session.execute(
+            select(m.TranscriptEventModel)
+            .where(m.TranscriptEventModel.meeting_db_id == meeting_id)
+            .order_by(m.TranscriptEventModel.ts)
+        )
+    ).scalars()
+    tasks = (
+        await session.execute(
+            select(m.TaskModel)
+            .where(
+                m.TaskModel.team_id == row.team_id,
+                m.TaskModel.source.in_(["meeting", "meeting_transcript"]),
+            )
+            .order_by(m.TaskModel.created_at.desc())
+        )
+    ).scalars()
+    payload.update(
+        {
+            "participants": [
+                {
+                    "id": str(user.id),
+                    "display_name": user.display_name,
+                    "rsvp": rsvp,
+                }
+                for user, rsvp in participants.all()
+            ],
+            "transcript_lines": [
+                {
+                    "speaker_name": line.speaker_name,
+                    "text": line.text,
+                    "ts": line.ts,
+                    "is_final": line.is_final,
+                }
+                for line in transcripts
+            ],
+            "extracted_tasks": [_task_payload(task, None) for task in tasks],
+        }
+    )
+    return payload
+
+
+@router.get("/api/integrations/telemost/status")
+async def telemost_status(current_user: CurrentUser) -> dict:
+    del current_user
+    return {
+        "available": True,
+        "mode": "managed",
+        "provider": "yandex_telemost",
+        "message": "Ссылки создаются автоматически при подтверждении встречи.",
+    }
+
+
+@router.get("/api/deploy/status")
+async def deploy_status(current_user: CurrentUser) -> dict:
+    del current_user
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "environment": settings.app_env,
+        "service": "brain-api",
+        "version": "v2",
+        "features": {
+            "websocket": True,
+            "yougile": True,
+            "telegram": bool(settings.telegram_bot_token),
+            "telemost": True,
+        },
+        "checked_at": datetime.now(UTC),
+    }
 
 
 @router.post("/api/meetings/{meeting_id}/confirm")
@@ -1044,6 +1297,24 @@ def _meeting_payload(row: m.MeetingModel) -> dict:
         "state": row.state,
         "status": row.status,
         "summary": row.summary,
+    }
+
+
+def _task_payload(task: m.TaskModel, assignee: m.UserModel | None) -> dict:
+    return {
+        "id": str(task.id),
+        "public_id": task.public_id,
+        "team_id": str(task.team_id) if task.team_id else None,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "priority": task.priority,
+        "assignee_id": str(task.assignee_id) if task.assignee_id else None,
+        "assignee_name": assignee.display_name if assignee else task.assignee_text,
+        "deadline": task.deadline,
+        "source": task.source,
+        "completed_at": task.completed_at,
+        "last_status_update_at": task.last_status_update_at,
     }
 
 
