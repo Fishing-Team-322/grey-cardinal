@@ -71,6 +71,10 @@ class LLMProviderConfig:
     timeout_seconds: int
     max_retries: int
     strict_json: bool
+    # HTTP(S)-прокси для исходящих LLM-запросов. Нужен, когда IP сервера
+    # гео-блокируется провайдером (напр. Groq отдаёт 403 для части регионов).
+    # Берётся из LLM_PROXY; секрет в логи/health не попадает.
+    proxy: str | None = None
     # transport не участвует в сравнении/хешировании — только для тестов.
     transport: httpx.AsyncBaseTransport | None = field(
         default=None, compare=False, hash=False, repr=False
@@ -143,7 +147,10 @@ class OpenAICompatibleJSONProvider:
 
         client_kwargs: dict = {"timeout": self.config.timeout_seconds}
         if self.config.transport is not None:
+            # В тестах используется MockTransport (proxy с ним несовместим).
             client_kwargs["transport"] = self.config.transport
+        elif self.config.proxy:
+            client_kwargs["proxy"] = self.config.proxy
 
         async with httpx.AsyncClient(**client_kwargs) as client:
             try:
@@ -282,6 +289,7 @@ class LLMProviderFactory:
                 timeout_seconds=self._settings.llm_timeout_seconds,
                 max_retries=self._settings.llm_max_retries,
                 strict_json=self._settings.llm_strict_json,
+                proxy=self._proxy_for(self._settings.llm_provider),
             )
         raise ValueError("No LLM provider configured for team")
 
@@ -296,7 +304,14 @@ class LLMProviderFactory:
             timeout_seconds=self._settings.llm_fallback_timeout_seconds,
             max_retries=self._settings.llm_max_retries,
             strict_json=self._settings.llm_strict_json,
+            proxy=self._proxy_for(self._settings.llm_fallback_provider),
         )
+
+    def _proxy_for(self, provider: str) -> str | None:
+        """Прокси применяем только к внешним провайдерам (local/Ollama — внутри сети)."""
+        if provider == "local":
+            return None
+        return self._settings.llm_proxy or None
 
     def _from_model(self, settings: m.LLMSettingsModel) -> LLMProviderConfig:
         return LLMProviderConfig(
@@ -307,4 +322,5 @@ class LLMProviderFactory:
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
             strict_json=settings.strict_json,
+            proxy=self._proxy_for(settings.provider),
         )

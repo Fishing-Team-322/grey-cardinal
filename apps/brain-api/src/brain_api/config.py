@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 20
     llm_max_retries: int = 2
     llm_strict_json: bool = True
+    # Optional outbound proxy for LLM calls (e.g. when the server IP is
+    # geo-blocked by the provider). Example: http://user:pass@host:port
+    llm_proxy: str = ""
 
     # ── Fallback LLM provider (e.g. OpenRouter) ──────────────────────────
     # Activated only when the primary fails (timeout / 429 / 5xx / invalid

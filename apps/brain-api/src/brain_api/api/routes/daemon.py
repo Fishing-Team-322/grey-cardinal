@@ -264,11 +264,19 @@ async def ingest_team_text(container: Container, team_id: UUID, text: str, sourc
         team = await session.get(m.TeamModel, team_id)
         if team is None or team.tg_chat_id is None:
             return {"kind": "unknown", "proposal_created": False}
+        member_names = list(
+            await session.scalars(
+                select(m.UserModel.display_name)
+                .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                .where(m.TeamMemberModel.team_id == team.id)
+            )
+        )
         try:
             parsed = await container.semantic_parser.parse(
                 SemanticMessageInput(
                     team_id=team.id, message_text=text, sender_user_id=None,
                     team_timezone=team.timezone, now=now,
+                    team_members=member_names,
                 )
             )
         except Exception as exc:  # noqa: BLE001
