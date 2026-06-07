@@ -65,9 +65,16 @@ apps/frontend-dashboard/public/downloads/*-msi-stage/
 
 apps/desktop-app/
 
-# Daemon binaries (published out-of-band, not committed)
-apps/frontend/public/downloads/*.exe
+# Agent/installer binaries — published out-of-band, never committed.
 apps/frontend/public/downloads/*.msi
+apps/frontend/public/downloads/*.exe
+apps/frontend/public/downloads/*.dmg
+apps/frontend/public/downloads/*.deb
 apps/frontend/public/downloads/*.zip
-!apps/frontend/public/downloads/GreyCardinalAgentSetup.exe
+apps/frontend/public/downloads/*-stage/
+
+# Native agent build output (PyInstaller / WiX / CMake).
+native/**/dist/
+native/**/build/
+native/**/installer/**/output/
 proriv/

@@ -34,7 +34,12 @@ async def test_confirm_creates_task_and_mock_board_card(
 
     assert card is not None
     assert card.provider.value == "mock"
-    assert [action.type for action in response.actions] == ["answer_callback", "edit_message"]
+    assert [action.type for action in response.actions] == [
+        "answer_callback",
+        "edit_message",
+        "send_message",
+    ]
+    assert response.actions[2].chat_id == 111
     assert events.events[-1].event.value == "task_created"
 
 

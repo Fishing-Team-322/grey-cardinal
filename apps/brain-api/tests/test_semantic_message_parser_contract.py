@@ -17,6 +17,11 @@ class _Provider:
         return {
             "kind": "task_candidate",
             "confidence": 0.9,
+            "business_relevance": 0.95,
+            "is_actionable": True,
+            "is_abusive": False,
+            "is_vague": False,
+            "should_create_proposal": True,
             "task": {"title": "Prepare invoice", "priority": "high"},
         }
 

@@ -10,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from brain_api.api.routes import (
     accounts,
+    agentic_pm,
     agents,
     daemon,
     debug,
+    grey_board,
     health,
     internal_audio,
     internal_telegram,
@@ -20,6 +22,7 @@ from brain_api.api.routes import (
     tasks,
     v2_tenants,
     websocket,
+    yandex_telemost,
     yougile,
     yougile_board,
     yougile_webhooks,
@@ -70,15 +73,18 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(accounts.router)
+    app.include_router(agentic_pm.router)
     app.include_router(agents.router)
     app.include_router(daemon.router)
     app.include_router(debug.router)
+    app.include_router(grey_board.router)
     app.include_router(internal_telegram.router)
     app.include_router(internal_audio.router)
     app.include_router(meetings.router)
     app.include_router(tasks.router)
     app.include_router(v2_tenants.router)
     app.include_router(websocket.router)
+    app.include_router(yandex_telemost.router)
     app.include_router(yougile.router)
     app.include_router(yougile_board.router)
     app.include_router(yougile_board.sync_router)

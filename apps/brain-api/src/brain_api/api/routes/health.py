@@ -111,11 +111,17 @@ async def _check_llm(container: Container) -> dict[str, object]:
     client_kwargs: dict = {"timeout": 5.0}
     if settings.llm_provider != "local" and settings.llm_proxy:
         client_kwargs["proxy"] = settings.llm_proxy
+    headers = {}
+    if settings.llm_provider == "external_api" and settings.effective_llm_api_key:
+        headers["Authorization"] = f"Bearer {settings.effective_llm_api_key}"
     try:
         async with httpx.AsyncClient(**client_kwargs) as client:
-            response = await client.get(f"{settings.effective_llm_base_url.rstrip('/')}/models")
+            response = await client.get(
+                f"{settings.effective_llm_base_url.rstrip('/')}/models",
+                headers=headers,
+            )
         return {
-            "ok": response.status_code < 500,
+            "ok": 200 <= response.status_code < 300,
             "provider": settings.llm_provider,
             "status_code": response.status_code,
         }

@@ -20,6 +20,15 @@ fishingteam.su {
 		reverse_proxy brain-api:8000
 	}
 
+	# /downloads/* — installer-файлы (MSI и т.п.): всегда attachment,
+	# octet-stream, без кэша, чтобы качалась актуальная сборка агента.
+	handle /downloads/* {
+		header Content-Disposition attachment
+		header Content-Type application/octet-stream
+		header Cache-Control "no-cache, no-store, must-revalidate"
+		reverse_proxy frontend:5173
+	}
+
 	handle {
 		reverse_proxy frontend:5173
 	}

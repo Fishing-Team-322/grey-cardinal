@@ -36,6 +36,13 @@ class TelegramMessageRef(BaseModel):
     chat_id: int
 
 
+class TelegramEntity(BaseModel):
+    type: str
+    offset: int
+    length: int
+    user: TelegramSender | None = None
+
+
 # --------------------------------------------------------------------------- #
 # telegram-bot -> brain-api
 # --------------------------------------------------------------------------- #
@@ -46,6 +53,11 @@ class TelegramMessageEvent(BaseModel):
     sender: TelegramSender
     text: str
     date: datetime
+    entities: list[TelegramEntity] = Field(default_factory=list)
+    reply_to_message_id: int | None = None
+    reply_to_sender: TelegramSender | None = None
+    reply_to_text: str | None = None
+    message_thread_id: int | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -67,6 +79,11 @@ class TelegramCommandEvent(BaseModel):
     args: list[str] = Field(default_factory=list)
     text: str
     date: datetime
+    entities: list[TelegramEntity] = Field(default_factory=list)
+    reply_to_message_id: int | None = None
+    reply_to_sender: TelegramSender | None = None
+    reply_to_text: str | None = None
+    message_thread_id: int | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 

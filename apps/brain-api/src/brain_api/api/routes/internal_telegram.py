@@ -7,6 +7,7 @@ UX: все взаимодействия через inline-кнопки. Кома
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, tzinfo
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -16,6 +17,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from brain_api.api.deps import get_container, verify_internal_token
+from brain_api.application.agentic_tasks import (
+    AssigneeCandidate,
+    AssigneeResolution,
+    IdentityResolver,
+    InteractionMode,
+    TaskDecisionEngine,
+)
 from brain_api.application.rendering import (
     CB_CONFIRM,
     CB_EDIT,
@@ -24,6 +32,9 @@ from brain_api.application.rendering import (
     proposal_keyboard,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
+from brain_api.application.task_status_service import TaskStatusService
+from brain_api.application.telemost_intent import detect_call_intent
+from brain_api.application.use_cases import yandex_telemost as telemost_svc
 from brain_api.application.use_cases.confirm_task import ConfirmTask
 from brain_api.application.use_cases.ingest_chat_message import IngestChatMessage
 from brain_api.application.use_cases.ingest_transcript_event import IngestTranscriptEvent
@@ -69,12 +80,16 @@ from brain_api.application.use_cases.team_settings import (
     is_settings_callback,
     open_settings,
 )
-from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
+from brain_api.config import get_settings
 from brain_api.container import Container
+from brain_api.domain.enums import TaskStatus
+from brain_api.domain.services import format_public_id, parse_public_id, status_for_command
 from brain_api.infrastructure.db import models as m
+from brain_api.integrations.yandex_telemost import YandexTelemostError
 from grey_cardinal_contracts import (
     ActionsResponse,
     AnswerCallbackAction,
+    EditMessageAction,
     SendMessageAction,
     TelegramCallbackEvent,
     TelegramCommandEvent,
@@ -108,6 +123,8 @@ CB_DEMO_RUN = "demo:run"
 CB_BIND_CHAT = "chat:bind"
 CB_MODE_CONFIRM = "mode:confirm"
 CB_MODE_AUTO = "mode:auto"
+CB_TELEMOST_CREATE = "tmcall:create"
+CB_TELEMOST_DISMISS = "tmcall:dismiss"
 
 _DEMO_LINES = [
     "Петя, подготовь оплату до завтра 18:00",
@@ -121,6 +138,13 @@ _DEMO_LINES = [
 def _kb(*rows: list[tuple[str, str]]) -> dict:
     """Build inline_keyboard reply_markup from rows of (text, callback_data)."""
     return {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in row] for row in rows]}
+
+
+def _telemost_prompt_kb() -> dict:
+    return _kb(
+        [("📹 Создать в Яндекс Телемост", CB_TELEMOST_CREATE)],
+        [("Другое / не сейчас", CB_TELEMOST_DISMISS)],
+    )
 
 
 def _main_menu_kb(is_group: bool = False) -> dict:
@@ -185,6 +209,7 @@ _WELCOME_GROUP = (
 _HELP_TEXT = (
     "📖 *Серый Кардинал* — команды\n\n"
     "Большинство действий — через кнопки. Дополнительные команды:\n\n"
+    "`/task @user что сделать до срока` — явно создать задачу\n"
     "`/jira URL EMAIL TOKEN ПРОЕКТ` — подключить Jira\n"
     "  Пример: `/jira https://team.atlassian.net user@mail.com token123 PROJ`\n\n"
     "`/done GC\\-1` — закрыть задачу\n"
@@ -209,6 +234,11 @@ _YOUGILE_SETUP_TEXT = (
     "🟡 *Подключение YouGile*\n\n"
     "Откройте настройки команды на сайте и войдите в YouGile. "
     "Ключ API будет получен и зашифрован автоматически."
+)
+
+_UNBOUND_TEAM_TEXT = (
+    "Этот чат ещё не привязан к команде Grey Cardinal.\n"
+    "Создайте bind-code в кабинете команды и выполните /bind_team CODE."
 )
 
 
@@ -285,23 +315,21 @@ async def bind_team_chat(
     now = datetime.now(UTC)
     code = payload.code.strip().upper()
     async with container.session_factory() as session:
-        teams = (await session.execute(select(m.TeamModel))).scalars().all()
-        team = None
-        for candidate in teams:
-            config = candidate.board_config or {}
-            if str(config.get("telegram_bind_code", "")).upper() != code:
-                continue
-            expires_raw = config.get("telegram_bind_expires_at")
-            if expires_raw:
-                expires_at = datetime.fromisoformat(str(expires_raw))
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=UTC)
-                if expires_at < now:
-                    return _text(payload.chat_id, "Код привязки чата истёк. Создай новый код.")
-            team = candidate
-            break
-        if team is None:
+        bind_code = await session.scalar(
+            select(m.TelegramTeamBindCodeModel).where(m.TelegramTeamBindCodeModel.code == code)
+        )
+        if bind_code is None:
             return _text(payload.chat_id, "Код привязки команды не найден.")
+        expires_at = bind_code.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at < now:
+            return _text(payload.chat_id, "Код привязки чата истёк. Создай новый код.")
+        if bind_code.used_at is not None:
+            return _text(payload.chat_id, "Код привязки чата уже использован.")
+        team = await session.get(m.TeamModel, bind_code.team_id)
+        if team is None:
+            return _text(payload.chat_id, "Команда для этого кода не найдена.")
 
         linker = None
         if payload.linked_by_tg_user_id is not None:
@@ -311,10 +339,7 @@ async def bind_team_chat(
                 )
             )
         team.tg_chat_id = payload.tg_chat_id
-        config = dict(team.board_config or {})
-        config.pop("telegram_bind_code", None)
-        config.pop("telegram_bind_expires_at", None)
-        team.board_config = config
+        bind_code.used_at = now
         chat = await session.scalar(
             select(m.TelegramChatModel).where(
                 m.TelegramChatModel.telegram_chat_id == payload.tg_chat_id
@@ -336,7 +361,7 @@ async def bind_team_chat(
             chat.title = payload.title
             chat.linked_by = linker.id if linker else chat.linked_by
             chat.linked_at = now
-        session.add(team)
+        session.add_all([team, bind_code])
         await session.commit()
 
     return _text(payload.chat_id, "✅ Чат привязан к команде Grey Cardinal.")
@@ -357,6 +382,20 @@ async def ingest_message(
                 return pending
             if is_help_request_text(event.text):
                 return _html(event.chat.id, await materials_for_arg(session, event.text))
+
+    # Группа: явный intent «нужен созвон» → спросить про Телемост (не создаём сами).
+    if event.chat.type in {"group", "supergroup"} and detect_call_intent(event.text):
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.chat.id,
+                    text=(
+                        "🎙 Похоже, нужен созвон. Создать комнату Яндекс Телемоста?"
+                    ),
+                    reply_markup=_telemost_prompt_kb(),
+                )
+            ]
+        )
 
     v2_response = await _try_v2_semantic_message(event, container)
     if v2_response is not None:
@@ -382,6 +421,13 @@ async def ingest_callback(
     chat_id = event.message.chat_id
     msg_id = event.message.message_id
     cq_id = event.callback_query_id
+
+    if data.startswith("taskcmd:"):
+        return await _handle_taskcmd_callback(container, event)
+
+    # ── Telemost: выбор провайдера для созвона ────────────────────────────
+    if data.startswith("tmcall:"):
+        return await _handle_telemost_callback(container, event)
 
     # ── Meeting (созвон) callbacks: подтверждение времени и RSVP ──────────
     if is_meeting_callback(data):
@@ -460,15 +506,36 @@ async def ingest_callback(
 
     if data in (CB_MODE_CONFIRM, CB_MODE_AUTO):
         required = data == CB_MODE_CONFIRM
-        async with container.make_uow() as uow:
-            project = await uow.projects.ensure_default(container.config.default_workspace_name)
-            chat = await uow.chats.get_by_telegram_id(chat_id)
-            if chat is None:
-                await uow.chats.upsert(chat_id, "supergroup", None, project.id)
-            else:
-                await uow.chats.upsert(chat_id, chat.type, chat.title, project.id)
-            await uow.chats.set_confirmation_required(chat_id, required)
-            await uow.commit()
+        if not hasattr(container, "session_factory"):
+            async with container.make_uow() as uow:
+                project = await uow.projects.ensure_default(container.config.default_workspace_name)
+                chat = await uow.chats.get_by_telegram_id(chat_id)
+                if chat is None:
+                    await uow.chats.upsert(chat_id, "supergroup", None, project.id)
+                else:
+                    await uow.chats.upsert(chat_id, chat.type, chat.title, project.id)
+                await uow.chats.set_confirmation_required(chat_id, required)
+                await uow.commit()
+            mode_text = (
+                "✅ Режим включён: задачи создаются после подтверждения в чате."
+                if required
+                else "✅ Режим включён: задачи создаются сразу, без сообщений в чат."
+            )
+            return _edit_with_kb(
+                chat_id,
+                msg_id,
+                cq_id,
+                f"{mode_text}\n\nЯ уже мониторю чат.",
+                _main_menu_kb(is_group=True),
+            )
+        async with container.session_factory() as session:
+            chat = await session.scalar(
+                select(m.TelegramChatModel).where(m.TelegramChatModel.telegram_chat_id == chat_id)
+            )
+            if chat is None or chat.team_id is None:
+                return _edit_with_kb(chat_id, msg_id, cq_id, _UNBOUND_TEAM_TEXT, _back_kb())
+            chat.task_confirmation_required = required
+            await session.commit()
         mode_text = (
             "✅ Режим включён: задачи создаются после подтверждения в чате."
             if required
@@ -492,19 +559,11 @@ async def ingest_callback(
         return _edit_with_kb(chat_id, msg_id, cq_id, _YOUGILE_SETUP_TEXT, _back_kb())
 
     if data == CB_BIND_CHAT:
-        async with container.make_uow() as uow:
-            project = await uow.projects.ensure_default(container.config.default_workspace_name)
-            await uow.chats.upsert(chat_id, "group", None, project.id)
-            bound_chat = await uow.chats.get_by_telegram_id(chat_id)
-            if bound_chat is None:
-                raise RuntimeError("chat binding failed")
-            await uow.projects.set_default_chat(project.id, bound_chat.id)
-            await uow.commit()
         return _edit_with_kb(
             chat_id,
             msg_id,
             cq_id,
-            "✅ Чат привязан к workspace!\nТеперь я буду следить за сообщениями здесь.",
+            _UNBOUND_TEAM_TEXT,
             _back_kb(),
         )
 
@@ -653,8 +712,11 @@ async def ingest_callback(
 
 
 async def _try_v2_semantic_message(
-    event: TelegramMessageEvent,
+    event: TelegramMessageEvent | TelegramCommandEvent,
     container: Container,
+    *,
+    interaction_mode: InteractionMode = InteractionMode.AUTO_BACKGROUND,
+    semantic_text: str | None = None,
 ) -> ActionsResponse | None:
     if event.chat.type not in {"group", "supergroup", "channel"}:
         return None
@@ -709,10 +771,28 @@ async def _try_v2_semantic_message(
             await session.commit()
             return ActionsResponse(actions=[])
 
+        reply_sender = None
+        if event.reply_to_sender is not None:
+            reply_sender = await session.scalar(
+                select(m.UserModel)
+                .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                .where(
+                    m.TeamMemberModel.team_id == team.id,
+                    m.UserModel.telegram_user_id == event.reply_to_sender.id,
+                )
+            )
         message = m.ChatMessageModel(
             telegram_message_id=event.message_id,
             chat_id=chat.id,
             sender_id=sender.id,
+            sender_telegram_user_id=event.sender.id,
+            reply_to_message_id=event.reply_to_message_id,
+            reply_to_sender_user_id=reply_sender.id if reply_sender else None,
+            reply_to_sender_telegram_user_id=(
+                event.reply_to_sender.id if event.reply_to_sender else None
+            ),
+            reply_to_text=event.reply_to_text,
+            message_thread_id=event.message_thread_id,
             text=event.text,
             raw_json=event.raw or {},
         )
@@ -731,12 +811,17 @@ async def _try_v2_semantic_message(
             parsed = await container.semantic_parser.parse(
                 SemanticMessageInput(
                     team_id=team.id,
-                    message_text=event.text,
+                    message_text=semantic_text or event.text,
                     sender_user_id=sender.id,
                     team_timezone=team.timezone,
                     now=now,
                     sender_display_name=sender.display_name,
                     team_members=member_names,
+                    interaction_mode=interaction_mode.value,
+                    reply_to_text=event.reply_to_text,
+                    reply_to_sender_display_name=(
+                        reply_sender.display_name if reply_sender else None
+                    ),
                 )
             )
         except Exception as exc:
@@ -754,11 +839,28 @@ async def _try_v2_semantic_message(
 
         kind = parsed["kind"]
         confidence = float(parsed["confidence"])
-        if (
-            kind == "task_candidate"
-            and confidence >= container.config.task_extraction_min_confidence
-        ):
-            return await _route_v2_task_candidate(session, team, sender, message, parsed, event)
+        if kind == "task_candidate":
+            resolver = IdentityResolver(session)
+            task_payload = parsed.get("task") or {}
+            resolution = await resolver.resolve_assignee(
+                team.id,
+                task_payload.get("assignee_reference") or task_payload.get("assignee_text"),
+                event.entities,
+                semantic_text or event.text,
+                reply_sender.id if reply_sender else None,
+                interaction_mode,
+            )
+            return await _route_v2_task_candidate(
+                session,
+                team,
+                sender,
+                message,
+                parsed,
+                event,
+                resolution,
+                interaction_mode,
+                semantic_text or event.text,
+            )
         if kind == "meeting_candidate" and confidence >= 0.6:
             return await _route_v2_meeting_candidate(session, team, sender, message, parsed, event)
         if kind == "daily_report":
@@ -768,6 +870,16 @@ async def _try_v2_semantic_message(
         if kind == "status_update":
             return await _route_v2_status_update(
                 session, container, team, sender, message, parsed, event
+            )
+        if interaction_mode in {
+            InteractionMode.EXPLICIT_TASK_COMMAND,
+            InteractionMode.REPLY_TASK_COMMAND,
+        }:
+            await session.commit()
+            return _text(
+                event.chat.id,
+                "Я понял команду создания задачи, но не вижу конкретного рабочего результата. "
+                "Напиши, что именно нужно сделать.",
             )
 
         session.add(
@@ -783,20 +895,133 @@ async def _try_v2_semantic_message(
         return ActionsResponse(actions=[])
 
 
-async def _route_v2_task_candidate(session, team, sender, message, parsed, event):
+async def _route_v2_task_candidate(
+    session,
+    team,
+    sender,
+    message,
+    parsed,
+    event,
+    resolution: AssigneeResolution,
+    interaction_mode: InteractionMode,
+    semantic_text: str,
+):
     task = parsed.get("task") or {}
-    title = str(task.get("title") or event.text[:120]).strip()
-    assignee_text = task.get("assignee_text")
-    assignee = await _match_v2_assignee(session, team.id, assignee_text)
+    title = str(task.get("title") or semantic_text[:120]).strip()
+    assignee_text = resolution.display_name or task.get("assignee_reference") or task.get(
+        "assignee_text"
+    )
     deadline = _parse_dt(task.get("deadline"), team.timezone)
-    duplicate = await _find_v2_duplicate(session, team.id, title, assignee.id if assignee else None)
-    if duplicate is not None:
+    duplicate = await _find_v2_duplicate(session, team.id, title, resolution.user_id)
+    decision = TaskDecisionEngine().decide(
+        semantic_result=parsed,
+        identity_resolution=resolution,
+        interaction_mode=interaction_mode,
+        has_context=bool(event.reply_to_text),
+        duplicate=duplicate is not None,
+    )
+    if decision.action == "ignore":
+        await session.commit()
+        return ActionsResponse(actions=[])
+    if decision.action == "create_ai_inbox_item":
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind=decision.reason
+                if decision.reason
+                in {
+                    "needs_assignee",
+                    "needs_task_object",
+                    "duplicate_suspected",
+                    "low_confidence",
+                }
+                else "task_candidate_uncertain",
+                status="pending",
+                reason=decision.reason,
+                raw_text=semantic_text,
+                semantic_payload=parsed,
+                identity_payload=resolution.payload(),
+                duplicate_task_id=duplicate.id if duplicate else None,
+                confidence=decision.confidence,
+            )
+        )
+        await session.commit()
+        return ActionsResponse(actions=[])
+    if decision.action == "ask_clarification":
+        if decision.reason == "needs_assignee":
+            return await _create_assignee_draft(
+                session,
+                team,
+                message,
+                parsed,
+                semantic_text,
+                resolution,
+                event.chat.id,
+            )
         await session.commit()
         return _text(
             event.chat.id,
-            "Похоже, такая задача уже есть:\n\n"
-            f"{duplicate.public_id} {duplicate.title}\n"
-            f"Статус: {duplicate.status}\n\nНе создаю дубль.",
+            "Я понял намерение создать задачу, но не понял конкретный результат. "
+            "Напиши, что именно нужно сделать.",
+        )
+    if decision.action == "duplicate_warning" and duplicate is not None:
+        proposal = m.TaskProposalModel(
+            team_id=team.id,
+            source="telegram_chat",
+            source_message_id=message.id,
+            title=title,
+            description=task.get("description"),
+            assignee_text=assignee_text,
+            assignee_id=resolution.user_id,
+            deadline=deadline,
+            deadline_timezone=team.timezone,
+            priority=task.get("priority") or "medium",
+            confidence=float(parsed["confidence"]),
+            raw_text=semantic_text,
+            extractor_payload={**parsed, "identity_resolution": resolution.payload()},
+            similar_task_id=duplicate.id,
+        )
+        session.add(proposal)
+        await session.flush()
+        confirmation = m.ConfirmationModel(
+            team_id=team.id,
+            proposal_id=proposal.id,
+            status="pending",
+            telegram_chat_id=event.chat.id,
+        )
+        session.add(confirmation)
+        await session.commit()
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.chat.id,
+                    text=(
+                        "Похоже, такая задача уже есть:\n\n"
+                        f"{duplicate.public_id} {duplicate.title}\n\nЧто сделать?"
+                    ),
+                    reply_markup={
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "Связать",
+                                    "callback_data": f"taskcmd:link:{confirmation.id}",
+                                },
+                                {
+                                    "text": "Создать всё равно",
+                                    "callback_data": f"taskcmd:create_anyway:{confirmation.id}",
+                                },
+                            ],
+                            [
+                                {
+                                    "text": "Отмена",
+                                    "callback_data": f"taskcmd:cancel:{confirmation.id}",
+                                }
+                            ],
+                        ]
+                    },
+                )
+            ]
         )
 
     proposal = m.TaskProposalModel(
@@ -806,13 +1031,13 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
         title=title,
         description=task.get("description"),
         assignee_text=assignee_text,
-        assignee_id=assignee.id if assignee else None,
+        assignee_id=resolution.user_id,
         deadline=deadline,
         deadline_timezone=team.timezone,
         priority=task.get("priority") or "medium",
         confidence=float(parsed["confidence"]),
-        raw_text=event.text,
-        extractor_payload=parsed,
+        raw_text=semantic_text,
+        extractor_payload={**parsed, "identity_resolution": resolution.payload()},
     )
     session.add(proposal)
     await session.flush()
@@ -831,7 +1056,7 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
                 text=(
                     "🧠 Нашёл задачу\n\n"
                     f"Что сделать:\n{proposal.title}\n\n"
-                    f"Исполнитель:\n{proposal.assignee_text or 'не указан'}\n\n"
+                    f"Исполнитель:\n{proposal.assignee_text or 'без исполнителя'}\n\n"
                     "Дедлайн:\n"
                     f"{proposal.deadline.isoformat() if proposal.deadline else 'не указан'} "
                     f"{team.timezone}\n\nСоздать карточку?"
@@ -840,6 +1065,226 @@ async def _route_v2_task_candidate(session, team, sender, message, parsed, event
             )
         ]
     )
+
+
+async def _create_assignee_draft(
+    session,
+    team,
+    message,
+    parsed,
+    semantic_text,
+    resolution: AssigneeResolution,
+    chat_id: int,
+) -> ActionsResponse:
+    task = parsed.get("task") or {}
+    proposal = m.TaskProposalModel(
+        team_id=team.id,
+        source="telegram_chat",
+        source_message_id=message.id,
+        title=str(task.get("title") or semantic_text[:120]).strip(),
+        description=task.get("description"),
+        assignee_text=task.get("assignee_reference") or task.get("assignee_text"),
+        deadline=_parse_dt(task.get("deadline"), team.timezone),
+        deadline_timezone=team.timezone,
+        priority=task.get("priority") or "medium",
+        confidence=float(parsed["confidence"]),
+        raw_text=semantic_text,
+        extractor_payload={
+            **parsed,
+            "identity_resolution": resolution.payload(),
+            "draft_kind": "task_command",
+        },
+    )
+    session.add(proposal)
+    await session.flush()
+    confirmation = m.ConfirmationModel(
+        team_id=team.id,
+        proposal_id=proposal.id,
+        status="pending",
+        telegram_chat_id=chat_id,
+    )
+    session.add(confirmation)
+    await session.commit()
+
+    candidates = resolution.candidates
+    if not candidates:
+        candidates = [
+            AssigneeCandidate(
+                user_id=user.id,
+                display_name=user.display_name,
+                source="manual",
+                confidence=1.0,
+            )
+            for user in (
+                await session.execute(
+                    select(m.UserModel)
+                    .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                    .where(m.TeamMemberModel.team_id == team.id)
+                    .limit(6)
+                )
+            ).scalars()
+        ]
+    rows = []
+    candidate_payload = []
+    for index, candidate in enumerate(candidates[:6]):
+        user_id = candidate.user_id
+        display_name = candidate.display_name
+        if user_id is None:
+            continue
+        candidate_payload.append({"user_id": str(user_id), "display_name": display_name})
+        rows.append(
+            [
+                {
+                    "text": display_name,
+                    "callback_data": f"taskcmd:assignee:{confirmation.id}:{index}",
+                }
+            ]
+        )
+    proposal.extractor_payload = {
+        **(proposal.extractor_payload or {}),
+        "assignee_candidates": candidate_payload,
+    }
+    rows.append(
+        [
+            {
+                "text": "Без исполнителя",
+                "callback_data": f"taskcmd:no_assignee:{confirmation.id}",
+            },
+            {"text": "Отмена", "callback_data": f"taskcmd:cancel:{confirmation.id}"},
+        ]
+    )
+    await session.commit()
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=chat_id,
+                text=(
+                    f"Я не нашёл сотрудника «{resolution.raw_reference or 'не указан'}».\n\n"
+                    "Выберите исполнителя:"
+                ),
+                reply_markup={"inline_keyboard": rows},
+            )
+        ]
+    )
+
+
+async def _handle_taskcmd_callback(container: Container, event: TelegramCallbackEvent):
+    parts = event.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    cq_id = event.callback_query_id
+    if action in {
+        "cancel",
+        "create",
+        "create_anyway",
+        "link",
+        "no_assignee",
+        "assignee",
+    }:
+        try:
+            confirmation_id = UUID(parts[2])
+        except (IndexError, ValueError):
+            return _answer(cq_id, "Черновик не найден")
+    else:
+        return _answer(cq_id, "Действие недоступно")
+
+    if action in {"create", "create_anyway"}:
+        async with container.make_uow() as uow:
+            return await ConfirmTask(
+                uow, container.board, container.event_publisher, container.config
+            ).execute(
+                confirmation_id=confirmation_id,
+                callback_query_id=cq_id,
+                chat_id=event.message.chat_id,
+                message_id=event.message.message_id,
+                actor_telegram_id=event.from_user.id,
+            )
+    if action == "cancel":
+        async with container.make_uow() as uow:
+            return await RejectTask(uow, container.event_publisher).execute(
+                confirmation_id=confirmation_id,
+                callback_query_id=cq_id,
+                chat_id=event.message.chat_id,
+                message_id=event.message.message_id,
+                actor_telegram_id=event.from_user.id,
+            )
+
+    async with container.session_factory() as session:
+        confirmation = await session.get(m.ConfirmationModel, confirmation_id)
+        if confirmation is None or confirmation.status != "pending":
+            return _answer(cq_id, "Черновик уже закрыт")
+        proposal = await session.get(m.TaskProposalModel, confirmation.proposal_id)
+        if proposal is None:
+            return _answer(cq_id, "Черновик не найден")
+        if action == "link":
+            if proposal.similar_task_id is None:
+                return _answer(cq_id, "Похожая задача не найдена")
+            duplicate = await session.get(m.TaskModel, proposal.similar_task_id)
+            if duplicate is None:
+                return _answer(cq_id, "Похожая задача не найдена")
+            confirmation.status = "rejected"
+            await session.commit()
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(
+                        callback_query_id=cq_id,
+                        text=f"Связано с {duplicate.public_id}",
+                    ),
+                    EditMessageAction(
+                        chat_id=event.message.chat_id,
+                        message_id=event.message.message_id,
+                        text=(
+                            "Новая карточка не создана.\n\n"
+                            f"Используем существующую задачу: "
+                            f"{duplicate.public_id} {duplicate.title}"
+                        ),
+                    ),
+                ]
+            )
+        if action == "no_assignee":
+            proposal.assignee_id = None
+            proposal.assignee_text = None
+        else:
+            try:
+                index = int(parts[3])
+                candidate = (proposal.extractor_payload or {})["assignee_candidates"][index]
+                user = await session.get(m.UserModel, UUID(candidate["user_id"]))
+            except (IndexError, KeyError, TypeError, ValueError):
+                return _answer(cq_id, "Исполнитель не найден")
+            if user is None:
+                return _answer(cq_id, "Исполнитель не найден")
+            proposal.assignee_id = user.id
+            proposal.assignee_text = user.display_name
+        await session.commit()
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Исполнитель выбран"),
+                EditMessageAction(
+                    chat_id=event.message.chat_id,
+                    message_id=event.message.message_id,
+                    text=(
+                        "Создать задачу?\n\n"
+                        f"Что сделать: {proposal.title}\n"
+                        f"Исполнитель: {proposal.assignee_text or 'без исполнителя'}\n"
+                        "Дедлайн: "
+                        f"{proposal.deadline.isoformat() if proposal.deadline else 'не указан'}"
+                    ),
+                    reply_markup={
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "Создать",
+                                    "callback_data": f"taskcmd:create:{confirmation.id}",
+                                },
+                                {
+                                    "text": "Отмена",
+                                    "callback_data": f"taskcmd:cancel:{confirmation.id}",
+                                },
+                            ]
+                        ]
+                    },
+                ),
+            ]
+        )
 
 
 async def _route_v2_meeting_candidate(session, team, sender, message, parsed, event):
@@ -927,87 +1372,92 @@ async def _route_v2_absence(session, team, sender, message, parsed, event):
 async def _route_v2_status_update(session, container, team, sender, message, parsed, event):
     """Сотрудник пишет статус в чат («приступаю» / «готово» / «застрял») →
     меняем статус задачи, двигаем карточку на доске и подтверждаем в чате."""
-    from brain_api.domain.enums import TaskStatus
 
-    now = datetime.now(UTC)
     detected = (parsed.get("daily_report") or {}).get("detected_status")
     if detected not in {"done", "in_progress", "blocked"}:
         await session.commit()
         return ActionsResponse(actions=[])
 
-    active = ["todo", "in_progress", "blocked", "review"]
-    task = await session.scalar(
-        select(m.TaskModel)
-        .where(
-            m.TaskModel.team_id == team.id,
-            m.TaskModel.assignee_id == sender.id,
-            m.TaskModel.status.in_(active),
-        )
-        .order_by(m.TaskModel.updated_at.desc())
-    )
-    # запасной матчинг: по имени исполнителя в тексте задачи (если assignee_id не проставлен)
-    if task is None:
-        name = (sender.display_name or sender.telegram_username or "").split()
-        needle = name[0].lower() if name else ""
-        if needle:
-            rows = await session.execute(
-                select(m.TaskModel)
-                .where(
-                    m.TaskModel.team_id == team.id,
-                    m.TaskModel.status.in_(active),
-                    m.TaskModel.assignee_text.is_not(None),
-                )
-                .order_by(m.TaskModel.updated_at.desc())
+    task = None
+    public_match = re.search(r"(?:#)?GC-\d+", event.text, flags=re.IGNORECASE)
+    if public_match:
+        task = await session.scalar(
+            select(m.TaskModel).where(
+                m.TaskModel.team_id == team.id,
+                func.lower(m.TaskModel.public_id) == public_match.group(0).lstrip("#").lower(),
             )
-            for candidate in rows.scalars():
-                if needle in (candidate.assignee_text or "").lower():
-                    task = candidate
-                    break
+        )
+    if task is None and message.reply_to_message_id is not None:
+        replied = await session.scalar(
+            select(m.ChatMessageModel).where(
+                m.ChatMessageModel.chat_id == message.chat_id,
+                m.ChatMessageModel.telegram_message_id == message.reply_to_message_id,
+            )
+        )
+        if replied is not None:
+            task = await session.scalar(
+                select(m.TaskModel).where(
+                    m.TaskModel.team_id == team.id,
+                    m.TaskModel.source_message_id == replied.id,
+                )
+            )
+            if task is None:
+                proposal = await session.scalar(
+                    select(m.TaskProposalModel).where(
+                        m.TaskProposalModel.team_id == team.id,
+                        m.TaskProposalModel.source_message_id == replied.id,
+                    )
+                )
+                if proposal is not None:
+                    task = await session.scalar(
+                        select(m.TaskModel).where(
+                            m.TaskModel.created_from_proposal_id == proposal.id
+                        )
+                    )
     if task is None:
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind="low_confidence",
+                status="pending",
+                reason="status_update_without_task_context",
+                raw_text=event.text,
+                semantic_payload=parsed,
+                confidence=float(parsed.get("confidence") or 0.0),
+            )
+        )
         await session.commit()
         return ActionsResponse(actions=[])
 
     was_done = task.status == "done"
-    task.status = detected
-    task.last_status_update_at = now
-    if detected == "done":
-        task.completed_at = now
-        if not was_done:
-            await grant_team_xp(
-                session,
-                user_id=task.assignee_id or sender.id,
-                team_id=team.id,
-                task_id=task.id,
-                kind="task_completed",
-                points=TASK_COMPLETED_XP,
-                reason=f"Закрыл задачу {task.public_id}",
-                idempotency_key=f"task_completed:{task.id}",
-            )
-
-    board_ok = True
-    card = await session.scalar(
-        select(m.BoardCardModel).where(m.BoardCardModel.task_id == task.id)
+    sync = await TaskStatusService(container.board_mirror).update_status(
+        task.id,
+        TaskStatus(detected),
+        actor_id=sender.id,
+        action="daily_report_status_update",
     )
-    if card is not None:
-        try:
-            if detected == "done":
-                await container.board.close_card(card.external_card_id)
-            else:
-                await container.board.move_card(card.external_card_id, TaskStatus(detected))
-        except Exception as exc:  # noqa: BLE001 — ошибка доски не должна терять статус
-            board_ok = False
-            logger.warning("board move failed for %s: %s", task.public_id, exc)
+    if detected == "done" and not was_done:
+        await grant_team_xp(
+            session,
+            user_id=task.assignee_id or sender.id,
+            team_id=team.id,
+            task_id=task.id,
+            kind="task_completed",
+            points=TASK_COMPLETED_XP,
+            reason=f"Закрыл задачу {task.public_id}",
+            idempotency_key=f"task_completed:{task.id}",
+        )
     await session.commit()
 
     labels = {"in_progress": "🔄 В работе", "done": "✅ Готово", "blocked": "⛔ Заблокирована"}
     text = f"{task.public_id} {task.title}\n→ {labels[detected]}"
-    if card is not None:
-        text += (
-            "\n(карточка на доске обновлена)" if board_ok
-            else "\n(доску синхронизировать не удалось)"
-        )
+    text += (
+        "\n(карточка на доске обновлена)"
+        if sync.sync_status != "error"
+        else f"\n(доску синхронизировать не удалось: {sync.sync_error})"
+    )
     return _text(event.chat.id, text)
-
 
 async def _match_v2_assignee(session, team_id, assignee_text):
     if not assignee_text:
@@ -1067,7 +1517,7 @@ def _parse_dt(value, timezone: str = "UTC"):
     return parsed.astimezone(UTC)
 
 
-def _display_name_from_event(event: TelegramMessageEvent) -> str:
+def _display_name_from_event(event: TelegramMessageEvent | TelegramCommandEvent) -> str:
     parts = [part for part in (event.sender.first_name, event.sender.last_name) if part]
     return " ".join(parts) or event.sender.username or f"user{event.sender.id}"
 
@@ -1083,23 +1533,43 @@ async def ingest_command(
 
     # ── /start — главное меню с кнопками ─────────────────────────────────
     if command == "start":
-        # Auto-bind group chat on /start
         if is_group:
-            async with container.make_uow() as uow:
-                project = await uow.projects.ensure_default(container.config.default_workspace_name)
-                await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
-                bound_chat = await uow.chats.get_by_telegram_id(chat_id)
-                if bound_chat is None:
-                    raise RuntimeError("chat binding failed")
-                await uow.projects.set_default_chat(project.id, bound_chat.id)
-                await uow.commit()
+            if not hasattr(container, "session_factory"):
+                async with container.make_uow() as uow:
+                    project = await uow.projects.ensure_default(
+                        container.config.default_workspace_name
+                    )
+                    await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
+                    bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+                    if bound_chat is None:
+                        raise RuntimeError("chat binding failed")
+                    await uow.projects.set_default_chat(project.id, bound_chat.id)
+                    await uow.commit()
+                return ActionsResponse(
+                    actions=[
+                        SendMessageAction(
+                            chat_id=chat_id,
+                            text=_WELCOME_GROUP,
+                            parse_mode="Markdown",
+                            reply_markup=_confirmation_mode_kb(),
+                        )
+                    ]
+                )
+            async with container.session_factory() as session:
+                chat = await session.scalar(
+                    select(m.TelegramChatModel).where(
+                        m.TelegramChatModel.telegram_chat_id == chat_id
+                    )
+                )
+                if chat is None or chat.team_id is None:
+                    return _text(chat_id, _UNBOUND_TEAM_TEXT)
             return ActionsResponse(
                 actions=[
                     SendMessageAction(
                         chat_id=chat_id,
                         text=_WELCOME_GROUP,
                         parse_mode="Markdown",
-                        reply_markup=_confirmation_mode_kb(),
+                        reply_markup=_main_menu_kb(is_group=True),
                     )
                 ]
             )
@@ -1141,6 +1611,26 @@ async def ingest_command(
     if command == "settings":
         async with container.session_factory() as session:
             return await open_settings(session, chat_id)
+
+    if command == "task":
+        task_text = " ".join(event.args).strip()
+        if not task_text:
+            return _text(
+                chat_id,
+                "Формат: /task @username подготовить отчёт до завтра 18:00",
+            )
+        mode = (
+            InteractionMode.REPLY_TASK_COMMAND
+            if event.reply_to_message_id is not None
+            else InteractionMode.EXPLICIT_TASK_COMMAND
+        )
+        response = await _try_v2_semantic_message(
+            event,
+            container,
+            interaction_mode=mode,
+            semantic_text=task_text,
+        )
+        return response or _text(chat_id, "Команда /task доступна в привязанном чате команды.")
 
     if command in {"leaderboard", "rating", "top"}:
         async with container.session_factory() as session:
@@ -1231,10 +1721,9 @@ async def ingest_command(
     # ── Task status commands ──────────────────────────────────────────────
     _STATUS_COMMANDS = {"start_task", "block", "done"}
     if command in _STATUS_COMMANDS:
-        async with container.make_uow() as uow:
-            return await UpdateTaskStatus(
-                uow, container.board, container.event_publisher, container.config
-            ).execute(command, event.args, chat_id)
+        return await _handle_v2_status_command(
+            container, command, event.args, chat_id, event.sender.id
+        )
 
     # ── Meeting commands ──────────────────────────────────────────────────
     if command == "meeting_start":
@@ -1323,15 +1812,17 @@ async def ingest_command(
         )
 
     if command == "bind_chat":
-        async with container.make_uow() as uow:
-            project = await uow.projects.ensure_default(container.config.default_workspace_name)
-            await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
-            bound_chat = await uow.chats.get_by_telegram_id(chat_id)
-            if bound_chat is None:
-                raise RuntimeError("chat binding failed")
-            await uow.projects.set_default_chat(project.id, bound_chat.id)
-            await uow.commit()
-        return _text(chat_id, f"✅ Чат привязан к workspace: {project.name}")
+        if container.settings.app_env == "dev":
+            async with container.make_uow() as uow:
+                project = await uow.projects.ensure_default(container.config.default_workspace_name)
+                await uow.chats.upsert(chat_id, event.chat.type, event.chat.title, project.id)
+                bound_chat = await uow.chats.get_by_telegram_id(chat_id)
+                if bound_chat is None:
+                    raise RuntimeError("chat binding failed")
+                await uow.projects.set_default_chat(project.id, bound_chat.id)
+                await uow.commit()
+            return _text(chat_id, f"✅ Чат привязан к dev workspace: {project.name}")
+        return _text(chat_id, _UNBOUND_TEAM_TEXT)
 
     return ActionsResponse(
         actions=[
@@ -1341,6 +1832,49 @@ async def ingest_command(
             )
         ]
     )
+
+
+async def _handle_v2_status_command(
+    container: Container,
+    command: str,
+    args: list[str],
+    chat_id: int,
+    actor_telegram_id: int,
+) -> ActionsResponse:
+    new_status = status_for_command(command)
+    if new_status is None:
+        return _text(chat_id, "Неизвестная команда изменения статуса.")
+    if not args:
+        return _text(chat_id, f"Укажи задачу, например: /{command} GC-12")
+    sequence = parse_public_id(args[0])
+    async with container.session_factory() as session:
+        chat = await session.scalar(
+            select(m.TelegramChatModel).where(m.TelegramChatModel.telegram_chat_id == chat_id)
+        )
+        if chat is None or chat.team_id is None:
+            return _text(chat_id, _UNBOUND_TEAM_TEXT)
+        statement = select(m.TaskModel).where(m.TaskModel.team_id == chat.team_id)
+        if sequence is not None:
+            statement = statement.where(m.TaskModel.public_id == format_public_id(sequence))
+        else:
+            try:
+                statement = statement.where(m.TaskModel.id == UUID(args[0]))
+            except ValueError:
+                return _text(chat_id, f"Задача {args[0]} не найдена.")
+        task = await session.scalar(statement)
+        if task is None:
+            return _text(chat_id, f"Задача {args[0]} не найдена.")
+        task_id = task.id
+    result = await TaskStatusService(container.board_mirror).update_status(
+        task_id,
+        new_status,
+        actor_id=actor_telegram_id,
+        action="telegram_status_command",
+    )
+    text = f"✅ {result.public_id} → {result.status}"
+    if result.sync_status == "error":
+        text = f"{text}\n\nYouGile sync error: {result.sync_error}"
+    return _text(chat_id, text)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1354,6 +1888,130 @@ def _parse_callback(data: str) -> tuple[str, UUID | None]:
         return action, UUID(raw_id)
     except ValueError:
         return action, None
+
+
+_TELEMOST_NOTICE = (
+    "ℹ️ Если включён meeting agent Grey Cardinal, он может подключиться для "
+    "заметок и задач."
+)
+
+
+async def _handle_telemost_callback(
+    container: Container, event: TelegramCallbackEvent
+) -> ActionsResponse:
+    """Inline-кнопки выбора провайдера созвона.
+
+    Проверяет: чат привязан к команде, Телемост подключён, право инициировать.
+    Сам создаёт комнату только по явному нажатию пользователя (не автоматически).
+    """
+    cq_id = event.callback_query_id
+    chat_id = event.message.chat_id
+    msg_id = event.message.message_id
+
+    if event.data == CB_TELEMOST_DISMISS:
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Ок"),
+                EditMessageAction(
+                    chat_id=chat_id, message_id=msg_id, text="Хорошо, без созвона."
+                ),
+            ]
+        )
+
+    settings = get_settings()
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            "Этот чат не привязан к команде Grey Cardinal. "
+                            "Менеджер команды должен привязать его в настройках команды."
+                        ),
+                    ),
+                ]
+            )
+
+        integration = await telemost_svc.get_integration(session, team.id)
+        if integration is None or integration.status != "connected":
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            "Яндекс Телемост ещё не подключён. Подключите его в "
+                            "Grey Cardinal → Integrations → Yandex Telemost."
+                        ),
+                    ),
+                ]
+            )
+
+        try:
+            result = await telemost_svc.create_room_for_chat(
+                session,
+                settings,
+                telegram_chat_id=chat_id,
+                created_by_telegram_user_id=event.from_user.id,
+            )
+            await session.commit()
+        except telemost_svc.TelemostNotConnected:
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text=""),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            "Яндекс Телемост ещё не подключён. Подключите его в "
+                            "Grey Cardinal → Integrations → Yandex Telemost."
+                        ),
+                    ),
+                ]
+            )
+        except YandexTelemostError:
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text="Ошибка"),
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text="Не удалось создать встречу в Телемосте. Попробуйте позже.",
+                    ),
+                ]
+            )
+
+    join_url = result.get("join_url")
+    if not join_url:
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Ошибка"),
+                SendMessageAction(
+                    chat_id=chat_id,
+                    text="Телемост не вернул ссылку на встречу. Попробуйте позже.",
+                ),
+            ]
+        )
+
+    return ActionsResponse(
+        actions=[
+            AnswerCallbackAction(callback_query_id=cq_id, text="Готово"),
+            EditMessageAction(
+                chat_id=chat_id, message_id=msg_id, text="📹 Создаю встречу в Яндекс Телемосте…"
+            ),
+            SendMessageAction(
+                chat_id=chat_id,
+                text=(
+                    "✅ Создал встречу в Яндекс Телемосте\n\n"
+                    f"Ссылка: {join_url}\n\n"
+                    f"{_TELEMOST_NOTICE}"
+                ),
+            ),
+        ]
+    )
 
 
 def _text(chat_id: int, text: str) -> ActionsResponse:

@@ -57,6 +57,25 @@ class BoardAdapterFactory:
                     self._cipher.decrypt_text(team.board_credentials_encrypted) or "{}"
                 )
                 config = dict(team.board_config or {})
+                selected_board = await session.scalar(
+                    select(m.YouGileBoardModel).where(
+                        m.YouGileBoardModel.team_id == team_id,
+                        m.YouGileBoardModel.is_selected.is_(True),
+                    )
+                )
+                mapped_columns: dict[str, str] = {}
+                if selected_board is not None:
+                    rows = await session.execute(
+                        select(m.YouGileColumnModel).where(
+                            m.YouGileColumnModel.board_id == selected_board.id,
+                            m.YouGileColumnModel.mapped_status.is_not(None),
+                        )
+                    )
+                    mapped_columns = {
+                        row.mapped_status: row.external_id
+                        for row in rows.scalars()
+                        if row.mapped_status
+                    }
                 client = YouGileClient(
                     credentials.get("api_key", ""),
                     base_url=self._settings.yougile_api_base_url,
@@ -66,7 +85,7 @@ class BoardAdapterFactory:
                     self._session_factory,
                     team_id,
                     client,
-                    config.get("default_column_ids", {}),
+                    mapped_columns or config.get("default_column_ids", {}),
                 )
             else:
                 raise BoardConfigurationError(f"Unsupported board provider: {team.board_provider}")
@@ -77,6 +96,14 @@ class BoardAdapterFactory:
     async def team_id_for_external_card(self, external_card_id: str) -> UUID | None:
         """team_id команды, которой принадлежит карточка доски (по external id)."""
         async with self._session_factory() as session:
+            team_id = await session.scalar(
+                select(m.ExternalTaskLinkModel.team_id).where(
+                    m.ExternalTaskLinkModel.external_task_id == external_card_id
+                )
+            )
+            if team_id is not None:
+                return team_id
+            # Read-only compatibility during migration from board_cards.
             return await session.scalar(
                 select(m.BoardCardModel.team_id).where(
                     m.BoardCardModel.external_card_id == external_card_id

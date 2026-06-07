@@ -6,6 +6,7 @@ import json
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from yougile_fakes import FakeYouGile
 
 from brain_api.application.use_cases.yougile_discovery import discover_yougile_workspace
@@ -128,3 +129,48 @@ async def test_discovery_mirrors_all_projects_when_primary_is_not_selected(sessi
     assert result["primary_project_id"] is None
     assert result["stats"]["boards"] == 2
     assert result["stats"]["tasks"] == 2
+
+
+@pytest.mark.asyncio
+async def test_discovery_preserves_database_selected_board(session_factory):
+    async with session_factory() as session:
+        team = await _seed_connected_team(session)
+        selected = m.YouGileBoardModel(
+            team_id=team.id,
+            external_id="b2",
+            name="Board 2",
+            is_selected=True,
+        )
+        session.add(selected)
+        await session.commit()
+
+    fake = FakeYouGile(
+        projects=[
+            {"id": "p1", "title": "One"},
+            {"id": "p2", "title": "Two"},
+        ],
+        boards=[
+            {"id": "b1", "title": "Board 1", "projectId": "p1"},
+            {"id": "b2", "title": "Board 2", "projectId": "p2"},
+        ],
+        columns=[],
+        users=[],
+    )
+    result = await discover_yougile_workspace(
+        session_factory,
+        team_id=team.id,
+        api_base_url="x",
+        cipher=CIPHER,
+        client=fake,
+    )
+    assert result["ok"] is True
+
+    async with session_factory() as session:
+        rows = list(
+            await session.scalars(
+                select(m.YouGileBoardModel).where(m.YouGileBoardModel.team_id == team.id)
+            )
+        )
+        assert [row.external_id for row in rows if row.is_selected] == ["b2"]
+        refreshed = await session.get(m.TeamModel, team.id)
+        assert refreshed.board_config["default_board_id"] == "b2"

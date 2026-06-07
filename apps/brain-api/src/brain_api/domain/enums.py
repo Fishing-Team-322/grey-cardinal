@@ -11,11 +11,13 @@ from enum import StrEnum
 
 
 class TaskStatus(StrEnum):
+    backlog = "backlog"
     proposed = "proposed"
     confirmed = "confirmed"
     todo = "todo"
     in_progress = "in_progress"
     blocked = "blocked"
+    review = "review"
     done = "done"
     rejected = "rejected"
     cancelled = "cancelled"
@@ -27,7 +29,13 @@ class TaskStatus(StrEnum):
     @property
     def is_active(self) -> bool:
         """Активная задача — та, что в работе и подлежит напоминаниям/дайджесту."""
-        return self in {TaskStatus.todo, TaskStatus.in_progress, TaskStatus.blocked}
+        return self in {
+            TaskStatus.backlog,
+            TaskStatus.todo,
+            TaskStatus.in_progress,
+            TaskStatus.blocked,
+            TaskStatus.review,
+        }
 
 
 class TaskPriority(StrEnum):
@@ -42,6 +50,8 @@ class TaskSource(StrEnum):
     telegram_direct = "telegram_direct"
     meeting_transcript = "meeting_transcript"
     manual = "manual"
+    yougile_import = "yougile_import"
+    daily_sync = "daily_sync"
 
 
 class ConfirmationStatus(StrEnum):
@@ -93,11 +103,13 @@ class XpEventKind(StrEnum):
 
 # Человекочитаемые подписи статусов/приоритетов для русскоязычного UX.
 STATUS_LABELS_RU: dict[TaskStatus, str] = {
+    TaskStatus.backlog: "Бэклог",
     TaskStatus.proposed: "Предложена",
     TaskStatus.confirmed: "Подтверждена",
     TaskStatus.todo: "To Do",
     TaskStatus.in_progress: "В работе",
     TaskStatus.blocked: "Заблокирована",
+    TaskStatus.review: "На проверке",
     TaskStatus.done: "Готово",
     TaskStatus.rejected: "Отклонена",
     TaskStatus.cancelled: "Отменена",

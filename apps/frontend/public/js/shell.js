@@ -19,6 +19,8 @@ import telemost from "./views/telemost.js";
 import leaderboard from "./views/leaderboard.js";
 import settings from "./views/settings.js";
 import deploy from "./views/deploy.js";
+import board from "./views/board.js";
+import aiInbox from "./views/ai-inbox.js";
 
 function ensureMobileMenu() {
   const topbar = document.getElementById("app-topbar");
@@ -62,9 +64,14 @@ async function boot() {
 
   Router.register("/app/companies", "/partials/companies.html", companies, guardFor("director"));
   Router.register("/app/companies/:id", "/partials/director.html", director, guardFor("director"));
+  Router.register("/app/companies/:id/map", "/partials/agentic.html", teamMapView, guardFor("director"));
   Router.register("/app/director", "/partials/director.html", director, guardFor("director"));
+  Router.register("/app/setup", "/partials/agentic.html", setupView, guardFor("director", "manager"));
   Router.register("/app/teams", "/partials/teams.html", teams, guardFor("director", "manager"));
   Router.register("/app/teams/:id", "/partials/manager.html", manager, guardFor("director", "manager"));
+  Router.register("/app/teams/:teamId/board", "/partials/board.html", board);
+  Router.register("/app/teams/:teamId/ai-inbox", "/partials/ai-inbox.html", aiInbox, guardFor("director", "manager"));
+  Router.register("/app/teams/:teamId/yougile", "/partials/yougile.html", yougile, guardFor("director", "manager"));
   Router.register("/app/manager", "/partials/manager.html", manager, guardFor("manager"));
   Router.register("/app/employee", "/partials/employee.html", employee, guardFor("employee"));
   Router.register("/app/meetings", "/partials/meetings.html", meetings);
@@ -78,6 +85,8 @@ async function boot() {
   Router.register("/app/integrations/telemost", "/partials/telemost.html", telemost, guardFor("director", "manager"));
   Router.register("/app/settings", "/partials/settings.html", settings);
   Router.register("/app/deploy", "/partials/deploy.html", deploy, guardFor("director"));
+  Router.register("/app/people/:userId", "/partials/agentic.html", profileView);
+  Router.register("/app/me", "/partials/agentic.html", profileView);
 
   if (location.pathname === "/app" || location.pathname === "/app/") {
     await Router.navigate(homeForUser(user), true);

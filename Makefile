@@ -3,7 +3,7 @@ PY ?= python
 
 .PHONY: help install dev test test-all lint format migrate docker-up docker-down docker-build \
         brain bot audio frontend set-telegram-webhook get-telegram-webhook-info \
-        set-telegram-commands test-agent audio-agent-configure \
+        set-telegram-commands test-agent audio-agent-configure check-frontend-downloads \
         audio-agent-build audio-agent-test audio-agent-run audio-worker-test-chunk \
         smoke-desktop-flow smoke-alembic-fresh-db smoke-v2-director \
         smoke-v2-manager smoke-v2-employee smoke-v2-full
@@ -43,7 +43,10 @@ docker-up: ## Поднять полный Docker-профиль в фоне
 docker-down: ## Остановить Docker-сервисы
 	docker compose --profile full down
 
-docker-build: ## Собрать Docker-образы
+check-frontend-downloads: ## Проверить, что MSI трей-агента на месте перед сборкой фронта
+	bash scripts/check_frontend_downloads.sh
+
+docker-build: check-frontend-downloads ## Собрать Docker-образы
 	docker compose --profile full build
 
 brain: ## Запустить brain-api локально

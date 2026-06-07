@@ -50,9 +50,11 @@ docker compose -f docker-compose.prod.yml stop brain-api telegram-bot audio-work
 Restore:
 
 ```bash
-cat /path/to/grey_cardinal.dump | docker compose -f docker-compose.prod.yml exec -T postgres \
-  pg_restore -U grey -d grey_cardinal --clean --if-exists
+bash scripts/ops/restore_postgres.sh /opt/grey-cardinal/backups/postgres/grey_cardinal_YYYYMMDDTHHMMSSZ.dump
 ```
+
+`backup_postgres.sh` uses `pg_dump -Fc`, so `.dump` backups must be restored with `pg_restore`.
+The restore script also supports legacy plain SQL gzip files ending in `.sql.gz`.
 
 Start services and check readiness:
 

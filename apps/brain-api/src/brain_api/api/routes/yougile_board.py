@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,163 @@ sync_router = APIRouter(
     prefix="/api/teams/{team_id}/integrations/yougile",
     tags=["yougile"],
 )
+
+
+class SelectBoardRequest(BaseModel):
+    board_id: str
+    column_mappings: dict[str, str | None] = Field(default_factory=dict)
+
+
+@sync_router.get("/boards")
+async def list_mirror_boards(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    await _team_for_member(team_id, current_user.id, session)
+    boards = list(
+        await session.scalars(
+            select(m.YouGileBoardModel)
+            .where(m.YouGileBoardModel.team_id == team_id)
+            .order_by(m.YouGileBoardModel.name)
+        )
+    )
+    result = []
+    for board in boards:
+        columns = list(
+            await session.scalars(
+                select(m.YouGileColumnModel)
+                .where(m.YouGileColumnModel.board_id == board.id)
+                .order_by(m.YouGileColumnModel.position)
+            )
+        )
+        result.append(
+            {
+                "id": board.external_id,
+                "name": board.name,
+                "is_selected": board.is_selected,
+                "columns": [
+                    {
+                        "id": column.external_id,
+                        "name": column.name,
+                        "mapped_status": column.mapped_status,
+                        "position": column.position,
+                    }
+                    for column in columns
+                ],
+            }
+        )
+    return result
+
+
+@sync_router.get("/boards/{board_id}/columns")
+async def list_mirror_columns(
+    team_id: UUID,
+    board_id: str,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    boards = await list_mirror_boards(team_id, current_user, session)
+    board = next((item for item in boards if item["id"] == board_id), None)
+    if board is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "YouGile board not found")
+    return board["columns"]
+
+
+@sync_router.post("/select-board")
+async def select_mirror_board(
+    team_id: UUID,
+    body: SelectBoardRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    boards = list(
+        await session.scalars(
+            select(m.YouGileBoardModel).where(m.YouGileBoardModel.team_id == team_id)
+        )
+    )
+    selected = next((row for row in boards if row.external_id == body.board_id), None)
+    if selected is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "YouGile board not found")
+    for board in boards:
+        board.is_selected = board.id == selected.id
+    columns = list(
+        await session.scalars(
+            select(m.YouGileColumnModel).where(m.YouGileColumnModel.board_id == selected.id)
+        )
+    )
+    allowed = {"backlog", "todo", "in_progress", "blocked", "review", "done"}
+    used: set[str] = set()
+    for column in columns:
+        mapped = body.column_mappings.get(column.external_id)
+        if mapped is not None and mapped not in allowed:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid task status")
+        if mapped and mapped in used:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Status {mapped} is mapped more than once",
+            )
+        column.mapped_status = mapped
+        if mapped:
+            used.add(mapped)
+    team = await session.get(m.TeamModel, team_id)
+    assert team is not None
+    config = dict(team.board_config or {})
+    config["default_board_id"] = selected.external_id
+    config["default_column_ids"] = {
+        column.mapped_status: column.external_id
+        for column in columns
+        if column.mapped_status
+    }
+    team.board_config = config
+    await session.commit()
+    return {
+        "selected_board": {"id": selected.external_id, "name": selected.name},
+        "mapped_statuses": sorted(used),
+    }
+
+
+@sync_router.post("/import")
+async def import_mirror_board(
+    team_id: UUID,
+    current_user: CurrentUser,
+    container: Container = Depends(get_container),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    return (await container.board_mirror.import_selected_board(team_id)).payload()
+
+
+@sync_router.get("/sync-events")
+async def list_sync_events(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    await _team_for_member(team_id, current_user.id, session)
+    rows = list(
+        await session.scalars(
+            select(m.SyncEventModel)
+            .where(m.SyncEventModel.team_id == team_id)
+            .order_by(m.SyncEventModel.created_at.desc())
+            .limit(100)
+        )
+    )
+    return [
+        {
+            "id": str(row.id),
+            "task_id": str(row.task_id) if row.task_id else None,
+            "direction": row.direction,
+            "action": row.action,
+            "status": row.status,
+            "error": row.error,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
 
 
 async def _team_for_member(
@@ -175,6 +333,14 @@ async def _run_sync_job(
         api_base_url=api_base_url,
         cipher=cipher,
     )
+    mirror_result = None
+    if result.get("ok"):
+        try:
+            mirror_result = await container.board_mirror.sync_inbound(team_id)
+        except Exception as exc:  # noqa: BLE001
+            mirror_result = {"errors": [str(exc)]}
+    if mirror_result is not None:
+        result["mirror"] = mirror_result
     await _publish_progress(
         container,
         team_id,

@@ -23,6 +23,7 @@ from brain_api.api.rbac import (
 )
 from brain_api.api.routes.accounts import CurrentUser, get_db
 from brain_api.application.llm.health import llm_health_report
+from brain_api.application.task_status_service import TaskStatusService
 from brain_api.application.use_cases.member_reports import member_report_payload
 from brain_api.application.use_cases.team_gamification import (
     gamification_profile_payload,
@@ -30,6 +31,7 @@ from brain_api.application.use_cases.team_gamification import (
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
+from brain_api.domain.enums import TaskStatus
 from brain_api.domain.v2.timezones import validate_iana_timezone
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.security.encryption import SecretCipher
@@ -377,27 +379,21 @@ async def task_status_response(
     if new_status == "cancelled" and not (body.reason or "").strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Cancellation reason is required")
 
-    now = datetime.now(UTC)
-    task.status = new_status
-    task.last_status_update_at = now
-    task.completed_at = now if new_status == "done" else None
-    session.add(task)
-    session.add(
-        m.AuditLogModel(
-            id=uuid4(),
-            actor_type="user",
-            actor_id=str(current_user.id),
+    if hasattr(container, "board_mirror"):
+        sync = await TaskStatusService(container.board_mirror).update_status(
+            task.id,
+            TaskStatus(new_status),
+            actor_id=current_user.id,
+            reason=body.reason,
             action="task_status_responded",
-            entity_type="task",
-            entity_id=task.id,
-            payload={
-                "response": body.response,
-                "reason": body.reason,
-                "status": new_status,
-                "team_id": str(task.team_id),
-            },
         )
-    )
+    else:
+        now = datetime.now(UTC)
+        task.status = new_status
+        task.last_status_update_at = now
+        task.completed_at = now if new_status == "done" else None
+        session.add(task)
+        sync = None
     if task.assignee_id is not None:
         from brain_api.application.use_cases.team_gamification import (
             TASK_COMPLETED_XP,
@@ -415,7 +411,10 @@ async def task_status_response(
             idempotency_key=f"web_status:{task.id}:{new_status}",
         )
     await session.commit()
+    await session.refresh(task)
     payload = _task_payload(task, current_user if task.assignee_id == current_user.id else None)
+    payload["sync_status"] = sync.sync_status if sync else "not_configured"
+    payload["sync_error"] = sync.sync_error if sync else None
     await container.websocket_manager.broadcast(
         {
             "event": "task_status_responded",
@@ -711,7 +710,6 @@ async def create_team_meeting(
         scheduled_at=body.scheduled_at,
         scheduled_timezone=team.timezone,
         duration_minutes=body.duration_minutes,
-        started_at=body.scheduled_at,
     )
     session.add(row)
     await session.commit()
@@ -1047,13 +1045,18 @@ async def create_team_telegram_bind_code(
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
     code = secrets.token_hex(3).upper()
-    config = dict(team.board_config or {})
-    config["telegram_bind_code"] = code
-    config["telegram_bind_expires_at"] = (datetime.now(UTC) + timedelta(minutes=20)).isoformat()
-    team.board_config = config
-    session.add(team)
+    expires_at = datetime.now(UTC) + timedelta(minutes=20)
+    session.add(
+        m.TelegramTeamBindCodeModel(
+            id=uuid4(),
+            team_id=team_id,
+            code=code,
+            created_by=current_user.id,
+            expires_at=expires_at,
+        )
+    )
     await session.commit()
-    return {"code": code, "expires_at": config["telegram_bind_expires_at"]}
+    return {"code": code, "expires_at": expires_at}
 
 
 @router.get("/api/teams/{team_id}/telegram/status")
@@ -1067,7 +1070,21 @@ async def team_telegram_status(
     team = await session.get(m.TeamModel, team_id)
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
-    return {"linked": team.tg_chat_id is not None, "tg_chat_id": team.tg_chat_id}
+    active_code = await session.scalar(
+        select(m.TelegramTeamBindCodeModel)
+        .where(
+            m.TelegramTeamBindCodeModel.team_id == team_id,
+            m.TelegramTeamBindCodeModel.used_at.is_(None),
+            m.TelegramTeamBindCodeModel.expires_at > datetime.now(UTC),
+        )
+        .order_by(m.TelegramTeamBindCodeModel.created_at.desc())
+        .limit(1)
+    )
+    return {
+        "linked": team.tg_chat_id is not None,
+        "tg_chat_id": team.tg_chat_id,
+        "bind_code_expires_at": active_code.expires_at if active_code else None,
+    }
 
 
 @router.delete("/api/teams/{team_id}/telegram", status_code=status.HTTP_204_NO_CONTENT)
@@ -1082,6 +1099,13 @@ async def unlink_team_telegram(
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
     team.tg_chat_id = None
+    chat = await session.scalar(
+        select(m.TelegramChatModel).where(m.TelegramChatModel.team_id == team_id)
+    )
+    if chat is not None:
+        chat.team_id = None
+        chat.linked_at = None
+        chat.linked_by = None
     session.add(team)
     await session.commit()
 

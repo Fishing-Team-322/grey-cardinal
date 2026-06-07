@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ApiError, request } from "../js/api.js";
+import { ApiError, api, request } from "../js/api.js";
 
 test("request always includes credentials", async () => {
   let options;
@@ -38,4 +38,44 @@ test("401 redirects non-auth calls to login", async () => {
     window.location.href,
     "/login.html?next=%2Fapp%2Fteams%2Fabc%3Ftab%3Dx",
   );
+});
+
+test("windows agent (daemon) API maps to the tenant-scoped agent endpoints", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    return new Response(JSON.stringify({ agents: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  await api.daemon.pairingCode();
+  await api.daemon.status();
+  await api.daemon.unpair("dev-1");
+  assert.deepEqual(calls, [
+    "POST /api/agents/pairing-code",
+    "GET /api/agents",
+    "POST /api/agents/dev-1/unpair",
+  ]);
+});
+
+test("yandex telemost API maps to the OAuth integration endpoints", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    return new Response(JSON.stringify({ ok: true, connected: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  await api.yandexTelemost.status("team-1");
+  await api.yandexTelemost.connectStart("team-1");
+  await api.yandexTelemost.disconnect("team-1");
+  await api.yandexTelemost.testCreateRoom("team-1");
+  assert.deepEqual(calls, [
+    "GET /api/integrations/yandex-telemost/status?team_id=team-1",
+    "POST /api/integrations/yandex-telemost/connect/start",
+    "POST /api/integrations/yandex-telemost/disconnect",
+    "POST /api/integrations/yandex-telemost/test-create-room",
+  ]);
 });
