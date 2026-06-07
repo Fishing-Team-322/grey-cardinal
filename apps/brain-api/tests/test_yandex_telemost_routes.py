@@ -108,7 +108,10 @@ def _no_token_anywhere(payload: dict) -> None:
 
 
 def test_status_not_connected(client: TestClient, seeded) -> None:
-    r = client.get("/api/integrations/yandex-telemost/status", params={"team_id": str(seeded["team_id"])})
+    r = client.get(
+        "/api/integrations/yandex-telemost/status",
+        params={"team_id": str(seeded["team_id"])},
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["connected"] is False
@@ -145,7 +148,10 @@ def test_connect_start_400_when_not_configured(session_factory, seeded, monkeypa
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _user
     c = TestClient(app)
-    r = c.post("/api/integrations/yandex-telemost/connect/start", json={"team_id": str(seeded["team_id"])})
+    r = c.post(
+        "/api/integrations/yandex-telemost/connect/start",
+        json={"team_id": str(seeded["team_id"])},
+    )
     assert r.status_code == 400
 
 

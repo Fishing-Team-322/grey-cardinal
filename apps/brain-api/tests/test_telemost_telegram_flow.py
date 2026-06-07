@@ -100,7 +100,11 @@ def _texts(resp) -> str:
 @pytest.mark.asyncio
 async def test_intent_asks_provider_without_creating() -> None:
     resp = await itg.ingest_message(_msg("нужен созвон"), container=SimpleNamespace())
-    kbs = [getattr(a, "reply_markup", None) for a in resp.actions if getattr(a, "reply_markup", None)]
+    kbs = [
+        getattr(a, "reply_markup", None)
+        for a in resp.actions
+        if getattr(a, "reply_markup", None)
+    ]
     assert kbs, "expected an inline keyboard prompt"
     flat = str(kbs)
     assert "tmcall:create" in flat and "tmcall:dismiss" in flat

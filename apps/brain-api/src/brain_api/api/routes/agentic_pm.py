@@ -413,8 +413,10 @@ async def edit_inbox(item_id: UUID, body: InboxEditRequest, current_user: Curren
     item = await _inbox_item(session, item_id, current_user.id, manager=True)
     if body.parsed_payload is not None:
         item.parsed_payload = body.parsed_payload
+        item.semantic_payload = body.parsed_payload
     if body.source_text is not None:
         item.source_text = body.source_text
+        item.raw_text = body.source_text
     if body.proposed_action is not None:
         item.proposed_action = body.proposed_action
     session.add(item)
@@ -519,12 +521,16 @@ async def run_demo(team_id: UUID, current_user: CurrentUser, session: AsyncSessi
             id=uuid4(),
             team_id=team_id,
             item_type="task_proposal",
+            kind="task_proposal",
             status="pending",
             source_type="manual",
             source_text="Демо: агент предлагает запросить статус перед вечерним синком",
+            reason="setup_wizard_demo",
+            raw_text="Демо: агент предлагает запросить статус перед вечерним синком",
             confidence=0.91,
             proposed_action="ask_status",
             parsed_payload={"title": "Запросить статус у команды"},
+            semantic_payload={"title": "Запросить статус у команды"},
         )
     )
     await session.commit()

@@ -189,7 +189,9 @@ async def test_create_room(
     settings = get_settings()
     tid = await _resolve_team(current_user, session, body.team_id, role="manager")
     try:
-        result = await svc.create_room_for_team(session, settings, tid, title="Grey Cardinal — тест")
+        result = await svc.create_room_for_team(
+            session, settings, tid, title="Grey Cardinal — тест"
+        )
     except svc.TelemostNotConnected as exc:
         await session.commit()
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc

@@ -12,7 +12,7 @@ import re
 
 # Each pattern matches a clear request for a voice/video call.
 _PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"созвон"),                       # созвон, созвонимся, «го созвон», «созвон по задаче»
+    re.compile(r"созвон"),  # созвон, созвонимся, «го созвон», «созвон по задаче»
     re.compile(r"созвонит"),                     # созвониться / созвонимся
     re.compile(r"созвонимся"),
     re.compile(r"телемост"),

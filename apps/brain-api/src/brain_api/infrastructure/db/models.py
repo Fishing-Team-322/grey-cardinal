@@ -177,7 +177,6 @@ class ChatMessageModel(TimestampMixin, Base):
     message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     raw_json: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
-    message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class TaskProposalModel(TimestampMixin, Base):
@@ -532,23 +531,27 @@ class AIInboxItemModel(TimestampMixin, Base):
     source_message_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("chat_messages.id"), nullable=True
     )
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     semantic_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
     identity_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
     duplicate_task_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("tasks.id"), nullable=True
     )
-    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    item_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parsed_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    proposed_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linked_task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    decided_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
 
 
-# These four were duplicated by the bad merge. Aligned to the alembic migrations
-# (0007 _create_*), i.e. the actual DB schema. The feature/v2-production-rebuild
-# variants (connection_id NOT NULL, project_id, SyncEvent.provider/entity_type, …)
-# were never migrated; their import/sync code + tests are an un-migrated follow-up
-# (see docs/yandex-telemost.md "Known follow-ups"). Telemost does not depend on these.
 class YouGileBoardModel(Base):
     __tablename__ = "yougile_boards"
     __table_args__ = (
@@ -560,6 +563,9 @@ class YouGileBoardModel(Base):
     team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
     connection_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("yougile_connections.id"), nullable=True
+    )
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("yougile_projects.id"), nullable=True
     )
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -582,6 +588,7 @@ class YouGileColumnModel(Base):
     mapped_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ExternalTaskLinkModel(TimestampMixin, Base):
@@ -616,9 +623,14 @@ class SyncEventModel(Base):
     link_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("external_task_links.id"), nullable=True
     )
+    provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     direction: Mapped[str] = mapped_column(Text, nullable=False)
-    action: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -736,7 +748,7 @@ class YouGileWorkspaceModel(Base):
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class YouGileProjectModel(Base):
@@ -755,16 +767,10 @@ class YouGileProjectModel(Base):
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-# A bad merge of feature/v2-production-rebuild duplicated several ORM classes.
-# Resolution (see docs/yandex-telemost.md "Known follow-ups"):
-#   - ai_inbox_items: the migrations (0007) + grey_board.py use the Block A schema
-#     (AIInboxItemModel above), so that stays canonical. agentic_pm referenced a
-#     second, un-migrated v2 variant under the name `AiInboxItemModel`; alias it to
-#     the canonical class so imports resolve (its v2-only columns are a follow-up).
-#   - yougile board-mirror models were aligned to the migrations (Block A) above.
+# Keep the historical spelling as an import-compatible alias to the single mapped class.
 AiInboxItemModel = AIInboxItemModel
 
 

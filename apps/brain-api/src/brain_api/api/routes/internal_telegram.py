@@ -32,6 +32,8 @@ from brain_api.application.rendering import (
     proposal_keyboard,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
+from brain_api.application.telemost_intent import detect_call_intent
+from brain_api.application.use_cases import yandex_telemost as telemost_svc
 from brain_api.application.use_cases.confirm_task import ConfirmTask
 from brain_api.application.use_cases.ingest_chat_message import IngestChatMessage
 from brain_api.application.use_cases.ingest_transcript_event import IngestTranscriptEvent
@@ -78,8 +80,6 @@ from brain_api.application.use_cases.team_settings import (
     open_settings,
 )
 from brain_api.application.use_cases.update_task_status import UpdateTaskStatus
-from brain_api.application.use_cases import yandex_telemost as telemost_svc
-from brain_api.application.telemost_intent import detect_call_intent
 from brain_api.config import get_settings
 from brain_api.container import Container
 from brain_api.infrastructure.db import models as m
