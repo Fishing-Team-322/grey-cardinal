@@ -30,6 +30,7 @@ from sqlalchemy import select
 
 from brain_api.api.deps import get_container
 from brain_api.api.routes.accounts import CurrentUser, get_db
+from brain_api.application.agentic_tasks import IdentityResolver, InteractionMode
 from brain_api.application.rendering import proposal_keyboard
 from brain_api.application.semantic_parser import SemanticMessageInput
 from brain_api.config import get_settings
@@ -230,11 +231,11 @@ async def daemon_v2_upload(
 
 
 async def _agent_team(session, user_id: UUID):
-    """Первая команда пользователя с привязанным Telegram-чатом (куда слать proposal)."""
+    """Первая команда пользователя. Internal Grey Board does not require Telegram."""
     return await session.scalar(
         select(m.TeamModel)
         .join(m.TeamMemberModel, m.TeamMemberModel.team_id == m.TeamModel.id)
-        .where(m.TeamMemberModel.user_id == user_id, m.TeamModel.tg_chat_id.is_not(None))
+        .where(m.TeamMemberModel.user_id == user_id)
         .order_by(m.TeamMemberModel.joined_at)
     )
 
@@ -255,31 +256,59 @@ async def ingest_team_text(
     container: Container, team_id: UUID, text: str, source: TaskSource
 ) -> dict:
     """Прогнать текст через v2-семантику команды и при task_candidate создать
-    proposal + отправить его в Telegram-чат команды с кнопками подтверждения."""
+    proposal + AI Inbox item, затем при наличии отправить его в Telegram-чат."""
     from brain_api.api.routes.internal_telegram import (
         _find_v2_duplicate,
-        _match_v2_assignee,
         _parse_dt,
     )
 
     now = datetime.now(UTC)
     async with container.session_factory() as session:
         team = await session.get(m.TeamModel, team_id)
-        if team is None or team.tg_chat_id is None:
+        if team is None:
             return {"kind": "unknown", "proposal_created": False}
-        member_names = list(
-            await session.scalars(
-                select(m.UserModel.display_name)
-                .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
-                .where(m.TeamMemberModel.team_id == team.id)
+        members = list(
+            (
+                await session.execute(
+                    select(m.UserModel)
+                    .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                    .where(m.TeamMemberModel.team_id == team.id)
+                )
+            ).scalars()
+        )
+        devices = list(
+            (
+                await session.execute(
+                    select(m.DeviceModel, m.UserModel)
+                    .join(m.UserModel, m.UserModel.id == m.DeviceModel.user_id)
+                    .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+                    .where(m.TeamMemberModel.team_id == team.id)
+                )
+            ).all()
+        )
+        member_context = [
+            " | ".join(
+                value
+                for value in (
+                    user.display_name,
+                    f"@{user.telegram_username}" if user.telegram_username else None,
+                    user.login,
+                    user.email,
+                )
+                if value
             )
+            for user in members
+        ]
+        member_context.extend(
+            f"{user.display_name} | Windows agent: {device.device_name}"
+            for device, user in devices
         )
         try:
             parsed = await container.semantic_parser.parse(
                 SemanticMessageInput(
                     team_id=team.id, message_text=text, sender_user_id=None,
                     team_timezone=team.timezone, now=now,
-                    team_members=member_names,
+                    team_members=member_context,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -293,8 +322,18 @@ async def ingest_team_text(
 
         task = parsed.get("task") or {}
         title = str(task.get("title") or text[:120]).strip()
-        assignee_text = task.get("assignee_text")
-        assignee = await _match_v2_assignee(session, team.id, assignee_text)
+        assignee_text = task.get("assignee_reference") or task.get("assignee_text")
+        resolution = await IdentityResolver(session).resolve_assignee(
+            team.id,
+            assignee_text,
+            [],
+            text,
+            None,
+            InteractionMode.AUTO_BACKGROUND,
+        )
+        assignee = (
+            await session.get(m.UserModel, resolution.user_id) if resolution.user_id else None
+        )
         deadline = _parse_dt(task.get("deadline"), team.timezone)
         duplicate = await _find_v2_duplicate(
             session, team.id, title, assignee.id if assignee else None
@@ -316,15 +355,38 @@ async def ingest_team_text(
             telegram_chat_id=team.tg_chat_id,
         )
         session.add(confirmation)
+        inbox_item = m.AIInboxItemModel(
+            team_id=team.id,
+            kind="task_candidate",
+            status="pending",
+            reason="windows_agent_proposal",
+            raw_text=text,
+            semantic_payload=parsed,
+            identity_payload=resolution.payload(),
+            item_type="task_proposal",
+            source_type="daemon_proposal",
+            source_id=str(proposal.id),
+            source_text=text,
+            proposed_action="approve",
+            confidence=conf,
+        )
+        session.add(inbox_item)
         await session.commit()
         chat_id = team.tg_chat_id
         conf_id = confirmation.id
+        inbox_id = inbox_item.id
 
-    msg = (
-        "🎙 Из созвона — нашёл задачу\n\n"
-        f"Что сделать:\n{title}\n\n"
-        f"Исполнитель:\n{assignee_text or 'не указан'}\n\n"
-        "Создать карточку?"
-    )
-    await container.telegram_gateway.send_message(chat_id, msg, proposal_keyboard(conf_id))
-    return {"kind": kind, "proposal_created": True, "title": title}
+    if chat_id is not None:
+        msg = (
+            "🎙 Из созвона — нашёл задачу\n\n"
+            f"Что сделать:\n{title}\n\n"
+            f"Исполнитель:\n{assignee_text or 'не указан'}\n\n"
+            "Создать карточку?"
+        )
+        await container.telegram_gateway.send_message(chat_id, msg, proposal_keyboard(conf_id))
+    return {
+        "kind": kind,
+        "proposal_created": True,
+        "title": title,
+        "ai_inbox_item_id": str(inbox_id),
+    }

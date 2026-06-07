@@ -25,7 +25,8 @@ export default async function boardView(root, params, query) {
     try {
       const data = await api.greyBoard.get(teamId, activeView);
       root.querySelector("#board-summary").textContent = `${data.stats.tasks} задач · ${data.stats.overdue} просрочено · ${data.stats.sync_errors} ошибок sync`;
-      content.innerHTML = data.columns.map(renderColumn).join("");
+      const columns = data.columns || data.groups || [];
+      content.innerHTML = columns.map(renderColumn).join("");
       content.querySelectorAll("[data-task]").forEach((button) => {
         button.onclick = () => openTask(root, JSON.parse(button.dataset.task), members, load);
       });

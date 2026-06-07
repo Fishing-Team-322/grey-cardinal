@@ -62,7 +62,7 @@ Provide it before building the `frontend` image via one of:
   agent MSI*) — download and drop it into `apps/frontend/public/downloads/`.
 - **Local build** (Windows, needs Python + PyInstaller and dotnet for WiX):
   ```powershell
-  ./scripts/package_windows_tray_msi.ps1 -Version 0.6.2
+  ./scripts/package_windows_tray_msi.ps1 -Version 0.6.5
   ```
 
 If the file is missing, `/downloads/GreyCardinalAgent-x64.msi` serves **404** after

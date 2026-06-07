@@ -8,8 +8,9 @@ daemon endpoints consume (correct, non-global binding).
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -171,7 +172,9 @@ async def test_register_token_is_a_resolvable_client_session(
         assert str(cs.user_id) == str(seeded_user)
 
 
-def test_unpair_removes_agent_and_revokes_token(client: TestClient) -> None:
+def test_unpair_removes_agent_and_revokes_token(
+    client: TestClient, session_factory
+) -> None:
     reg = _register(client, _issue_code(client))
     assert len(client.get("/api/agents").json()["agents"]) == 1
     r = client.post(f"/api/agents/{reg['agent_id']}/unpair")
@@ -186,6 +189,15 @@ def test_unpair_removes_agent_and_revokes_token(client: TestClient) -> None:
         ).status_code
         == 401
     )
+
+    async def assert_session_revoked() -> None:
+        async with session_factory() as session:
+            client_session = await session.get(m.ClientSessionModel, UUID(reg["agent_token"]))
+            assert client_session is not None
+            assert client_session.status == "revoked"
+            assert client_session.device_id is None
+
+    asyncio.run(assert_session_revoked())
 
 
 @pytest.mark.asyncio
