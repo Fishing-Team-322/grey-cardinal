@@ -353,9 +353,17 @@ async def create_room_for_chat(
 
 
 def build_jitsi_url(team_name: str | None) -> str:
-    """A unique, hard-to-guess public Jitsi Meet room. No account/OAuth needed."""
+    """A unique public Jitsi room on an open instance (no moderator login gate).
+
+    meet.jit.si now forces the first participant to authenticate as moderator,
+    which leaves everyone stuck "waiting for a host". meet.ffmuc.net is an open
+    Jitsi instance that lets anyone start the room. prejoinPageEnabled=false skips
+    the lobby so the link opens straight into the call. This is a stopgap until a
+    Yandex 360 account enables real Telemost rooms (also hostless via API).
+    """
     slug = "".join(ch for ch in (team_name or "") if ch.isalnum())[:24] or "team"
-    return f"https://meet.jit.si/GreyCardinal-{slug}-{secrets.token_hex(4)}"
+    room = f"GreyCardinal-{slug}-{secrets.token_hex(4)}"
+    return f"https://meet.ffmuc.net/{room}#config.prejoinPageEnabled=false"
 
 
 async def create_jitsi_room_for_chat(
