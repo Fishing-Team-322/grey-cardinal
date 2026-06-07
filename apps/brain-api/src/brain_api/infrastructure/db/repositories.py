@@ -174,6 +174,7 @@ def _meeting_participant(row: m.MeetingParticipantModel) -> MeetingParticipant:
 def _proposal(row: m.TaskProposalModel) -> TaskProposal:
     return TaskProposal(
         id=row.id,
+        team_id=row.team_id,
         source=TaskSource(row.source),
         title=row.title,
         priority=TaskPriority(row.priority),
@@ -193,6 +194,7 @@ def _proposal(row: m.TaskProposalModel) -> TaskProposal:
 def _confirmation(row: m.ConfirmationModel) -> Confirmation:
     return Confirmation(
         id=row.id,
+        team_id=row.team_id,
         proposal_id=row.proposal_id,
         status=ConfirmationStatus(row.status),
         telegram_chat_id=row.telegram_chat_id,
@@ -207,6 +209,7 @@ def _confirmation(row: m.ConfirmationModel) -> Confirmation:
 def _task(row: m.TaskModel) -> Task:
     return Task(
         id=row.id,
+        team_id=row.team_id,
         public_id=row.public_id,
         title=row.title,
         status=TaskStatus(row.status),
@@ -229,6 +232,7 @@ def _task(row: m.TaskModel) -> Task:
 def _board_card(row: m.BoardCardModel) -> BoardCard:
     return BoardCard(
         id=row.id,
+        team_id=row.team_id,
         task_id=row.task_id,
         provider=BoardProvider(row.provider),
         external_card_id=row.external_card_id,
@@ -801,6 +805,7 @@ class ProposalRepositoryImpl:
     async def add(self, proposal: TaskProposal) -> TaskProposal:
         row = m.TaskProposalModel(
             id=proposal.id,
+            team_id=proposal.team_id,
             source=proposal.source.value,
             source_message_id=proposal.source_message_id,
             source_transcript_id=proposal.source_transcript_id,
@@ -858,6 +863,7 @@ class ConfirmationRepositoryImpl:
     async def add(self, confirmation: Confirmation) -> Confirmation:
         row = m.ConfirmationModel(
             id=confirmation.id,
+            team_id=confirmation.team_id,
             proposal_id=confirmation.proposal_id,
             status=confirmation.status.value,
             telegram_chat_id=confirmation.telegram_chat_id,
@@ -903,6 +909,7 @@ class TaskRepositoryImpl:
         seq = parse_public_id(task.public_id) or 1
         row = m.TaskModel(
             id=task.id,
+            team_id=task.team_id,
             seq=seq,
             public_id=task.public_id,
             project_id=task.project_id,
@@ -1074,6 +1081,7 @@ class BoardCardRepositoryImpl:
     async def add(self, card: BoardCard) -> BoardCard:
         row = m.BoardCardModel(
             id=card.id,
+            team_id=card.team_id,
             task_id=card.task_id,
             provider=card.provider.value,
             external_card_id=card.external_card_id,

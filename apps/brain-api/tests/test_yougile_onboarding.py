@@ -1,0 +1,182 @@
+"""YouGile onboarding endpoints: login -> connect -> status -> disconnect."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from yougile_fakes import FakeYouGile
+
+from brain_api.api.deps import get_container
+from brain_api.api.routes import yougile as yg_routes
+from brain_api.api.routes.accounts import get_current_user, get_db
+from brain_api.infrastructure.db import models as m
+from brain_api.integrations.yougile import YouGileServerError
+
+
+@pytest_asyncio.fixture
+async def manager_and_team(session_factory):
+    async with session_factory() as session:
+        user = m.UserModel(id=uuid4(), display_name="Mgr", email="mgr@e.com", login="mgr")
+        company = m.CompanyModel(id=uuid4(), name="C", timezone="Europe/Moscow", created_by=user.id)
+        team = m.TeamModel(
+            id=uuid4(),
+            company_id=company.id,
+            name="Team",
+            timezone="Europe/Moscow",
+            board_provider="yougile",
+        )
+        session.add_all([user, company, team])
+        session.add(m.TeamMemberModel(id=uuid4(), team_id=team.id, user_id=user.id, role="manager"))
+        await session.commit()
+        return user.id, team.id
+
+
+@pytest.fixture
+def client(session_factory, manager_and_team, monkeypatch) -> TestClient:
+    user_id, _ = manager_and_team
+    fake = FakeYouGile(companies=[{"id": "co1", "name": "Acme"}], keys=[{"key": "k-existing"}])
+    monkeypatch.setattr(yg_routes, "YouGileClient", lambda *a, **k: fake)
+
+    async def _noop_discovery(*a, **k):
+        return {"ok": True}
+
+    monkeypatch.setattr(yg_routes, "discover_yougile_workspace", _noop_discovery)
+
+    app = FastAPI()
+    app.include_router(yg_routes.router)
+
+    async def _db():
+        async with session_factory() as session:
+            yield session
+
+    async def _user():
+        async with session_factory() as session:
+            return await session.get(m.UserModel, user_id)
+
+    from types import SimpleNamespace
+
+    fake_container = SimpleNamespace(session_factory=session_factory)
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _user
+    app.dependency_overrides[get_container] = lambda: fake_container
+    return TestClient(app)
+
+
+def test_full_onboarding_flow(client: TestClient, manager_and_team):
+    _, team_id = manager_and_team
+    base = f"/api/teams/{team_id}/integrations/yougile"
+
+    r = client.post(f"{base}/login", json={"login": "a@b.com", "password": "pw"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["companies"] == [{"id": "co1", "name": "Acme"}]
+    token = body["onboarding_token"]
+
+    r = client.post(f"{base}/connect", json={"onboarding_token": token, "company_id": "co1"})
+    assert r.status_code == 200, r.text
+    assert r.json()["connected"] is True
+    assert r.json()["sync_status"] == "in_progress"
+
+    r = client.get(f"{base}/status")
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["connected"] is True
+    assert s["company"]["name"] == "Acme"
+    assert s["stats"] == {"projects": 0, "boards": 0, "columns": 0, "tasks": 0}
+
+    r = client.request("DELETE", base)
+    assert r.status_code == 200
+    assert r.json()["connected"] is False
+    r = client.get(f"{base}/status")
+    assert r.json()["connected"] is False
+
+
+def test_connect_with_expired_token_rejected(client: TestClient, manager_and_team):
+    _, team_id = manager_and_team
+    base = f"/api/teams/{team_id}/integrations/yougile"
+    r = client.post(f"{base}/connect", json={"onboarding_token": "nope", "company_id": "co1"})
+    assert r.status_code == 422
+
+
+def test_login_hides_upstream_error_body(
+    client: TestClient,
+    manager_and_team,
+    monkeypatch,
+):
+    class FailingClient:
+        async def auth_companies(self, login, password):
+            raise YouGileServerError("POST", "/auth/companies", 500, "<html>sensitive</html>")
+
+    monkeypatch.setattr(yg_routes, "YouGileClient", lambda *args, **kwargs: FailingClient())
+    _, team_id = manager_and_team
+
+    response = client.post(
+        f"/api/teams/{team_id}/integrations/yougile/login",
+        json={"login": "a@b.com", "password": "pw"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {"error": "yougile_unavailable"}
+    assert "sensitive" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_manager_can_select_primary_project(session_factory, manager_and_team):
+    user_id, team_id = manager_and_team
+    async with session_factory() as session:
+        mappings = [
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="project",
+                yougile_id="project-1",
+                payload={"title": "Project"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="board",
+                yougile_id="board-1",
+                payload={"title": "Board", "projectId": "project-1"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="column",
+                yougile_id="todo",
+                payload={"title": "К выполнению", "boardId": "board-1"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="column",
+                yougile_id="progress",
+                payload={"title": "В работе", "boardId": "board-1"},
+            ),
+            m.YouGileMappingModel(
+                team_id=team_id,
+                entity_type="column",
+                yougile_id="done",
+                payload={"title": "Готово", "boardId": "board-1"},
+            ),
+        ]
+        for mapping in mappings:
+            mapping.last_synced_at = datetime.now(UTC)
+        session.add_all(mappings)
+        user = await session.get(m.UserModel, user_id)
+        await session.commit()
+        result = await yg_routes.set_primary_project(
+            team_id,
+            yg_routes.PrimaryProjectRequest(project_id="project-1"),
+            user,
+            session,
+        )
+
+    assert result["default_board_id"] == "board-1"
+    assert result["default_column_ids"] == {
+        "todo": "todo",
+        "in_progress": "progress",
+        "done": "done",
+    }

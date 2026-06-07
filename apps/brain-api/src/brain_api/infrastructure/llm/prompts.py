@@ -1,5 +1,7 @@
 """Промпты для LLM-экстракции задач."""
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import json

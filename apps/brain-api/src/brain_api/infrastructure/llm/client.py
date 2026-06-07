@@ -7,6 +7,7 @@ through a proxy (needed when the server's IP is geo-blocked by the provider).
 from __future__ import annotations
 
 import os
+
 import httpx
 
 

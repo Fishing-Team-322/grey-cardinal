@@ -181,8 +181,7 @@ def render_stale_reminder(task: Task) -> str:
             "👀 Нужен статус",
             "",
             f"{task.public_id} {task.title} давно без обновлений.",
-            f"Обнови статус: /start_task {task.public_id}, "
-            f"/block {task.public_id} или /done {task.public_id}",
+            "Выбери статус кнопкой ниже 👇",
         ]
     )
 

@@ -10,8 +10,8 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $buildScript = Join-Path $repoRoot "scripts\windows\build_agent.ps1"
 $agentRoot = Join-Path $repoRoot "native\desktop-agent"
 $templateDir = Join-Path $agentRoot "package\windows"
-$downloadDir = Join-Path $repoRoot "apps\frontend-dashboard\public\downloads"
-$stageDir = Join-Path $repoRoot "apps\frontend-dashboard\public\downloads\grey-cardinal-daemon-windows"
+$downloadDir = Join-Path $repoRoot "apps\frontend\public\downloads"
+$stageDir = Join-Path $repoRoot "apps\frontend\public\downloads\grey-cardinal-daemon-windows"
 $zipPath = Join-Path $downloadDir "grey-cardinal-daemon-windows.zip"
 
 & $buildScript -Configuration $Configuration

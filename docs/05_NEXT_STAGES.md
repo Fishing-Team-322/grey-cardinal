@@ -2,7 +2,7 @@
 
 После P0 остаются:
 
-- создать проект/доску/колонки YouGile и выполнить `make yougile-smoke`;
+- проверить onboarding и двустороннюю синхронизацию YouGile на тестовой команде;
 - production auth и rotation internal token;
 - заменить hackathon desktop dev-auth на OAuth/JWT и refresh sessions;
 - подключить реальный microphone capture/ASR в desktop app или companion daemon;

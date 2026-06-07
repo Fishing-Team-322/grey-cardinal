@@ -46,7 +46,7 @@
       <b>rose.exe</b>
     </td>
     <td align="center" width="50%">
-      <img src="./docs/assets/giphy.gif" width="100%" alt="anime gif" />
+      <img src="./docs/assets/giphy (1).gif" width="100%" alt="anime gif" />
       <br/>
       <b>night_mode.gif</b>
     </td>

@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grey Cardinal — Команда говорит, проект обновляется сам</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* ---------- Landing-specific ---------- */
+  .lp-header {
+    position: sticky; top: 0; z-index: 50; height: 68px;
+    display: flex; align-items: center; gap: 28px;
+    padding: 0 32px; border-bottom: 1px solid var(--line);
+    background: rgba(11,11,13,0.7); backdrop-filter: blur(16px);
+  }
+  .lp-nav { display: flex; gap: 26px; margin-left: 14px; }
+  .lp-nav a { font-size: 14px; color: var(--text-dim); font-weight: 500; }
+  .lp-nav a:hover { color: var(--text); }
+  .lp-wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 32px; position: relative; z-index: 1; }
+
+  /* hero */
+  .hero { padding: 76px 0 60px; }
+  .hero-grid { display: grid; grid-template-columns: 1.02fr 1.18fr; gap: 56px; align-items: center; }
+  .hero h1 { margin: 18px 0 0; }
+  .hero h1 .accent-text { background: linear-gradient(90deg,#E0233F,#ff6b7e); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+  .hero-sub { font-size: 18px; color: var(--text-dim); margin-top: 22px; max-width: 520px; line-height: 1.6; }
+  .hero-cta { display: flex; gap: 12px; margin-top: 30px; }
+  .hero-meta { display:flex; gap: 22px; margin-top: 30px; flex-wrap: wrap; }
+  .hero-meta .hm { font-size: 13px; color: var(--text-faint); display:flex; align-items:center; gap:8px; }
+  .hero-meta .hm b { color: var(--text); font-weight:700; font-family:'JetBrains Mono',monospace; }
+
+  /* hero visual */
+  .stage {
+    background: linear-gradient(180deg, var(--surface), var(--bg-2));
+    border: 1px solid var(--line-2); border-radius: var(--r-xl); padding: 18px;
+    box-shadow: var(--shadow-lg); position: relative; overflow: hidden;
+  }
+  .stage::after { content:""; position:absolute; inset:0; border-radius:var(--r-xl);
+    box-shadow: inset 0 0 80px rgba(194,21,46,0.05); pointer-events:none; }
+  .rail { display: flex; gap: 6px; margin-bottom: 16px; }
+  .rail-node { flex:1; height: 4px; border-radius: 999px; background: var(--surface-3); overflow:hidden; position:relative; }
+  .rail-node.done { background: var(--accent); }
+  .rail-node.on::after { content:""; position:absolute; inset:0; background:var(--accent-2);
+    animation: fill 1.7s linear forwards; transform-origin:left; }
+  @keyframes fill { from{transform:scaleX(0)} to{transform:scaleX(1)} }
+
+  .stage-track { position: relative; min-height: 296px; }
+  .slide { position:absolute; inset:0; opacity:0; transform: translateY(10px); transition: all .5s; pointer-events:none; }
+  .slide.show { opacity:1; transform:none; pointer-events:auto; }
+  .slide-label { font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent-2); display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+  .slide-label .n { color:var(--text-faint); }
+
+  .bubble { padding:11px 14px; border-radius:13px; font-size:14px; max-width:84%; }
+  .bubble.them { background: var(--surface-3); border:1px solid var(--line-2); border-bottom-left-radius:4px; }
+  .bubble.bot { background: rgba(68,147,248,0.12); border:1px solid rgba(68,147,248,0.3);
+    border-bottom-left-radius:4px; color:#cfe1fb; }
+  .bubble .who { font-size:11px; color:var(--text-faint); margin-bottom:3px; font-weight:600; }
+  .chat-row { display:flex; gap:10px; margin-bottom:10px; }
+
+  .mini-card { border:1px solid var(--line-2); border-radius:12px; padding:14px; background:var(--surface); }
+  .kv { display:flex; justify-content:space-between; font-size:13.5px; padding:5px 0; }
+  .kv .k { color:var(--text-dim); }
+  .kv .v { font-family:'JetBrains Mono',monospace; font-weight:600; }
+
+  .poll-opt { display:flex; align-items:center; gap:10px; margin:8px 0; }
+  .poll-opt .lbl { width:62px; font-size:13px; }
+  .poll-opt .bar { flex:1; }
+  .poll-opt .cnt { font-family:'JetBrains Mono',monospace; font-size:13px; width:22px; text-align:right; color:var(--text-dim); }
+
+  .rec-ring { width:84px; height:84px; border-radius:50%; margin:6px auto 14px; display:grid; place-items:center;
+    border:2px solid var(--accent-line); position:relative; }
+  .rec-ring::before{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--accent);
+    animation:ripple 1.8s infinite; opacity:0;}
+  @keyframes ripple{0%{transform:scale(.9);opacity:.7}100%{transform:scale(1.25);opacity:0}}
+  .rec-dot{width:14px;height:14px;border-radius:50%;background:var(--accent-2);box-shadow:0 0 16px var(--accent-glow);animation:pulse 1.3s infinite;}
+
+  .xp-burst { text-align:center; padding-top:8px; }
+  .xp-num { font-size:52px; font-weight:800; letter-spacing:-.04em; color:#fff;
+    text-shadow:0 0 30px var(--accent-glow); }
+  .xp-num span{ color:var(--accent-2); }
+
+  /* sections */
+  section.band { padding: 84px 0; border-top: 1px solid var(--line); position:relative; z-index:1; }
+  .sec-head { max-width: 680px; margin-bottom: 44px; }
+  .sec-head h2 { margin-top: 14px; }
+  .sec-head p { color: var(--text-dim); font-size: 17px; margin-top: 16px; }
+
+  .prob-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .prob { padding:24px; }
+  .prob .pq { font-family:'JetBrains Mono',monospace; color:var(--err); font-size:13px; margin-bottom:12px; }
+
+  .flow-tabs { display:flex; gap:8px; margin-bottom:26px; flex-wrap:wrap; }
+  .flow-tab { padding:9px 16px; border-radius:10px; border:1px solid var(--line-2); background:var(--surface);
+    font-weight:600; font-size:14px; color:var(--text-dim); cursor:pointer; }
+  .flow-tab.active { background:var(--accent-soft); border-color:var(--accent-line); color:#fff; }
+
+  .step-list { counter-reset: s; }
+  .step-row { display:flex; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); }
+  .step-row:last-child{border-bottom:0;}
+  .step-row .num { counter-increment:s; font-family:'JetBrains Mono',monospace; font-weight:700;
+    color:var(--accent-2); font-size:14px; width:30px; flex:none; }
+  .step-row .num::before{ content:"0" counter(s); }
+  .step-row b{ font-weight:600; font-size:15px; }
+  .step-row p{ color:var(--text-dim); font-size:13.5px; margin-top:2px; }
+
+  .integ-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:18px; }
+  .integ { padding:26px; display:flex; gap:18px; }
+  .integ .ic { width:50px; height:50px; border-radius:13px; flex:none; display:grid; place-items:center; }
+  .integ h3{ font-size:18px; }
+  .integ p{ color:var(--text-dim); font-size:14px; margin-top:7px; }
+
+  .feat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  .cta-band { text-align:center; padding:100px 0; }
+  .cta-band h2{ max-width:760px; margin:18px auto 0; }
+  .lp-foot{ border-top:1px solid var(--line); padding:40px 0; }
+
+  @media (max-width: 940px){
+    .hero-grid{ grid-template-columns:1fr; gap:40px; }
+    .prob-grid,.integ-grid,.feat-grid{ grid-template-columns:1fr; }
+    .feat-grid{ grid-template-columns:repeat(2,1fr); }
+    .lp-nav{ display:none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="lp-header">
+  <div id="brand"></div>
+  <nav class="lp-nav">
+    <a href="#how">Как это работает</a>
+    <a href="#flows">Роли</a>
+    <a href="#integrations">Интеграции</a>
+    <a href="#game">Геймификация</a>
+  </nav>
+  <div class="grow"></div>
+  <a class="btn btn-sm btn-ghost" href="/login.html">Войти</a>
+  <a class="btn btn-sm btn-primary" href="/register.html">Начать бесплатно</a>
+</header>
+
+<!-- ============ HERO ============ -->
+<div class="lp-wrap">
+<section class="hero">
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <span class="pill acc"><span class="dot"></span>AI · Telegram · Telemost · YouGile</span>
+      <h1>Команда говорит —<br><span class="accent-text">проект ведётся сам</span></h1>
+      <p class="hero-sub">Grey Cardinal слышит, как команда договаривается о созвоне в Telegram, сам создаёт встречу в Telemost, записывает её и превращает разговор в задачи, дедлайны и обновления в YouGile.</p>
+      <div class="hero-cta">
+        <a class="btn btn-lg btn-primary" href="/register.html">Подключить команду</a>
+        <a class="btn btn-lg btn-ghost" href="/app">Открыть кабинет →</a>
+      </div>
+      <div class="hero-meta">
+        <span class="hm">Создано AI задач: <b>1 248</b></span>
+        <span class="hm">Automation rate: <b>87%</b></span>
+        <span class="hm">Команд: <b>34</b></span>
+      </div>
+    </div>
+
+    <!-- animated pipeline visual -->
+    <div class="stage">
+      <div class="rail" id="rail"></div>
+      <div class="stage-track" id="track">
+
+        <div class="slide" data-i="0">
+          <div class="slide-label"><span class="n">01 /</span> Telegram · командный чат</div>
+          <div class="chat-row"><span class="av sm" style="background:#C2152E">АЛ</span>
+            <div class="bubble them"><div class="who">Анна · руководитель</div>Давайте созвон сегодня в 18:00 по оплате 💸</div></div>
+          <div class="chat-row"><span class="av sm" style="background:#777">ДО</span>
+            <div class="bubble them"><div class="who">Дмитрий</div>Го, давно пора разобраться</div></div>
+          <div class="chat-row"><span class="av sm" style="background:#4493F8">GC</span>
+            <div class="bubble bot"><div class="who">Grey Cardinal</div>Секунду, кажется вы планируете встречу…</div></div>
+        </div>
+
+        <div class="slide" data-i="1">
+          <div class="slide-label"><span class="n">02 /</span> AI распознаёт намерение</div>
+          <div class="mini-card">
+            <div class="kv"><span class="k">Intent</span><span class="v" style="color:var(--accent-2)">create_meeting</span></div>
+            <div class="kv"><span class="k">Confidence</span><span class="v">94%</span></div>
+            <div class="kv"><span class="k">Заголовок</span><span class="v">Созвон по оплате</span></div>
+            <div class="kv"><span class="k">Время</span><span class="v">Сегодня · 18:00</span></div>
+            <div class="kv"><span class="k">Длительность</span><span class="v">45 мин</span></div>
+            <hr class="divider">
+            <div class="flex gap-8"><span class="pill warn"><span class="dot"></span>нужно подтверждение</span></div>
+          </div>
+        </div>
+
+        <div class="slide" data-i="2">
+          <div class="slide-label"><span class="n">03 /</span> Yandex Telemost</div>
+          <div class="mini-card">
+            <div class="flex center gap-10" style="margin-bottom:12px">
+              <span class="av" style="background:#4493F8">▶</span>
+              <div><b style="font-size:15px">Встреча создана</b><div class="faint" style="font-size:12px">через подключённый Яндекс-аккаунт</div></div>
+              <span class="grow"></span><span class="pill ok"><span class="dot"></span>created</span>
+            </div>
+            <div class="code-msg">telemost.yandex.ru/j/82910-payments</div>
+            <div class="chat-row" style="margin-top:12px"><span class="av sm" style="background:#4493F8">GC</span>
+              <div class="bubble bot">Созвон создан: ссылка выше. Кто придёт? 👇</div></div>
+          </div>
+        </div>
+
+        <div class="slide" data-i="3">
+          <div class="slide-label"><span class="n">04 /</span> Опрос участников</div>
+          <div class="mini-card">
+            <b style="font-size:14px">Кто придёт на созвон в 18:00?</b>
+            <div class="poll-opt" style="margin-top:12px"><span class="lbl">Да</span><span class="bar ok"><i style="width:71%"></i></span><span class="cnt">5</span></div>
+            <div class="poll-opt"><span class="lbl">Опоздаю</span><span class="bar info"><i style="width:28%"></i></span><span class="cnt">2</span></div>
+            <div class="poll-opt"><span class="lbl">Нет</span><span class="bar"><i style="width:14%"></i></span><span class="cnt">1</span></div>
+          </div>
+        </div>
+
+        <div class="slide" data-i="4">
+          <div class="slide-label"><span class="n">05 /</span> Daemon записывает</div>
+          <div class="mini-card" style="text-align:center">
+            <div class="rec-ring"><span class="rec-dot"></span></div>
+            <span class="pill acc"><span class="dot live"></span>REC · идёт запись</span>
+            <p class="faint" style="font-size:12px;margin-top:12px">Daemon включился сам — только на время подтверждённой встречи. 00:42:17</p>
+          </div>
+        </div>
+
+        <div class="slide" data-i="5">
+          <div class="slide-label"><span class="n">06 /</span> AI summary и задачи</div>
+          <div class="grid g2" style="gap:10px">
+            <div class="mini-card"><div class="stat-value mono" style="font-size:30px">7</div><div class="faint" style="font-size:12px">задач найдено</div></div>
+            <div class="mini-card"><div class="stat-value mono" style="font-size:30px">3</div><div class="faint" style="font-size:12px">дедлайна</div></div>
+            <div class="mini-card"><div class="stat-value mono" style="font-size:30px;color:var(--warn)">2</div><div class="faint" style="font-size:12px">риска</div></div>
+            <div class="mini-card"><div class="stat-value mono" style="font-size:30px">5</div><div class="faint" style="font-size:12px">владельца</div></div>
+          </div>
+        </div>
+
+        <div class="slide" data-i="6">
+          <div class="slide-label"><span class="n">07 /</span> Синхронизация в YouGile</div>
+          <div class="mini-card">
+            <div class="kv"><span class="k">Подготовить счёт на оплату</span><span class="tag">Todo</span></div>
+            <div class="kv"><span class="k">Согласовать бюджет Q3</span><span class="tag">In Progress</span></div>
+            <div class="kv"><span class="k">Закрыть риск по подрядчику</span><span class="tag" style="color:var(--warn)">Review</span></div>
+            <hr class="divider">
+            <div class="flex between center"><span class="pill ok"><span class="dot"></span>5 карточек обновлено</span><span class="faint mono" style="font-size:12px">sync 2с</span></div>
+          </div>
+        </div>
+
+        <div class="slide" data-i="7">
+          <div class="slide-label"><span class="n">08 /</span> XP и лидерборд</div>
+          <div class="xp-burst">
+            <div class="xp-num"><span>+</span>120</div>
+            <div class="dim" style="margin-top:-4px">XP команде Growth за встречу</div>
+            <div class="flex center gap-8" style="justify-content:center;margin-top:16px">
+              <span class="pill acc"><span class="dot"></span>Meeting Hero</span>
+              <span class="pill ok"><span class="dot"></span>streak 5 дней</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ============ PROBLEM ============ -->
+<section class="band" id="problem">
+  <div class="lp-wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Проблема</span>
+      <h2>Встречи проходят. Договорённости — исчезают.</h2>
+      <p>Команда созванивается, обо всём договаривается — а потом задачи теряются, дедлайны забываются, и никто не помнит, кто что обещал.</p>
+    </div>
+    <div class="prob-grid">
+      <div class="card prob">
+        <div class="pq">// после созвона</div>
+        <h3>«А что мы решили?»</h3>
+        <p class="dim mt-8">Решения живут в голове и в переписке. Через день их уже не восстановить.</p>
+      </div>
+      <div class="card prob">
+        <div class="pq">// задачи</div>
+        <h3>Никто не завёл таски</h3>
+        <p class="dim mt-8">Договорились — но в трекер руками никто не перенёс. Работа повисает.</p>
+      </div>
+      <div class="card prob">
+        <div class="pq">// ответственность</div>
+        <h3>Owner потерялся</h3>
+        <p class="dim mt-8">«Я думал, это делаешь ты». Дедлайн прошёл — виноватых нет.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="band" id="how">
+  <div class="lp-wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Как это работает</span>
+      <h2>От сообщения в чате — до комнаты созвона и закрытых задач</h2>
+      <p>Команда не создаёт встречи руками. Бот сам понимает намерение, уточняет время, создаёт Telemost-ссылку и запускает весь конвейер.</p>
+    </div>
+    <div class="chain" id="howchain">
+      <div class="chain-node"><div class="step-no">01</div><div class="step-name">Сообщение в Telegram</div></div>
+      <div class="chain-node"><div class="step-no">02</div><div class="step-name">AI понимает намерение</div></div>
+      <div class="chain-node"><div class="step-no">03</div><div class="step-name">Telemost-ссылка</div></div>
+      <div class="chain-node"><div class="step-no">04</div><div class="step-name">Опрос команды</div></div>
+      <div class="chain-node"><div class="step-no">05</div><div class="step-name">Daemon записывает</div></div>
+      <div class="chain-node"><div class="step-no">06</div><div class="step-name">Summary + задачи</div></div>
+      <div class="chain-node"><div class="step-no">07</div><div class="step-name">YouGile sync</div></div>
+      <div class="chain-node"><div class="step-no">08</div><div class="step-name">XP · лидерборд</div></div>
+    </div>
+    <div class="note mt-24">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <span><b>Daemon не пишет постоянно.</b> Запись включается только во время подтверждённого окна встречи — backend остаётся единственным источником истины.</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ROLE FLOWS ============ -->
+<section class="band" id="flows">
+  <div class="lp-wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Роли</span>
+      <h2>Понятно каждому — от директора до сотрудника</h2>
+    </div>
+    <div class="flow-tabs" data-tabs="flows">
+      <div class="flow-tab active" data-tab="dir">Директор</div>
+      <div class="flow-tab" data-tab="man">Руководитель</div>
+      <div class="flow-tab" data-tab="emp">Сотрудник</div>
+    </div>
+
+    <div class="grid g2" style="align-items:start">
+      <div data-panel="dir" data-scope="flows" class="step-list card card-pad-lg">
+        <div class="step-row"><span class="num"></span><div><b>Создаёт компанию</b><p>Регистрируется и заводит workspace для всей организации.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Создаёт команды</b><p>Разбивает компанию на отделы и назначает руководителей.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Приглашает по ссылке</b><p>Руководители заходят по инвайту и настраивают свои команды.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Видит Company Pulse</b><p>Health score, automation rate, risk radar и лидерборд отделов.</p></div></div>
+      </div>
+      <div data-panel="dir" data-scope="flows" class="card card-pad-lg col gap-12">
+        <span class="eyebrow muted">Company Command Center</span>
+        <div class="grid g2" style="gap:10px">
+          <div class="stat"><div class="stat-label">Команд</div><div class="stat-value mono">6</div></div>
+          <div class="stat"><div class="stat-label">Automation rate</div><div class="stat-value mono" style="color:var(--ok)">87%</div></div>
+          <div class="stat"><div class="stat-label">AI задач</div><div class="stat-value mono">1 248</div></div>
+          <div class="stat"><div class="stat-label">В риске</div><div class="stat-value mono" style="color:var(--warn)">2</div></div>
+        </div>
+        <a class="btn btn-ghost btn-block" href="/app/companies">Открыть панель директора →</a>
+      </div>
+
+      <div data-panel="man" data-scope="flows" class="step-list card card-pad-lg" style="display:none">
+        <div class="step-row"><span class="num"></span><div><b>Заходит по инвайту</b><p>Попадает в командный workspace, приглашает сотрудников.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Подключает интеграции</b><p>Telegram-бот в чат, Telemost и YouGile по своим credentials.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Назначает созвоны из чата</b><p>Пишет «давайте в 18:00» — бот всё создаёт сам.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Получает intelligence</b><p>Summary, задачи, риски и нерешённые owner'ы после встречи.</p></div></div>
+      </div>
+      <div data-panel="man" data-scope="flows" class="card card-pad-lg col gap-12" style="display:none">
+        <span class="eyebrow muted">Team Command Center</span>
+        <div class="check-item done"><span class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 6"/></svg></span><div class="grow"><div class="check-title">Telegram подключён</div></div></div>
+        <div class="check-item done"><span class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 6"/></svg></span><div class="grow"><div class="check-title">Telemost подключён</div></div></div>
+        <div class="check-item active"><span class="check-box"></span><div class="grow"><div class="check-title">Настроить YouGile</div></div><span class="pill warn"><span class="dot"></span>next</span></div>
+        <a class="btn btn-ghost btn-block" href="/app">Открыть панель команды →</a>
+      </div>
+
+      <div data-panel="emp" data-scope="flows" class="step-list card card-pad-lg" style="display:none">
+        <div class="step-row"><span class="num"></span><div><b>Заходит по инвайту</b><p>Привязывает Telegram, ставит daemon, входит в группу.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Участвует в созвоне</b><p>Бот напоминает запустить daemon за 5 минут до встречи.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Получает и подтверждает задачи</b><p>«Беру», «не моя задача» или «нужны детали» — прямо в Telegram.</p></div></div>
+        <div class="step-row"><span class="num"></span><div><b>Растёт в лидерборде</b><p>XP, streak и достижения за вовремя закрытые задачи.</p></div></div>
+      </div>
+      <div data-panel="emp" data-scope="flows" class="card card-pad-lg col gap-12" style="display:none">
+        <span class="eyebrow muted">Personal Productivity Hub</span>
+        <div class="flex center gap-12">
+          <span class="av lg" style="background:linear-gradient(135deg,#C2152E,#E0233F)">7</span>
+          <div class="grow"><b style="font-size:16px">Level 7 · Project Operator</b><div class="bar mt-8"><i style="width:78%"></i></div><div class="faint mono mt-8" style="font-size:12px">2 450 XP · до уровня 340</div></div>
+        </div>
+        <div class="grid g3" style="gap:8px">
+          <div class="stat" style="padding:12px"><div class="stat-label">Streak</div><div class="stat-value mono" style="font-size:24px">5🔥</div></div>
+          <div class="stat" style="padding:12px"><div class="stat-label">On-time</div><div class="stat-value mono" style="font-size:24px">91%</div></div>
+          <div class="stat" style="padding:12px"><div class="stat-label">Ранг</div><div class="stat-value mono" style="font-size:24px">#3</div></div>
+        </div>
+        <a class="btn btn-ghost btn-block" href="employee.html">Открыть мою панель →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ INTEGRATIONS ============ -->
+<section class="band" id="integrations">
+  <div class="lp-wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Интеграции</span>
+      <h2>Единая цепочка из четырёх сервисов</h2>
+      <p>Каждая интеграция подключается отдельно и отвечает за свой участок — вместе они работают как один автоматический конвейер.</p>
+    </div>
+    <div class="integ-grid">
+      <a class="card card-hover integ" href="/app/integrations/telegram">
+        <span class="ic" style="background:rgba(68,147,248,0.14);color:#4493F8"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 3 2 11l6 2 2 7 3-4 5 4 4-17z"/></svg></span>
+        <div><div class="flex center gap-10"><h3>Telegram</h3><span class="pill ok"><span class="dot"></span>connected</span></div>
+        <p>Бот слышит чат, ищет намерение создать встречу, шлёт опросы, напоминания и собирает статусы задач.</p></div>
+      </a>
+      <a class="card card-hover integ" href="/app/integrations/telemost">
+        <span class="ic" style="background:rgba(255,80,80,0.12);color:#ff6b6b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 10l5-3v10l-5-3v-4zM2 6h13v12H2z"/></svg></span>
+        <div><div class="flex center gap-10"><h3>Yandex Telemost</h3><span class="pill ok"><span class="dot"></span>connected</span></div>
+        <p>Автоматически создаёт ссылку на конференцию, когда команда договаривается о созвоне в чате.</p></div>
+      </a>
+      <a class="card card-hover integ" href="/app/integrations/daemon">
+        <span class="ic" style="background:var(--accent-soft);color:var(--accent-2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8"/></svg></span>
+        <div><div class="flex center gap-10"><h3>Desktop Daemon</h3><span class="pill warn"><span class="dot"></span>2 offline</span></div>
+        <p>Записывает созвон только в подтверждённое окно встречи. Никакой постоянной слежки.</p></div>
+      </a>
+      <a class="card card-hover integ" href="/app/integrations/yougile">
+        <span class="ic" style="background:rgba(63,182,96,0.12);color:#3FB660"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z"/></svg></span>
+        <div><div class="flex center gap-10"><h3>YouGile</h3><span class="pill ok"><span class="dot"></span>synced</span></div>
+        <p>Задачи из summary создаются и обновляются на доске с настроенным маппингом колонок.</p></div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GAMIFICATION ============ -->
+<section class="band" id="game">
+  <div class="lp-wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Геймификация</span>
+      <h2>Мотивация, а не детский сад</h2>
+      <p>XP начисляется за реальную пользу: подтверждённые задачи, закрытые вовремя, участие в созвонах и снятые риски.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="ach"><span class="ico" style="background:var(--accent-soft);color:var(--accent-2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></span><div class="ach-name">First Capture</div><div class="ach-desc">Первый созвон превратился в задачи</div></div>
+      <div class="ach"><span class="ico" style="background:var(--ok-bg);color:var(--ok)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M12 2h0"/></svg></span><div class="ach-name">Deadline Keeper</div><div class="ach-desc">Неделя без просрочек</div></div>
+      <div class="ach"><span class="ico" style="background:var(--info-bg);color:var(--info)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 10l5-3v10l-5-3v-4zM2 6h13v12H2z"/></svg></span><div class="ach-name">Meeting Hero</div><div class="ach-desc">Активное участие в созвонах</div></div>
+      <div class="ach"><span class="ico" style="background:var(--warn-bg);color:var(--warn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span><div class="ach-name">Risk Resolver</div><div class="ach-desc">Закрыл риск до того, как он выстрелил</div></div>
+    </div>
+    <div class="flex gap-12 mt-24 wrap">
+      <a class="btn btn-primary" href="/app/leaderboard">Открыть лидерборд →</a>
+      <a class="btn btn-ghost" href="/app/employee">Личный прогресс</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SECURITY ============ -->
+<section class="band" id="security">
+  <div class="lp-wrap">
+    <div class="grid g3">
+      <div class="card prob"><span class="pill ok"><span class="dot"></span>privacy by design</span><h3 class="mt-12">Запись только по согласию</h3><p class="dim mt-8">Daemon активируется лишь в окне подтверждённой встречи. Backend — единственный источник истины.</p></div>
+      <div class="card prob"><span class="pill info"><span class="dot"></span>human-in-the-loop</span><h3 class="mt-12">AI может ошибиться</h3><p class="dim mt-8">Поэтому подтверждение руководителя включено по умолчанию: бот предлагает, человек решает.</p></div>
+      <div class="card prob"><span class="pill acc"><span class="dot"></span>your credentials</span><h3 class="mt-12">Ваши интеграции — ваши</h3><p class="dim mt-8">Telemost и YouGile подключаются по вашим токенам и в любой момент отключаются.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="band cta-band">
+  <div class="lp-wrap">
+    <span class="eyebrow">Готовы?</span>
+    <h2>Пусть команда просто говорит.<br>Остальное сделает Grey Cardinal.</h2>
+    <div class="flex gap-12" style="justify-content:center;margin-top:32px">
+      <a class="btn btn-lg btn-primary" href="/register.html">Подключить команду</a>
+      <a class="btn btn-lg btn-ghost" href="/app/companies">Я директор компании →</a>
+    </div>
+  </div>
+</section>
+
+<footer class="lp-foot">
+  <div class="lp-wrap flex between center wrap gap-16">
+    <div id="brand-foot"></div>
+    <span class="faint" style="font-size:13px">© 2026 Grey Cardinal · Команда говорит — проект обновляется сам</span>
+  </div>
+</footer>
+
+<script src="/assets/icons.js"></script>
+<script>
+  document.getElementById('brand').innerHTML = gcBrand(28);
+  document.getElementById('brand-foot').innerHTML = gcBrand(26);
+  gcTabs();
+
+  // hero pipeline animation
+  const N = 8, DUR = 1750;
+  const rail = document.getElementById('rail');
+  const slides = [...document.querySelectorAll('#track .slide')];
+  for (let i=0;i<N;i++){ const d=document.createElement('div'); d.className='rail-node'; rail.appendChild(d); }
+  const nodes = [...rail.children];
+  let cur = -1;
+  function step(){
+    cur = (cur+1)%N;
+    slides.forEach((s,i)=> s.classList.toggle('show', i===cur));
+    nodes.forEach((n,i)=>{ n.classList.toggle('done', i<cur); n.classList.toggle('on', i===cur);
+      if(i===cur){ n.classList.remove('on'); void n.offsetWidth; n.classList.add('on'); } });
+  }
+  step(); setInterval(step, DUR);
+</script>
+</body>
+</html>

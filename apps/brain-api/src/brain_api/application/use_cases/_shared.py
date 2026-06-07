@@ -107,6 +107,7 @@ async def create_proposal_and_confirmation(
 
     proposal = TaskProposal(
         id=uuid4(),
+        team_id=getattr(extraction, "team_id", None),
         source=source,
         title=extraction.title or raw_text[:120],
         description=extraction.description,
@@ -124,6 +125,7 @@ async def create_proposal_and_confirmation(
 
     confirmation = Confirmation(
         id=uuid4(),
+        team_id=proposal.team_id,
         proposal_id=proposal.id,
         status=ConfirmationStatus.pending,
         telegram_chat_id=chat_telegram_id,
@@ -166,6 +168,7 @@ async def create_task_from_proposal(
     now = config.now()
     task = Task(
         id=uuid4(),
+        team_id=proposal.team_id,
         public_id=format_public_id(sequence),
         title=proposal.title,
         description=proposal.description,
@@ -257,6 +260,7 @@ async def create_board_card(
     await uow.board_cards.add(
         BoardCard(
             id=uuid4(),
+            team_id=task.team_id,
             task_id=task.id,
             provider=provider,
             external_card_id=result.external_card_id,

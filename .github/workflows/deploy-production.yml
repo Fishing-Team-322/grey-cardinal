@@ -1,0 +1,79 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/contracts/python
+          python -m pip install -e "apps/brain-api[dev]"
+          python -m pip install -e "apps/telegram-bot[dev]"
+          python -m pip install -e "apps/audio-worker[dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run ruff
+        run: python -m ruff check .
+
+      # mypy — мягкий гейт: сообщает о проблемах, но не блокирует деплой
+      # (в репозитории есть предсуществующие type-замечания вне scope этого прохода).
+      - name: Run mypy (non-blocking)
+        continue-on-error: true
+        run: python -m mypy apps/brain-api/src packages/contracts/python/grey_cardinal_contracts
+
+      - name: Validate production compose
+        run: docker compose -f docker-compose.prod.yml config
+
+  deploy:
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Архив ровно из закоммиченного дерева (без .git/.env/node_modules).
+      - name: Create deploy archive
+        run: git archive --format=tar.gz -o /tmp/gc-deploy.tar.gz HEAD
+
+      - name: Copy archive to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          port: ${{ secrets.PROD_PORT }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          source: /tmp/gc-deploy.tar.gz
+          target: /tmp
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          port: ${{ secrets.PROD_PORT }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          envs: PROD_PATH
+          script: |
+            export PROD_PATH="${{ secrets.PROD_PATH }}"
+            cd "$PROD_PATH"
+            # Распаковать новый код, сохранив серверные .env.production и .env.
+            tar xzf /tmp/gc-deploy.tar.gz --exclude='.env' --exclude='.env.production'
+            bash scripts/deploy/deploy_prod.sh

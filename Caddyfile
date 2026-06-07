@@ -1,34 +1,39 @@
-# Caddy reverse proxy for Grey Cardinal (auto-HTTPS via Let's Encrypt).
-# {$DOMAIN} comes from the environment (see docker-compose.prod.yml / .env).
-
-{$DOMAIN} {
+fishingteam.su {
 	encode zstd gzip
 
-	# Telegram delivers webhook updates here.
+	# /internal/* — это service-to-service endpoints brain-api (X-Internal-Token).
+	# Наружу закрыто полностью, чтобы их нельзя было дёрнуть из браузера/интернета.
+	handle /internal/* {
+		respond 404
+	}
+
 	handle /webhooks/telegram {
 		reverse_proxy telegram-bot:8010
 	}
 
-	# C++ desktop agent uploads WAV → audio-worker (more specific than /api/*).
 	handle /api/audio/upload {
 		reverse_proxy audio-worker:8020
 	}
 
-	# Backend API + live events + desktop ingestion → brain-api.
-	# WebSocket upgrades on /ws/* are handled transparently by reverse_proxy.
-	@backend path /api/* /ws/* /desktop/* /health /ready /docs /docs/* /openapi.json /redoc /redoc/*
-	handle @backend {
+	@brain path /api/* /ws/* /desktop/* /health /ready /docs /docs/* /openapi.json /redoc /redoc/*
+	handle @brain {
 		reverse_proxy brain-api:8000
 	}
 
-	# Everything else is the static Grey Cardinal app.
 	handle {
 		reverse_proxy frontend:5173
 	}
 }
 
-# API subdomain — exposes brain-api directly (Swagger UI at /docs).
-api.{$DOMAIN} {
+api.fishingteam.su {
 	encode zstd gzip
-	reverse_proxy brain-api:8000
+
+	# Тот же запрет: api.fishingteam.su проксирует brain-api, но НЕ /internal/*.
+	handle /internal/* {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy brain-api:8000
+	}
 }

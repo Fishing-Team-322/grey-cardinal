@@ -13,6 +13,7 @@ native/desktop-agent/chunks/
 # Node / frontend
 node_modules/
 apps/*/node_modules/
+apps/frontend/dist/
 apps/frontend-dashboard/dist/
 
 # Logs
@@ -30,6 +31,7 @@ __pycache__/
 .venv/
 venv/
 .tools/
+.venv312
 
 # CMake / native builds
 native/desktop-agent/build/
@@ -51,6 +53,7 @@ C:/Temp/
 .env
 .env.*
 !.env.example
+!.env.production.example
 config.local.*
 
 # Archives
@@ -61,3 +64,10 @@ native/desktop-agent/build-win/
 apps/frontend-dashboard/public/downloads/*-msi-stage/
 
 apps/desktop-app/
+
+# Daemon binaries (published out-of-band, not committed)
+apps/frontend/public/downloads/*.exe
+apps/frontend/public/downloads/*.msi
+apps/frontend/public/downloads/*.zip
+!apps/frontend/public/downloads/GreyCardinalAgentSetup.exe
+proriv/

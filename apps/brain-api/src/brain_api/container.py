@@ -1,8 +1,4 @@
-"""Композиционный корень (DI-контейнер) brain-api.
-
-Собирает singletons (extractor, board, telegram-gateway, event publisher,
-session factory) и выдаёт UnitOfWork на каждую операцию.
-"""
+"""Composition root for brain-api."""
 
 from __future__ import annotations
 
@@ -19,12 +15,11 @@ from brain_api.application.ports import (
     TelegramGateway,
     UnitOfWork,
 )
+from brain_api.application.semantic_parser import SemanticMessageParser
 from brain_api.config import Settings
-from brain_api.domain.enums import BoardProvider
-from brain_api.infrastructure.board.base import YouGileConfig, resolve_provider
+from brain_api.infrastructure.board.factory import BoardAdapterFactory, TeamScopedBoardGateway
 from brain_api.infrastructure.board.jira import JiraBoardGateway, JiraConfig
 from brain_api.infrastructure.board.mock import MockBoardGateway
-from brain_api.infrastructure.board.yougile import YouGileBoardGateway
 from brain_api.infrastructure.db.repositories import SqlAlchemyUnitOfWork
 from brain_api.infrastructure.db.session import create_engine, create_session_factory
 from brain_api.infrastructure.events.event_bus import WebSocketEventPublisher
@@ -32,6 +27,7 @@ from brain_api.infrastructure.events.websocket_manager import WebSocketManager
 from brain_api.infrastructure.llm.client import OpenAICompatibleClient
 from brain_api.infrastructure.llm.extractor import LLMTaskExtractor
 from brain_api.infrastructure.llm.heuristic_extractor import HeuristicTaskExtractor
+from brain_api.infrastructure.llm.providers import LLMProviderFactory
 from brain_api.infrastructure.telegram_gateway.client import HttpTelegramGateway
 
 logger = logging.getLogger(__name__)
@@ -64,35 +60,48 @@ class Container:
         self.websocket_manager = WebSocketManager()
         self.event_publisher: EventPublisher = WebSocketEventPublisher(self.websocket_manager)
         self.telegram_gateway: TelegramGateway = HttpTelegramGateway(
-            settings.telegram_bot_base_url, settings.internal_api_token
+            settings.telegram_bot_base_url,
+            settings.internal_api_token,
         )
+        self.llm_provider_factory = LLMProviderFactory(self.session_factory, settings)
+        self.semantic_parser = SemanticMessageParser(self.llm_provider_factory)
         self.extractor: TaskExtractor = self._build_extractor(settings)
-        self.board: BoardGateway = self._build_board(settings)
 
-    # ------------------------------------------------------------------ #
+        self.board_adapter_factory = BoardAdapterFactory(self.session_factory, settings)
+        self.board: BoardGateway = TeamScopedBoardGateway(
+            self.board_adapter_factory,
+            self._build_fallback_board(settings),
+        )
+
     def make_uow(self) -> UnitOfWork:
         return cast(UnitOfWork, SqlAlchemyUnitOfWork(self.session_factory()))
 
     async def dispose(self) -> None:
         await self.engine.dispose()
 
-    # ------------------------------------------------------------------ #
     def _build_extractor(self, settings: Settings) -> TaskExtractor:
         if settings.llm_enabled:
             logger.info("LLM extractor enabled (model=%s)", settings.llm_model)
             client = OpenAICompatibleClient(
-                base_url=settings.llm_base_url,
-                api_key=settings.llm_api_key,
+                base_url=settings.effective_llm_base_url,
+                api_key=settings.effective_llm_api_key,
                 model=settings.llm_model,
+                timeout=settings.llm_timeout_seconds,
             )
             return LLMTaskExtractor(client)
-        logger.info("LLM_API_KEY пуст — используется HeuristicTaskExtractor")
+        if settings.is_production:
+            raise RuntimeError("LLM provider must be configured in production")
+        logger.info("LLM is not configured; using HeuristicTaskExtractor")
         return HeuristicTaskExtractor()
 
-    def _build_board(self, settings: Settings) -> BoardGateway:
-        provider = resolve_provider(settings.board_provider)
-        if provider == BoardProvider.jira:
-            cfg = JiraConfig(
+    def _build_fallback_board(self, settings: Settings) -> BoardGateway:
+        """Build only the legacy no-team fallback.
+
+        YouGile is always resolved from TeamModel by BoardAdapterFactory so its
+        credentials never come from process environment variables.
+        """
+        if settings.board_provider == "jira":
+            jira_cfg = JiraConfig(
                 url=settings.jira_url,
                 email=settings.jira_email,
                 api_token=settings.jira_api_token,
@@ -100,30 +109,9 @@ class Container:
                 done_transition_id=settings.jira_done_transition_id,
                 in_progress_transition_id=settings.jira_in_progress_transition_id,
             )
-            if cfg.is_configured:
-                logger.info("Board provider: Jira (%s / %s)", cfg.url, cfg.project_key)
-                return JiraBoardGateway(cfg)
-            logger.warning("BOARD_PROVIDER=jira, but not configured — falling back to mock")
-        if provider == BoardProvider.yougile:
-            cfg = YouGileConfig(
-                api_base_url=settings.yougile_api_base_url,
-                api_key=settings.yougile_api_key,
-                company_id=settings.yougile_company_id or None,
-                project_id=settings.yougile_project_id or None,
-                board_id=settings.yougile_board_id or None,
-                column_backlog_id=settings.yougile_column_backlog_id or None,
-                column_todo_id=settings.yougile_column_todo_id or None,
-                column_in_progress_id=settings.yougile_column_in_progress_id or None,
-                column_review_id=settings.yougile_column_review_id or None,
-                column_blocked_id=settings.yougile_column_blocked_id or None,
-                column_done_id=settings.yougile_column_done_id or None,
-            )
-            if cfg.is_configured:
-                logger.info("Board provider: YouGile")
-                return YouGileBoardGateway(cfg)
-            logger.warning(
-                "BOARD_PROVIDER=yougile, но не настроен (%s) — откат на MockBoardGateway",
-                ", ".join(cfg.missing_required),
-            )
-        logger.info("Board provider: mock")
+            if jira_cfg.is_configured:
+                logger.info("Fallback board provider: Jira")
+                return cast(BoardGateway, JiraBoardGateway(jira_cfg))
+            logger.warning("Fallback Jira is incomplete; using mock")
+        logger.info("Global board fallback: mock; YouGile is configured per team")
         return MockBoardGateway()

@@ -269,6 +269,8 @@ class IngestChatMessage:
         card = await self._uow.board_cards.get_by_task(task.id)
         if card is None:
             return True
+        if self._board is None:
+            return False
         try:
             await self._board.move_card(card.external_card_id, TaskStatus.in_progress)
         except Exception as exc:

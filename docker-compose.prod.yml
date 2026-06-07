@@ -1,58 +1,59 @@
 name: grey-cardinal
 
-# Production / demo stack for Grey Cardinal.
-#
-#   docker compose -f docker-compose.prod.yml up -d --build
-#
-# Only Caddy publishes ports (80/443). PostgreSQL, brain-api, telegram-bot,
-# audio-worker, asr-service, frontend and tg-proxy stay on the
-# internal docker network. Secrets come from .env (see .env.example / DEPLOY.md).
-
 services:
   postgres:
     image: postgres:16-alpine
-    env_file: [.env]
+    env_file:
+      - path: .env.production
+        required: false
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-grey_cardinal}
       POSTGRES_USER: ${POSTGRES_USER:-grey}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-    # No host port published — database is internal only.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grey}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grey} -d ${POSTGRES_DB:-grey_cardinal}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
     restart: unless-stopped
 
-  brain-api:
-    build:
-      context: .
-      dockerfile: apps/brain-api/Dockerfile
-    env_file: [.env]
-    environment:
-      # Persist the file-backed demo/meetings store across restarts.
-      UPLOADS_DIR: /data/uploads
+  ollama:
+    image: ollama/ollama:latest
+    env_file:
+      - path: .env.production
+        required: false
     expose:
-      - "8000"
+      - "11434"
     volumes:
-      - brain_uploads:/data/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  asr-service:
+    build:
+      context: apps/asr-service
+      dockerfile: Dockerfile
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+    expose:
+      - "8030"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/health')"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
-  # Dedicated outbound HTTP proxy for the Telegram bot. This host's network
-  # blocks api.telegram.org's default IPs (and has no IPv6 egress); 149.154.167.220
-  # is reachable, so it is pinned here. The bot routes only its HTTPS Telegram
-  # traffic through this proxy (HTTPS_PROXY); its http brain-api calls go direct.
   tg-proxy:
     build:
       context: apps/tg-proxy
@@ -63,13 +64,44 @@ services:
       - "8888"
     restart: unless-stopped
 
+  brain-api:
+    build:
+      context: .
+      dockerfile: apps/brain-api/Dockerfile
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      APP_ENV: production
+      LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://ollama:11434/v1}
+      UPLOADS_DIR: /data/uploads
+    expose:
+      - "8000"
+    volumes:
+      - brain_uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
   telegram-bot:
     build:
       context: .
       dockerfile: apps/telegram-bot/Dockerfile
-    env_file: [.env]
+    env_file:
+      - path: .env.production
+        required: false
     environment:
-      # Telegram API is HTTPS → through the proxy. brain-api is http → direct.
+      APP_ENV: production
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
       HTTPS_PROXY: http://tg-proxy:8888
       NO_PROXY: brain-api,localhost,127.0.0.1
     expose:
@@ -83,7 +115,7 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
       start_period: 15s
     restart: unless-stopped
 
@@ -91,40 +123,21 @@ services:
     build:
       context: .
       dockerfile: apps/audio-worker/Dockerfile
-    env_file: [.env]
+    env_file:
+      - path: .env.production
+        required: false
     environment:
-      AUDIO_ASR_PROVIDER: ${AUDIO_ASR_PROVIDER:-mock}
+      AUDIO_ASR_PROVIDER: ${AUDIO_ASR_PROVIDER:-http}
+      ASR_SERVICE_URL: http://asr-service:8030
     expose:
       - "8020"
     depends_on:
       brain-api:
         condition: service_healthy
+      asr-service:
+        condition: service_healthy
     restart: unless-stopped
 
-  # Real speech-to-text (faster-whisper, CPU int8, model "base").
-  asr-service:
-    build:
-      context: apps/asr-service
-      dockerfile: Dockerfile
-      args:
-        WHISPER_MODEL: ${WHISPER_MODEL:-base}
-    environment:
-      WHISPER_MODEL: ${WHISPER_MODEL:-base}
-      WHISPER_DEVICE: cpu
-      WHISPER_COMPUTE_TYPE: int8
-      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
-    expose:
-      - "8030"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    restart: unless-stopped
-
-  # The real Grey Cardinal app (landing + auth + cockpit/kanban/tasks), wired to
-  # the backend via /api and /ws. Built to static and served by Caddy on :5173.
   frontend:
     build:
       context: apps/frontend
@@ -137,8 +150,11 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    env_file:
+      - path: .env.production
+        required: false
     environment:
-      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+      DOMAIN: ${DOMAIN:-fishingteam.su}
     ports:
       - "80:80"
       - "443:443"
@@ -148,11 +164,14 @@ services:
       - caddy_config:/config
     depends_on:
       - brain-api
+      - telegram-bot
+      - audio-worker
       - frontend
     restart: unless-stopped
 
 volumes:
   postgres_data:
+  brain_uploads:
+  ollama_data:
   caddy_data:
   caddy_config:
-  brain_uploads:

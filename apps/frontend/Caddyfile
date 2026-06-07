@@ -1,8 +1,34 @@
 :5173 {
-	root * /srv
-	try_files {path} /index.html
-	header /downloads/*.msi Content-Type application/octet-stream
-	header /downloads/*.deb Content-Type application/vnd.debian.binary-package
-	header /downloads/*.dmg Content-Type application/x-apple-diskimage
-	file_server
+    root * /usr/share/caddy
+    encode gzip
+
+    @assets path /styles.css /assets/* /js/* /vendor/* /partials/*
+    handle @assets {
+        header Cache-Control "no-cache"
+        file_server
+    }
+
+    handle /downloads/* {
+        file_server
+    }
+
+    @app path /app /app/*
+    handle @app {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        try_files {path} /app.html
+        file_server
+    }
+
+    @html_no_ext {
+        not path *.html *.css *.js *.png *.jpg *.svg *.exe
+        not path /app /app/*
+    }
+    handle @html_no_ext {
+        try_files {path}.html {path}/index.html /index.html
+        file_server
+    }
+
+    handle {
+        file_server
+    }
 }

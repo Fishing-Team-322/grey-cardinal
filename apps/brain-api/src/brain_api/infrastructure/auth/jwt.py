@@ -8,7 +8,6 @@ from uuid import UUID
 import bcrypt
 from jose import JWTError, jwt
 
-
 # ── Password helpers ──────────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
