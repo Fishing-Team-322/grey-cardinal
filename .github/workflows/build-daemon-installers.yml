@@ -1,11 +1,11 @@
-name: Build daemon installers
+name: Build Windows tray agent MSI
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "native/desktop-agent/**"
-      - "scripts/package_*"
+      - "native/tray-agent/**"
+      - "scripts/package_windows_tray_msi.ps1"
       - ".github/workflows/build-daemon-installers.yml"
 
 jobs:
@@ -13,40 +13,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - uses: ilammy/msvc-dev-cmd@v1
-      - name: Build MSI
+      - name: Install tray-agent build deps
         shell: pwsh
-        run: ./scripts/package_windows_msi.ps1 -Configuration Release -Version 0.3.0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: grey-cardinal-daemon-windows-x64
-          path: apps/frontend/public/downloads/grey-cardinal-daemon-windows-x64.msi
-
-  linux-deb-preview:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Show Linux DEB preview status
         run: |
-          chmod +x scripts/package_linux_deb.sh
-          scripts/package_linux_deb.sh || test "$?" = "2"
+          python -m pip install --upgrade pip
+          pip install -r native/tray-agent/requirements.txt pyinstaller
+      - name: Build tray agent MSI
+        shell: pwsh
+        run: ./scripts/package_windows_tray_msi.ps1 -Version 0.6.2
       - uses: actions/upload-artifact@v4
         with:
-          name: grey-cardinal-daemon-linux-preview-docs
-          path: native/desktop-agent/package/linux
-
-  macos-installer-preview:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Show macOS preview status
-        run: |
-          chmod +x scripts/package_macos.sh
-          scripts/package_macos.sh || test "$?" = "2"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: grey-cardinal-daemon-macos-preview-docs
-          path: native/desktop-agent/package/macos
+          name: grey-cardinal-agent-windows-x64
+          path: apps/frontend/public/downloads/GreyCardinalAgent-x64.msi

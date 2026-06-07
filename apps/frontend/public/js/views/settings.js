@@ -24,7 +24,7 @@ export default async function settingsView(root) {
     <div class="col gap-16">
       <div class="card card-pad"><div class="card-head"><div class="card-title">Подключения</div></div>
         <a class="integration-row" href="/app/integrations/telegram"><span>Telegram</span><span class="pill ${telegram.linked ? "ok" : "warn"}">${telegram.linked ? "привязан" : "настроить"}</span></a>
-        <a class="integration-row" href="/app/integrations/daemon"><span>Desktop Agent</span><span class="pill ${agents.agents.length ? "ok" : "warn"}">${agents.agents.length} устройств</span></a>
+        <a class="integration-row" href="/app/integrations/daemon"><span>Windows Agent</span><span class="pill ${agents.agents.length ? "ok" : "warn"}">${agents.agents.length} устройств</span></a>
       </div>
       <form class="card card-pad col gap-16" id="password-form"><div class="card-head"><div class="card-title">Безопасность</div></div><label>Текущий пароль<input class="input mt-6" type="password" name="old_password" required></label><label>Новый пароль<input class="input mt-6" type="password" name="new_password" minlength="6" required></label><button class="btn btn-primary" type="submit">Сменить пароль</button><div class="alert alert-error" id="password-error" hidden></div><button class="btn btn-ghost" type="button" id="logout">Выйти</button></form>
     </div>

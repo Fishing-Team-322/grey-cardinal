@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from brain_api.api.routes.accounts import get_current_user, get_db
 from brain_api.api.routes.agents import router as agents_router
-from brain_api.api.routes.daemon import _resolve_session
+from brain_api.api.routes.daemon import _agent_team, _resolve_session
 from brain_api.infrastructure.db import models as m
 
 
@@ -52,6 +52,35 @@ def client(session_factory, seeded_user) -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture
+def unauth_client(session_factory) -> TestClient:
+    """Same router but WITHOUT the auth override — exercises the real
+    get_current_user dependency (no session cookie => 401)."""
+    app = FastAPI()
+    app.include_router(agents_router)
+
+    async def _override_db():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _override_db
+    return TestClient(app)
+
+
+async def _seed_team(session, *, owner_id, name: str, tg_chat_id: int):
+    """A self-contained tenant: company + team (with Telegram chat) + one member."""
+    company = m.CompanyModel(name=f"{name} Co", timezone="Europe/Moscow", created_by=owner_id)
+    session.add(company)
+    await session.flush()
+    team = m.TeamModel(
+        company_id=company.id, name=name, timezone="Europe/Moscow", tg_chat_id=tg_chat_id
+    )
+    session.add(team)
+    await session.flush()
+    session.add(m.TeamMemberModel(team_id=team.id, user_id=owner_id, role="manager"))
+    return team.id
+
+
 def _issue_code(client: TestClient) -> str:
     r = client.post("/api/agents/pairing-code")
     assert r.status_code == 200, r.text
@@ -67,6 +96,13 @@ def _register(client: TestClient, code: str, device="Denis laptop") -> dict:
     )
     assert r.status_code == 200, r.text
     return r.json()
+
+
+def test_pairing_code_requires_auth(unauth_client: TestClient) -> None:
+    """No session cookie => no pairing code. Codes are minted only for the
+    authenticated user who will own (and be billed/attributed for) the agent."""
+    r = unauth_client.post("/api/agents/pairing-code")
+    assert r.status_code == 401
 
 
 def test_pairing_code_requires_auth_and_returns_code(client: TestClient) -> None:
@@ -150,3 +186,42 @@ def test_unpair_removes_agent_and_revokes_token(client: TestClient) -> None:
         ).status_code
         == 401
     )
+
+
+@pytest.mark.asyncio
+async def test_agent_upload_routes_to_bound_users_team_only(
+    client: TestClient, session_factory, seeded_user
+):
+    """An agent paired by user A must route daemon uploads to A's team — and the
+    routing helper must resolve a *different* user to their *own* team. This proves
+    upload destination follows the per-agent token binding, with no global/
+    single-tenant fallback that could leak one tenant's audio into another's board.
+    """
+    # Two independent tenants, each with its own Telegram-bound team.
+    async with session_factory() as session:
+        other_user = m.UserModel(
+            id=uuid4(), display_name="Bob", email="bob@example.com", login="bob"
+        )
+        session.add(other_user)
+        await session.flush()
+        other_user_id = other_user.id
+        team_a = await _seed_team(session, owner_id=seeded_user, name="Team A", tg_chat_id=-1001)
+        team_b = await _seed_team(session, owner_id=other_user_id, name="Team B", tg_chat_id=-1002)
+        await session.commit()
+
+    # Agent is paired by user A (seeded_user).
+    reg = _register(client, _issue_code(client))
+
+    async with session_factory() as session:
+        cs = await _resolve_session(session, reg["agent_token"])
+        assert cs is not None
+        assert cs.user_id == seeded_user  # token bound to A, not a global session
+
+        # daemon_v2_upload picks the destination team via _agent_team(cs.user_id):
+        bound_team = await _agent_team(session, cs.user_id)
+        assert bound_team is not None and bound_team.id == team_a
+
+        # The other tenant resolves strictly to its own team — no cross-tenant bleed.
+        other_team = await _agent_team(session, other_user_id)
+        assert other_team is not None and other_team.id == team_b
+        assert other_team.id != bound_team.id
