@@ -10,7 +10,7 @@ export default async function integrationsView(root) {
     team ? api.teams.telegramStatus(team.id).catch(() => ({ linked: false })) : { linked: false },
     team ? api.yougile.status(team.id).catch(() => ({ connected: false })) : { connected: false },
     api.daemon.status().catch(() => ({ agents: [] })),
-    api.telemost.status().catch(() => ({ available: false })),
+    team ? api.yandexTelemost.status(team.id).catch(() => ({ connected: false })) : { connected: false },
     team ? api.llm.health(team.id).catch(() => ({ status: "error" })) : { status: "error" },
   ]);
   content.innerHTML = `<div class="card card-pad">
@@ -19,7 +19,7 @@ export default async function integrationsView(root) {
     ${row("YouGile", yougile.connected, "/app/integrations/yougile", team?.name || "")}
     ${row("LLM (семантика)", llm.status === "ok", "/app/integrations/llm", llm.primary?.provider || "")}
     ${row("Windows Agent", agents.agents.length > 0, "/app/integrations/daemon", `${agents.agents.length} устройств`)}
-    ${row("Yandex Telemost", telemost.available, "/app/integrations/telemost", telemost.provider || "")}
+    ${row("Yandex Telemost", telemost.connected, "/app/integrations/telemost", telemost.status || "")}
   </div>`;
 }
 

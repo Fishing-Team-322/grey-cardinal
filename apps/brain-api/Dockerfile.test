@@ -9,6 +9,7 @@ COPY apps/brain-api/alembic.ini /app/apps/brain-api/alembic.ini
 COPY apps/brain-api/alembic /app/apps/brain-api/alembic
 COPY apps/brain-api/src /app/apps/brain-api/src
 COPY apps/brain-api/tests /app/apps/brain-api/tests
+COPY apps/brain-api/evals /app/apps/brain-api/evals
 COPY apps/frontend /app/apps/frontend
 COPY Caddyfile docker-compose.prod.yml /app/
 RUN pip install -e "/app/apps/brain-api[dev]"

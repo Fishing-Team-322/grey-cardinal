@@ -271,6 +271,33 @@ export const api = {
       return request("GET", "/api/integrations/telemost/status");
     },
   },
+  yandexTelemost: {
+    status(teamId) {
+      return request("GET", "/api/integrations/yandex-telemost/status", {
+        query: { team_id: teamId },
+      });
+    },
+    connectStart(teamId) {
+      return request("POST", "/api/integrations/yandex-telemost/connect/start", {
+        body: { team_id: teamId },
+      });
+    },
+    disconnect(teamId) {
+      return request("POST", "/api/integrations/yandex-telemost/disconnect", {
+        body: { team_id: teamId },
+      });
+    },
+    saveSettings(teamId, settings) {
+      return request("PATCH", "/api/integrations/yandex-telemost/settings", {
+        body: { team_id: teamId, ...settings },
+      });
+    },
+    testCreateRoom(teamId) {
+      return request("POST", "/api/integrations/yandex-telemost/test-create-room", {
+        body: { team_id: teamId },
+      });
+    },
+  },
   deploy: {
     status() {
       return request("GET", "/api/deploy/status");

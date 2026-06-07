@@ -20,6 +20,11 @@ fi
 echo "Validating compose config..."
 docker compose -f "$COMPOSE_FILE" config >/dev/null
 
+# Guard: tray-agent MSI is published out-of-band (not in git). The frontend image
+# bakes it via `COPY public/`; missing => /downloads/...msi serves 404 in prod.
+echo "Checking frontend downloads..."
+bash scripts/check_frontend_downloads.sh
+
 echo "Building images..."
 docker compose -f "$COMPOSE_FILE" build
 

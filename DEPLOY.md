@@ -48,6 +48,34 @@ chmod 600 .env
 Optional: `TELEGRAM_BOT_TOKEN=` (enables the bot), `LLM_*` (LLM extraction),
 `YOUGILE_ENABLED=true` + keys (real board sync).
 
+## 4a. Windows tray-agent MSI (required before building `frontend`)
+The Windows tray agent installer **is not stored in git** (binaries are published
+out-of-band to keep the repo small). The `frontend` image bakes
+`apps/frontend/public/` via `COPY public/`, so the MSI must exist at:
+
+```
+apps/frontend/public/downloads/GreyCardinalAgent-x64.msi
+```
+
+Provide it before building the `frontend` image via one of:
+- **CI artifact** `grey-cardinal-agent-windows-x64` (workflow *Build Windows tray
+  agent MSI*) — download and drop it into `apps/frontend/public/downloads/`.
+- **Local build** (Windows, needs Python + PyInstaller and dotnet for WiX):
+  ```powershell
+  ./scripts/package_windows_tray_msi.ps1 -Version 0.6.2
+  ```
+
+If the file is missing, `/downloads/GreyCardinalAgent-x64.msi` serves **404** after
+deploy. The deploy script (`scripts/deploy/deploy_prod.sh`) and `make docker-build`
+run a guard that fails fast with a clear message before the image is built:
+
+```bash
+bash scripts/check_frontend_downloads.sh   # or: make check-frontend-downloads
+```
+
+> `apps/frontend/public/downloads/*.msi` and `*.exe` stay **git-ignored** and must
+> never be committed.
+
 ## 5. Launch
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
@@ -93,6 +121,21 @@ This host blocks Telegram's default IPs / has no IPv6 egress. `tg-proxy`
 (its http calls to brain-api go direct via `NO_PROXY`). If your host reaches
 Telegram normally, you can drop `tg-proxy` and the bot's `HTTPS_PROXY`.
 
+## 8a. Yandex Telemost (create rooms from Telegram)
+Create Telemost rooms from a Telegram group via the bot. Full guide:
+[docs/yandex-telemost.md](docs/yandex-telemost.md).
+
+1. Create a Yandex OAuth app (platform Web) with redirect URI
+   `https://fishingteam.su/api/integrations/yandex-telemost/oauth/callback` and scopes
+   `telemost-api:conferences.create read update`.
+2. Set `YANDEX_TELEMOST_CLIENT_ID` / `YANDEX_TELEMOST_CLIENT_SECRET` (rotated) in
+   `.env.production` (see `.env.production.example`).
+3. `docker compose -f docker-compose.prod.yml run --rm brain-api alembic upgrade head`
+   (adds migration `0009_yandex_telemost`).
+4. In the cabinet: **Integrations → Yandex Telemost → Connect**, then bind the
+   Telegram group to the team. In the group, «нужен созвон» → bot offers to create
+   the room. Tokens are stored encrypted; the secret is env-only and never logged.
+
 ## 9. Logs / update / stop
 ```bash
 docker compose -f docker-compose.prod.yml logs --tail=200 brain-api
@@ -105,7 +148,7 @@ docker compose -f docker-compose.prod.yml down                # stop (keeps volu
 | Part | Status |
 |------|--------|
 | STT | `asr-service` real (faster-whisper `base`); `audio-worker` provider = mock. |
-| Telemost | mock session manager. |
+| Telemost | Real room creation via Yandex OAuth (`YANDEX_TELEMOST_*`); the meeting-agent join worker is a stub. |
 | Telegram | needs `TELEGRAM_BOT_TOKEN`; reaches Telegram via `tg-proxy`. |
 | LLM | heuristic unless `LLM_*` set. |
 | Board | local unless `YOUGILE_ENABLED=true` + keys. |

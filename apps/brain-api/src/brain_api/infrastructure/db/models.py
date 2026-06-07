@@ -544,18 +544,11 @@ class AIInboxItemModel(TimestampMixin, Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
 
 
-class YouGileConnectionModel(TimestampMixin, Base):
-    __tablename__ = "yougile_connections"
-    __table_args__ = (UniqueConstraint("team_id", name="uq_yougile_connection_team"),)
-
-    id: Mapped[UUID] = _uuid_pk()
-    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
-    external_company_id: Mapped[str] = mapped_column(Text, nullable=False)
-    company_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="connected")
-    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
+# These four were duplicated by the bad merge. Aligned to the alembic migrations
+# (0007 _create_*), i.e. the actual DB schema. The feature/v2-production-rebuild
+# variants (connection_id NOT NULL, project_id, SyncEvent.provider/entity_type, …)
+# were never migrated; their import/sync code + tests are an un-migrated follow-up
+# (see docs/yandex-telemost.md "Known follow-ups"). Telemost does not depend on these.
 class YouGileBoardModel(Base):
     __tablename__ = "yougile_boards"
     __table_args__ = (
@@ -713,13 +706,19 @@ class YouGileSyncLogModel(Base):
 
 
 class YouGileConnectionModel(TimestampMixin, Base):
+    # Single source of truth: merges the two previously-duplicated declarations
+    # (both were used by code) into the union of columns the migrations create
+    # (0007 _create_yougile_connections + alters) and the routes/discovery write.
     __tablename__ = "yougile_connections"
+    __table_args__ = (UniqueConstraint("team_id", name="uq_yougile_connection_team"),)
 
     id: Mapped[UUID] = _uuid_pk()
     team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
     provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="yougile")
-    credentials_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
+    external_company_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    company_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="connected")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -759,100 +758,14 @@ class YouGileProjectModel(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class YouGileBoardModel(Base):
-    __tablename__ = "yougile_boards"
-    __table_args__ = (
-        UniqueConstraint("connection_id", "external_id", name="uq_yougile_board_external"),
-    )
-
-    id: Mapped[UUID] = _uuid_pk()
-    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
-    connection_id: Mapped[UUID] = mapped_column(
-        ForeignKey("yougile_connections.id"), nullable=False
-    )
-    project_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("yougile_projects.id"), nullable=True
-    )
-    external_id: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    is_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class YouGileColumnModel(Base):
-    __tablename__ = "yougile_columns"
-    __table_args__ = (
-        UniqueConstraint("board_id", "external_id", name="uq_yougile_column_external"),
-    )
-
-    id: Mapped[UUID] = _uuid_pk()
-    board_id: Mapped[UUID] = mapped_column(ForeignKey("yougile_boards.id"), nullable=False)
-    external_id: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    mapped_status: Mapped[str | None] = mapped_column(Text, nullable=True)
-    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class ExternalTaskLinkModel(Base):
-    __tablename__ = "external_task_links"
-    __table_args__ = (
-        UniqueConstraint("provider", "external_task_id", name="uq_external_task_provider_id"),
-    )
-
-    id: Mapped[UUID] = _uuid_pk()
-    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
-    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"), nullable=False)
-    provider: Mapped[str] = mapped_column(Text, nullable=False)
-    external_board_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    external_column_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    external_task_id: Mapped[str] = mapped_column(Text, nullable=False)
-    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    sync_status: Mapped[str] = mapped_column(Text, nullable=False)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-
-
-class SyncEventModel(Base):
-    __tablename__ = "sync_events"
-    __table_args__ = (
-        Index("ix_sync_events_team_created", "team_id", "created_at"),
-    )
-
-    id: Mapped[UUID] = _uuid_pk()
-    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
-    provider: Mapped[str] = mapped_column(Text, nullable=False)
-    direction: Mapped[str] = mapped_column(Text, nullable=False)
-    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
-    entity_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
-    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-
-class AiInboxItemModel(TimestampMixin, Base):
-    __tablename__ = "ai_inbox_items"
-
-    id: Mapped[UUID] = _uuid_pk()
-    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
-    item_type: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
-    source_type: Mapped[str] = mapped_column(Text, nullable=False)
-    source_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_text: Mapped[str] = mapped_column(Text, nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
-    parsed_payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
-    proposed_action: Mapped[str | None] = mapped_column(Text, nullable=True)
-    linked_task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
-    decided_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+# A bad merge of feature/v2-production-rebuild duplicated several ORM classes.
+# Resolution (see docs/yandex-telemost.md "Known follow-ups"):
+#   - ai_inbox_items: the migrations (0007) + grey_board.py use the Block A schema
+#     (AIInboxItemModel above), so that stays canonical. agentic_pm referenced a
+#     second, un-migrated v2 variant under the name `AiInboxItemModel`; alias it to
+#     the canonical class so imports resolve (its v2-only columns are a follow-up).
+#   - yougile board-mirror models were aligned to the migrations (Block A) above.
+AiInboxItemModel = AIInboxItemModel
 
 
 class AgentRecommendationModel(TimestampMixin, Base):
@@ -970,3 +883,83 @@ class GamificationEventModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# ── Yandex Telemost integration (OAuth, tenant-scoped) ────────────────────────
+
+
+class YandexTelemostIntegrationModel(TimestampMixin, Base):
+    """Per-team Yandex Telemost OAuth connection.
+
+    Tokens are stored ONLY encrypted (Fernet via SecretCipher). Never serialized
+    to API responses or logs. One row per team (the team = workspace tenant).
+    """
+
+    __tablename__ = "yandex_telemost_integrations"
+    __table_args__ = (
+        UniqueConstraint("team_id", name="uq_yandex_telemost_team"),
+        CheckConstraint(
+            "status in ('connected','expired','disconnected','error')",
+            name="ck_yandex_telemost_status",
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="yandex_telemost")
+    yandex_user_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    refresh_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="disconnected")
+    # UI/behaviour settings: enable_meeting_agent_auto_join, send_ai_recording_notice_to_chat,
+    # default_title_template.
+    settings: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class YandexOAuthStateModel(Base):
+    """One-time CSRF state for the Yandex OAuth dance, bound to user+team."""
+
+    __tablename__ = "yandex_oauth_states"
+
+    id: Mapped[UUID] = _uuid_pk()
+    state: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="yandex_telemost")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MeetingAgentJoinJobModel(TimestampMixin, Base):
+    """Queue stub for the meeting recording agent joining a Telemost room.
+
+    MVP does NOT auto-join (no hidden recording). This row records intent so a
+    future worker can pick it up; until then it stays 'pending'.
+    """
+
+    __tablename__ = "meeting_agent_join_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','queued','failed','completed')",
+            name="ck_meeting_agent_join_status",
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="yandex_telemost")
+    meeting_url: Mapped[str] = mapped_column(Text, nullable=False)
+    conference_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meeting_id: Mapped[UUID | None] = mapped_column(ForeignKey("meetings.id"), nullable=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
