@@ -76,6 +76,12 @@ export const api = {
     overview(id) {
       return request("GET", `/api/companies/${id}/overview`);
     },
+    map(id) {
+      return request("GET", `/api/companies/${id}/map`);
+    },
+    recommendations(id) {
+      return request("GET", `/api/companies/${id}/recommendations`);
+    },
   },
   teams: {
     create(companyId, name, timezone) {
@@ -148,6 +154,101 @@ export const api = {
     },
     syncNow(teamId) {
       return request("POST", `/api/teams/${teamId}/integrations/yougile/sync`);
+    },
+    connectFull(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/yougile/connect`, { body });
+    },
+    statusFull(teamId) {
+      return request("GET", `/api/teams/${teamId}/yougile/status`);
+    },
+    workspaces(teamId) {
+      return request("GET", `/api/teams/${teamId}/yougile/workspaces`);
+    },
+    projectsFull(teamId) {
+      return request("GET", `/api/teams/${teamId}/yougile/projects`);
+    },
+    boardsFull(teamId) {
+      return request("GET", `/api/teams/${teamId}/yougile/boards`);
+    },
+    columnsFull(teamId, boardId) {
+      return request("GET", `/api/teams/${teamId}/yougile/boards/${boardId}/columns`);
+    },
+    selectBoard(teamId, boardId, columnMapping) {
+      return request("POST", `/api/teams/${teamId}/yougile/select-board`, {
+        body: { board_id: boardId, column_mapping: columnMapping },
+      });
+    },
+    importBoard(teamId) {
+      return request("POST", `/api/teams/${teamId}/yougile/import`);
+    },
+    syncFull(teamId) {
+      return request("POST", `/api/teams/${teamId}/yougile/sync`);
+    },
+    syncEvents(teamId) {
+      return request("GET", `/api/teams/${teamId}/yougile/sync-events`);
+    },
+  },
+  greyBoard: {
+    get(teamId, view = "agent") {
+      return request("GET", `/api/teams/${teamId}/grey-board`, { query: { view } });
+    },
+    action(taskId, body) {
+      return request("POST", `/api/tasks/${taskId}/agent-action`, { body });
+    },
+  },
+  aiInbox: {
+    list(teamId) {
+      return request("GET", `/api/teams/${teamId}/ai-inbox`);
+    },
+    approve(id) {
+      return request("POST", `/api/ai-inbox/${id}/approve`);
+    },
+    reject(id) {
+      return request("POST", `/api/ai-inbox/${id}/reject`);
+    },
+    edit(id, body) {
+      return request("POST", `/api/ai-inbox/${id}/edit`, { body });
+    },
+    linkTask(id, taskId) {
+      return request("POST", `/api/ai-inbox/${id}/link-task`, { body: { task_id: taskId } });
+    },
+  },
+  setup: {
+    status(teamId) {
+      return request("GET", `/api/teams/${teamId}/setup/status`);
+    },
+    runDemo(teamId) {
+      return request("POST", `/api/teams/${teamId}/setup/run-demo`);
+    },
+  },
+  recommendations: {
+    team(teamId) {
+      return request("GET", `/api/teams/${teamId}/recommendations`);
+    },
+    ignore(id) {
+      return request("POST", `/api/recommendations/${encodeURIComponent(id)}/ignore`);
+    },
+    apply(id) {
+      return request("POST", `/api/recommendations/${encodeURIComponent(id)}/apply`);
+    },
+  },
+  people: {
+    team(teamId) {
+      return request("GET", `/api/teams/${teamId}/people`);
+    },
+    profile(userId) {
+      return request("GET", `/api/people/${userId}/profile`);
+    },
+    me() {
+      return request("GET", "/api/users/me/profile");
+    },
+  },
+  topics: {
+    list(teamId) {
+      return request("GET", `/api/teams/${teamId}/telegram/topics`);
+    },
+    bind(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/telegram/topics`, { body });
     },
   },
   llm: {

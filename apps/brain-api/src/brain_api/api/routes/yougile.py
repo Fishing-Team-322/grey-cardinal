@@ -14,8 +14,9 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -168,7 +169,8 @@ async def yougile_connect(
 
     webhook_secret = secrets.token_urlsafe(24)
     team.board_provider = "yougile"
-    team.board_credentials_encrypted = cipher.encrypt_text(json.dumps({"api_key": api_key}))
+    credentials_encrypted = cipher.encrypt_text(json.dumps({"api_key": api_key}))
+    team.board_credentials_encrypted = credentials_encrypted
     config = dict(team.board_config or {})
     config.update(
         {
@@ -187,6 +189,26 @@ async def yougile_connect(
             api_key, settings.yougile_api_base_url, base, team_id, webhook_secret
         )
     team.board_config = config
+    connection = await session.scalar(
+        select(m.YouGileConnectionModel).where(
+            m.YouGileConnectionModel.team_id == team_id,
+            m.YouGileConnectionModel.provider == "yougile",
+        )
+    )
+    if connection is None:
+        connection = m.YouGileConnectionModel(
+            id=uuid4(),
+            team_id=team_id,
+            provider="yougile",
+            credentials_encrypted=credentials_encrypted,
+            status="active",
+            last_checked_at=datetime.now(UTC),
+        )
+    connection.credentials_encrypted = credentials_encrypted
+    connection.status = "active"
+    connection.last_error = None
+    connection.last_checked_at = datetime.now(UTC)
+    session.add(connection)
     session.add(team)
     await session.commit()
 

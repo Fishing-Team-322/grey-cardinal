@@ -48,6 +48,7 @@ def build_message_event(update: dict[str, Any], message: dict[str, Any]) -> Tele
         sender=_sender(sender_raw),
         text=message.get("text", ""),
         date=_ts(message.get("date")),
+        message_thread_id=message.get("message_thread_id"),
         raw=update,
     )
 
@@ -65,6 +66,7 @@ def build_command_event(update: dict[str, Any], message: dict[str, Any]) -> Tele
         args=args,
         text=text,
         date=_ts(message.get("date")),
+        message_thread_id=message.get("message_thread_id"),
         raw=update,
     )
 

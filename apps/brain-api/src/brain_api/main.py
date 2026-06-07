@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from brain_api.api.routes import (
     accounts,
+    agentic_pm,
     agents,
     daemon,
     debug,
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(accounts.router)
+    app.include_router(agentic_pm.router)
     app.include_router(agents.router)
     app.include_router(daemon.router)
     app.include_router(debug.router)

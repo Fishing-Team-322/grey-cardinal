@@ -6,6 +6,17 @@ export interface TelegramChatInfo {
   title: string | null;
 }
 
+export interface TelegramMessageEvent {
+  update_id: number;
+  message_id: number;
+  chat: TelegramChatInfo;
+  sender: TelegramSender;
+  text: string;
+  date: string;
+  message_thread_id: number | null;
+  raw?: unknown;
+}
+
 export interface TelegramSender {
   id: number;
   username: string | null;

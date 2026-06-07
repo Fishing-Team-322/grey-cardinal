@@ -168,6 +168,16 @@ class YouGileClient:
         return data["key"]
 
     # ── projects / boards / columns ──────────────────────────────────────────────
+    async def health(self) -> dict[str, Any]:
+        projects = await self.list_projects()
+        return {"ok": True, "projects_count": len(projects)}
+
+    async def list_workspaces(self) -> list[dict[str, Any]]:
+        try:
+            return await self._paginate("/companies")
+        except YouGileNotFound:
+            return []
+
     async def list_projects(self) -> list[dict[str, Any]]:
         return await self._paginate("/projects")
 
@@ -202,9 +212,18 @@ class YouGileClient:
 
     # ── tasks ────────────────────────────────────────────────────────────────────
     async def list_tasks(
-        self, *, column_id: str | None = None, assigned_to: str | None = None
+        self,
+        board_id: str | None = None,
+        cursor: str | None = None,
+        *,
+        column_id: str | None = None,
+        assigned_to: str | None = None,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
+        if board_id:
+            params["boardId"] = board_id
+        if cursor:
+            params["cursor"] = cursor
         if column_id:
             params["columnId"] = column_id
         if assigned_to:
@@ -234,6 +253,15 @@ class YouGileClient:
 
     async def update_task(self, task_id: str, **fields: Any) -> dict[str, Any]:
         return await self._request("PUT", f"/tasks/{task_id}", json=fields)
+
+    async def move_task(self, task_id: str, column_id: str) -> dict[str, Any]:
+        return await self.update_task(task_id, columnId=column_id)
+
+    async def close_task(self, task_id: str) -> dict[str, Any]:
+        return await self.update_task(task_id, completed=True)
+
+    async def add_comment(self, task_id: str, text: str) -> dict[str, Any]:
+        return await self.create_chat_message(task_id, text)
 
     # ── users ────────────────────────────────────────────────────────────────────
     async def list_users(self) -> list[dict[str, Any]]:
