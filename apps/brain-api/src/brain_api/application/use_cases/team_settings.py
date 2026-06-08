@@ -26,7 +26,8 @@ CARDINAL_MENTION_SETTING = "require_cardinal_mention"
 DEFAULT_REQUIRE_CARDINAL_MENTION = False
 
 _CARDINAL_PREFIX = re.compile(
-    r"^\s*(?:серый\s+)?(?:кардинал|кординал|координат[ауеы]?|cardinal|dinal)"
+    r"^\s*(?:(?:так|ну|ээ+|эм+|слушай|слушайте)[\s,.:;!?—-]+)?"
+    r"(?:серый\s+)?(?:кардинал|кординал|координат[ауеы]?|cardinal|dinal)"
     r"(?=$|[\s,.:;!?—-])[\s,.:;!?—-]*",
     re.IGNORECASE,
 )
