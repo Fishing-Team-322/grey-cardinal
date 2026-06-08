@@ -36,6 +36,22 @@ def test_parse_time_with_preposition_and_dot_minutes():
     assert parsed.astimezone(TZ).minute == 30
 
 
+@pytest.mark.parametrize(
+    ("text", "hour", "minute"),
+    [
+        ("Cardinal мне нужен зазвон на 12-37.", 12, 37),
+        ("Cardinal планируется звом на 12 40.", 12, 40),
+        ("Кардинал, созвон в 12: 45", 12, 45),
+        ("Кардинал, нужен звонок на 12", 12, 0),
+    ],
+)
+def test_parse_time_from_asr_variants(text: str, hour: int, minute: int):
+    parsed = _parse_time_to_dt(text, NOW, "Europe/Moscow")
+    assert parsed is not None
+    assert parsed.astimezone(TZ).hour == hour
+    assert parsed.astimezone(TZ).minute == minute
+
+
 async def _seed(session, *, scheduled_at):
     company = m.CompanyModel(name="Co", timezone="Europe/Moscow", created_by=uuid4())
     session.add(company)
