@@ -34,7 +34,7 @@ async def run_job(job: dict) -> None:
     meeting_id = job["meeting_public_id"]
     directory = Path("/tmp/telemost-recordings") / job_id
     shutil.rmtree(directory, ignore_errors=True)
-    browser = TelemostBrowser(settings.participant_name, settings.join_timeout_seconds)
+    browser = TelemostBrowser(settings)
     segmenter = AudioSegmenter(directory, settings.segment_seconds)
     sequence = 0
     try:
