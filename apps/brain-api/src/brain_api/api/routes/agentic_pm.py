@@ -578,8 +578,28 @@ async def person_profile(user_id: UUID, current_user: CurrentUser, session: Asyn
 
 
 @router.get("/api/users/me/profile")
-async def my_profile(current_user: CurrentUser, session: AsyncSession = Depends(get_db)) -> dict:
-    return await employee_profile_payload(session, current_user.id)
+async def my_profile(
+    current_user: CurrentUser,
+    user_id: UUID | None = None,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    target = current_user.id
+    if user_id is not None and user_id != current_user.id:
+        # Allow viewing a teammate's profile only if they share a team.
+        shares_team = await session.scalar(
+            select(m.TeamMemberModel.id)
+            .where(m.TeamMemberModel.user_id == user_id)
+            .where(
+                m.TeamMemberModel.team_id.in_(
+                    select(m.TeamMemberModel.team_id).where(
+                        m.TeamMemberModel.user_id == current_user.id
+                    )
+                )
+            )
+        )
+        if shares_team is not None:
+            target = user_id
+    return await employee_profile_payload(session, target)
 
 
 @router.get("/api/teams/{team_id}/telegram/topics")

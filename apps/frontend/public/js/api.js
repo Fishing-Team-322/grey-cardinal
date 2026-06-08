@@ -250,6 +250,20 @@ export const api = {
       return request("POST", `/api/ai-inbox/${itemId}/assign`, { body: { user_id: userId } });
     },
   },
+  people: {
+    me() {
+      return request("GET", "/api/users/me/profile");
+    },
+    profile(userId) {
+      return request("GET", `/api/users/me/profile`, { query: { user_id: userId } });
+    },
+    team(teamId) {
+      return request("GET", `/api/teams/${teamId}/people`);
+    },
+    update(body) {
+      return request("PATCH", "/api/auth/me", { body });
+    },
+  },
   leaderboards: {
     me() {
       return request("GET", "/api/users/me/gamification");

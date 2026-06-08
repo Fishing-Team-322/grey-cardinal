@@ -218,10 +218,210 @@ export async function peopleView(root, params) {
 }
 
 export async function profileView(root, params) {
+  injectProfileStyles();
   const mine = location.pathname === "/app/me";
-  setHeader(root, mine ? "Мой профиль" : "Employee Profile", "Задачи, digest, активность, достижения и Telegram linking.");
-  const data = mine ? await api.people.me() : await api.people.profile(params.userId);
-  root.querySelector("#agentic-content").innerHTML = profileHtml(data);
+  setHeader(root, mine ? "Мой профиль" : "Профиль сотрудника", "Прогресс, достижения, активность.");
+  const container = root.querySelector("#agentic-content");
+  async function render() {
+    let data;
+    try {
+      data = mine ? await api.people.me() : await api.people.profile(params.userId);
+    } catch (e) {
+      container.innerHTML = `<div class="note warn">${escapeHtml(e.message || "Не удалось загрузить профиль")}</div>`;
+      return;
+    }
+    container.innerHTML = profileHtml(data, mine);
+    if (mine) bindProfileEdit(container, data, render);
+  }
+  await render();
+}
+
+const ROLE_RU = { director: "Директор", manager: "Руководитель", employee: "Сотрудник", member: "Участник" };
+
+function profileInitials(name) {
+  return (name || "").trim().split(/\s+/).slice(0, 2).map((w) => (w[0] || "").toUpperCase()).join("") || "?";
+}
+
+function avatarBlock(user, big) {
+  const size = big ? "avatar-xl" : "avatar-sm";
+  if (user.photo_data_url) {
+    return `<div class="gc-avatar ${size}" style="background-image:url('${escapeHtml(user.photo_data_url)}')"></div>`;
+  }
+  return `<div class="gc-avatar ${size} ph">${escapeHtml(profileInitials(user.display_name))}</div>`;
+}
+
+function profileHtml(data, mine) {
+  const u = data.user || {};
+  const s = data.stats || {};
+  const pct = Math.min(100, Math.round((s.level_xp / (s.next_level_xp || 100)) * 100));
+  const role = ROLE_RU[u.role] || u.role || "—";
+  const earned = data.achievements.filter((a) => a.earned).length;
+  return `
+  <div class="gc-profile">
+    <div class="card prof-hero">
+      <div class="prof-hero-row">
+        <div class="prof-ava-wrap">
+          ${avatarBlock(u, true)}
+          ${mine ? `<label class="ava-edit" title="Загрузить фото">📷<input type="file" id="ava-input" accept="image/*" hidden></label>` : ""}
+        </div>
+        <div class="prof-id">
+          <div class="prof-name-row">
+            <h2 id="prof-name">${escapeHtml(u.display_name || "—")}</h2>
+            <span class="lvl-badge" title="Уровень">LVL ${s.level || 1}</span>
+            <span class="role-badge">${escapeHtml(role)}</span>
+            ${u.telegram_linked ? `<span class="tg-badge">📱 ${escapeHtml(u.telegram_username ? "@" + u.telegram_username : "Telegram")}</span>` : ""}
+          </div>
+          <p class="prof-bio" id="prof-bio">${escapeHtml(u.bio || (mine ? "Добавьте пару слов о себе…" : ""))}</p>
+          <div class="lvl-bar"><div class="lvl-fill" style="width:${pct}%"></div><span class="lvl-txt">${s.level_xp || 0} / ${s.next_level_xp || 100} XP до ${(s.level || 1) + 1} ур.</span></div>
+        </div>
+      </div>
+      ${mine ? `<div class="prof-edit-actions"><button class="btn btn-sm btn-ghost" id="edit-profile">✏️ Редактировать</button></div>` : ""}
+    </div>
+
+    <div class="prof-stats">
+      ${statCard("🔥", "Серия", (s.streak || 0) + " дн.")}
+      ${statCard("⭐", "Всего XP", s.xp || 0)}
+      ${statCard("📋", "Открытых", s.open_tasks || 0)}
+      ${statCard("⏰", "Просрочено", s.overdue || 0)}
+      ${statCard("✅", "За неделю", s.closed_week || 0)}
+      ${statCard("🏆", "Закрыто всего", s.closed_total || 0)}
+    </div>
+
+    <div class="card card-pad">
+      <div class="card-title">Достижения <span class="dim">${earned}/${data.achievements.length}</span></div>
+      <div class="ach-grid">
+        ${data.achievements.map((a) => `<div class="ach-card ${a.earned ? "earned" : "locked"}" title="${escapeHtml(a.desc || "")}">
+          <div class="ach-ico">${a.earned ? (a.icon || "✓") : "🔒"}</div>
+          <div class="ach-meta"><div class="ach-name">${escapeHtml(a.name)}</div><div class="ach-desc">${escapeHtml(a.desc || "")}</div></div>
+        </div>`).join("")}
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <div class="card-title">Задачи</div>
+      <table class="tbl mt-12"><tbody>
+        ${(data.tasks || []).slice(0, 30).map((t) => `<tr><td class="mono">${escapeHtml(t.public_id)}</td><td>${escapeHtml(t.title)}</td><td><span class="pill">${escapeHtml(t.status)}</span></td><td>${t.deadline ? formatDate(t.deadline) : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="dim">Задач нет</td></tr>'}
+      </tbody></table>
+    </div>
+  </div>`;
+}
+
+function statCard(icon, label, value) {
+  return `<div class="card prof-stat"><div class="ps-ico">${icon}</div><div class="ps-val">${escapeHtml(String(value))}</div><div class="ps-lbl">${escapeHtml(label)}</div></div>`;
+}
+
+function bindProfileEdit(container, data, rerender) {
+  const u = data.user || {};
+  const input = container.querySelector("#ava-input");
+  if (input) {
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const dataUrl = await resizeImage(file, 256);
+        await api.people.update({ photo_data_url: dataUrl });
+        toast("Фото обновлено");
+        await rerender();
+      } catch (e) { toast("Не удалось загрузить фото: " + (e.message || "")); }
+    });
+  }
+  const editBtn = container.querySelector("#edit-profile");
+  if (editBtn) {
+    editBtn.addEventListener("click", () => openProfileEditor(container, u, rerender));
+  }
+}
+
+function openProfileEditor(container, u, rerender) {
+  let dialog = document.getElementById("profile-edit-dialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "profile-edit-dialog";
+    dialog.className = "task-dialog";
+    document.body.appendChild(dialog);
+  }
+  dialog.innerHTML = `<div class="task-panel">
+    <header><h3>Редактировать профиль</h3><button class="icon-close" type="button">×</button></header>
+    <label class="fld">Имя<input id="pe-name" value="${escapeHtml(u.display_name || "")}"></label>
+    <label class="fld">О себе<textarea id="pe-bio" rows="3">${escapeHtml(u.bio || "")}</textarea></label>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-sm btn-primary" id="pe-save">Сохранить</button>
+      <button class="btn btn-sm btn-ghost" id="pe-cancel" type="button">Отмена</button>
+    </div>
+  </div>`;
+  dialog.querySelector(".icon-close").onclick = () => dialog.close();
+  dialog.querySelector("#pe-cancel").onclick = () => dialog.close();
+  dialog.querySelector("#pe-save").onclick = async () => {
+    try {
+      await api.people.update({
+        display_name: dialog.querySelector("#pe-name").value.trim(),
+        bio: dialog.querySelector("#pe-bio").value,
+      });
+      toast("Профиль сохранён");
+      dialog.close();
+      await rerender();
+    } catch (e) { toast("Ошибка: " + (e.message || "")); }
+  };
+  dialog.showModal();
+}
+
+function resizeImage(file, max) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read error"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("bad image"));
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function injectProfileStyles() {
+  if (document.getElementById("gc-profile-styles")) return;
+  const st = document.createElement("style");
+  st.id = "gc-profile-styles";
+  st.textContent = `
+  .gc-profile{display:flex;flex-direction:column;gap:16px}
+  .prof-hero{padding:20px;position:relative}
+  .prof-hero-row{display:flex;gap:18px;align-items:center}
+  .prof-ava-wrap{position:relative;flex-shrink:0}
+  .gc-avatar{border-radius:50%;background-size:cover;background-position:center;background-color:#2a2a33;display:flex;align-items:center;justify-content:center;font-weight:800;color:#ddd}
+  .gc-avatar.avatar-xl{width:96px;height:96px;font-size:34px}
+  .gc-avatar.avatar-sm{width:34px;height:34px;font-size:13px}
+  .ava-edit{position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;background:#ff003c;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;border:2px solid #141418}
+  .prof-name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .prof-name-row h2{margin:0;font-size:24px}
+  .lvl-badge{background:linear-gradient(135deg,#ff003c,#ff7a00);color:#fff;font-weight:800;font-size:11px;padding:3px 9px;border-radius:20px}
+  .role-badge{background:#22222a;border:1px solid #33333d;color:#cfcfd6;font-size:12px;padding:3px 9px;border-radius:20px}
+  .tg-badge{background:#142a3a;border:1px solid #1d4a66;color:#7fc8ff;font-size:12px;padding:3px 9px;border-radius:20px}
+  .prof-bio{color:#9a9aa3;margin:8px 0 12px}
+  .lvl-bar{position:relative;height:20px;background:#1a1a1f;border:1px solid #2a2a33;border-radius:20px;overflow:hidden;max-width:420px}
+  .lvl-fill{height:100%;background:linear-gradient(90deg,#ff003c,#ff7a00)}
+  .lvl-txt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .prof-edit-actions{position:absolute;top:16px;right:16px}
+  .prof-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  @media(max-width:760px){.prof-stats{grid-template-columns:repeat(3,1fr)}}
+  .prof-stat{padding:14px;text-align:center}
+  .ps-ico{font-size:20px}.ps-val{font-size:22px;font-weight:800;margin:4px 0}.ps-lbl{color:#8a8a93;font-size:12px}
+  .ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px}
+  .ach-card{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid #26262e;border-radius:12px;background:#16161a}
+  .ach-card.locked{opacity:.45;filter:grayscale(1)}
+  .ach-card.earned{border-color:#3a2a18;background:linear-gradient(135deg,#1a1410,#16161a)}
+  .ach-ico{font-size:26px;flex-shrink:0}
+  .ach-name{font-weight:700}.ach-desc{font-size:12px;color:#8a8a93}
+  .fld{display:flex;flex-direction:column;gap:5px;margin-top:10px;font-size:13px;color:#9a9aa3}
+  .fld input,.fld textarea{padding:8px 10px;border-radius:9px;border:1px solid #2a2a33;background:#1a1a1f;color:#ececf0;font:inherit}
+  `;
+  document.head.appendChild(st);
 }
 
 export async function telegramTopicsView(root, params) {
@@ -235,13 +435,6 @@ export async function telegramTopicsView(root, params) {
 function personCard(item) {
   const p = item.profile;
   return `<a class="card card-pad" href="/app/people/${item.id}"><div class="card-title">${escapeHtml(item.display_name)}</div><div class="dim">${escapeHtml(item.role)}</div><div class="grid g2 mt-16">${stat("Open", p.stats.open_tasks)}${stat("Overdue", p.stats.overdue)}${stat("XP", p.stats.xp)}${stat("Absence", p.absence.active ? "yes" : "no")}</div></a>`;
-}
-
-function profileHtml(data) {
-  return `<div class="grid g2">
-    <div class="card card-pad"><h2>${escapeHtml(data.user.display_name)}</h2><p class="dim">${escapeHtml(data.user.email || "")}</p><div class="grid g4 mt-20">${stat("Open", data.stats.open_tasks)}${stat("Overdue", data.stats.overdue)}${stat("Closed/week", data.stats.closed_week)}${stat("XP", data.stats.xp)}</div><div class="note mt-20">${escapeHtml(data.digest)}</div></div>
-    <div class="card card-pad"><div class="card-title">Achievements</div><div class="grid g2 mt-16">${data.achievements.map(a => `<div class="ach ${a.earned ? "" : "locked"}"><div class="ico">${a.earned ? "✓" : "·"}</div><div class="ach-name">${escapeHtml(a.name)}</div></div>`).join("")}</div></div>
-  </div><div class="card card-pad mt-20"><div class="card-title">Tasks</div><table class="tbl mt-12"><tbody>${data.tasks.map(task => `<tr><td>${escapeHtml(task.public_id)}</td><td>${escapeHtml(task.title)}</td><td>${escapeHtml(task.status)}</td><td>${task.deadline ? formatDate(task.deadline) : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function stat(label, value) {

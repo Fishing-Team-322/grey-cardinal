@@ -937,16 +937,32 @@ async def employee_profile_payload(
         )
     )
     xp = await session.scalar(select(m.UserXpTotalModel).where(m.UserXpTotalModel.user_id == user_id))
+    from brain_api.application.use_cases.team_gamification import LEVEL_XP, level_for_points
+
+    total_xp = xp.points_total if xp else 0
+    level = xp.level if xp else level_for_points(total_xp)
+    all_completed = [t for t in tasks if t.completed_at]
+    total_closed = len(all_completed)
+    streak = _completion_streak(all_completed, now)
     achievements = [
-        {"name": "Закрыл 5 задач за неделю", "earned": len(closed_week) >= 5},
-        {"name": "Нет просрочек", "earned": not overdue},
-        {"name": "Быстро отвечает на статус", "earned": any(t.last_status_update_at for t in tasks)},
+        {"name": "Первая кровь", "desc": "Закрыта первая задача", "icon": "🩸", "earned": total_closed >= 1},
+        {"name": "Продуктивная неделя", "desc": "5 задач за неделю", "icon": "🔥", "earned": len(closed_week) >= 5},
+        {"name": "Чистый дедлайн", "desc": "Нет просрочек", "icon": "✅", "earned": not overdue},
+        {"name": "На связи", "desc": "Привязан Telegram", "icon": "📱", "earned": bool(user and user.telegram_user_id)},
+        {"name": "Серия 3 дня", "desc": "3 дня подряд с закрытой задачей", "icon": "⚡", "earned": streak >= 3},
+        {"name": "Ветеран", "desc": "Закрыто 25 задач", "icon": "🏆", "earned": total_closed >= 25},
+        {"name": "5 уровень", "desc": "Достигнут 5 уровень", "icon": "🌟", "earned": level >= 5},
     ]
     return {
         "user": {
             "id": str(user.id),
             "display_name": user.display_name,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
             "email": user.email,
+            "bio": user.bio,
+            "photo_data_url": user.photo_data_url,
+            "role": user.role,
             "telegram_linked": user.telegram_user_id is not None,
             "telegram_username": user.telegram_username,
         } if user else None,
@@ -954,8 +970,12 @@ async def employee_profile_payload(
             "open_tasks": len([t for t in tasks if t.status not in TERMINAL_STATUSES]),
             "overdue": len(overdue),
             "closed_week": len(closed_week),
-            "xp": xp.points_total if xp else 0,
-            "level": xp.level if xp else 1,
+            "closed_total": total_closed,
+            "streak": streak,
+            "xp": total_xp,
+            "level": level,
+            "level_xp": total_xp % LEVEL_XP,
+            "next_level_xp": LEVEL_XP,
         },
         "absence": {
             "active": absence is not None,
@@ -966,6 +986,22 @@ async def employee_profile_payload(
         "tasks": [_task_summary(task) for task in tasks],
         "achievements": achievements,
     }
+
+
+def _completion_streak(completed_tasks: list, now: datetime) -> int:
+    """Consecutive days (ending today or yesterday) with >=1 completed task."""
+    days = {_as_utc(t.completed_at).date() for t in completed_tasks if t.completed_at}
+    if not days:
+        return 0
+    today = now.date()
+    if today not in days and (today - timedelta(days=1)) not in days:
+        return 0
+    streak = 0
+    cursor = today if today in days else today - timedelta(days=1)
+    while cursor in days:
+        streak += 1
+        cursor -= timedelta(days=1)
+    return streak
 
 
 def _card_payload(
