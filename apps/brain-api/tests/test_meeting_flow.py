@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from brain_api.application.use_cases import yandex_telemost as telemost_svc
 from brain_api.application.use_cases.meeting_flow import (
     _parse_time_to_dt,
     build_meeting_proposal,
@@ -17,7 +18,9 @@ from brain_api.application.use_cases.meeting_flow import (
 from brain_api.application.use_cases.meeting_reminders import (
     run_meeting_finalize,
     run_meeting_reminders,
+    run_scheduled_meeting_starts,
 )
+from brain_api.config import Settings
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.telegram_gateway.client import NullTelegramGateway
 from grey_cardinal_contracts import TelegramCallbackEvent, TelegramMessageRef, TelegramSender
@@ -157,6 +160,66 @@ async def test_5min_reminder_pings_attendees(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_scheduled_meeting_start_creates_room_and_posts_link(
+    session_factory,
+    monkeypatch,
+) -> None:
+    async def fake_create_room_for_team(session, settings, team_id, *, title=None):
+        return {
+            "join_url": "https://telemost.yandex.ru/j/scheduled",
+            "conference_id": "conf-scheduled",
+            "raw": {},
+        }
+
+    monkeypatch.setattr(telemost_svc, "create_room_for_team", fake_create_room_for_team)
+    async with session_factory() as session:
+        team, _manager, _emp, meeting = await _seed(
+            session,
+            scheduled_at=NOW - timedelta(seconds=5),
+        )
+        meeting.state = "scheduled"
+        meeting.status = "scheduled"
+        session.add(
+            m.YandexTelemostIntegrationModel(
+                team_id=team.id,
+                provider="yandex_telemost",
+                status="connected",
+                settings={"enable_meeting_agent_auto_join": True},
+            )
+        )
+        await session.commit()
+
+    gateway = NullTelegramGateway()
+    started = await run_scheduled_meeting_starts(
+        session_factory,
+        gateway,
+        Settings(),
+        now=NOW,
+    )
+
+    assert started == 1
+    assert gateway.sent
+    assert gateway.sent[0][0] == GROUP_CHAT
+    assert "https://telemost.yandex.ru/j/scheduled" in gateway.sent[0][1]
+    async with session_factory() as session:
+        refreshed = await session.get(m.MeetingModel, meeting.id)
+        assert refreshed.metadata_json["join_url"] == "https://telemost.yandex.ru/j/scheduled"
+        job = await session.scalar(select_job(meeting.id))
+        assert job is not None
+        assert job.status == "queued"
+        assert job.meeting_url == "https://telemost.yandex.ru/j/scheduled"
+
+    started_again = await run_scheduled_meeting_starts(
+        session_factory,
+        gateway,
+        Settings(),
+        now=NOW + timedelta(seconds=20),
+    )
+    assert started_again == 0
+    assert len(gateway.sent) == 1
+
+
+@pytest.mark.asyncio
 async def test_pending_time_then_confirm(session_factory):
     async with session_factory() as session:
         team, manager, _emp, meeting = await _seed(session, scheduled_at=None)
@@ -244,4 +307,12 @@ def select_xp(user_id, kind):
     return select(m.UserXpEventModel).where(
         m.UserXpEventModel.user_id == user_id,
         m.UserXpEventModel.kind == kind,
+    )
+
+
+def select_job(meeting_id):
+    from sqlalchemy import select
+
+    return select(m.MeetingAgentJoinJobModel).where(
+        m.MeetingAgentJoinJobModel.meeting_id == meeting_id
     )

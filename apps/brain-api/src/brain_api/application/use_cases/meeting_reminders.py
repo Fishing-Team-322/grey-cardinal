@@ -14,19 +14,128 @@ from typing import Any
 from sqlalchemy import func, or_, select
 
 from brain_api.application.rendering import format_deadline
+from brain_api.application.use_cases import yandex_telemost as telemost_svc
+from brain_api.application.use_cases.meeting_flow import rsvp_keyboard
 from brain_api.application.use_cases.team_gamification import (
     MEETING_SUMMARY_XP,
     grant_team_xp,
 )
+from brain_api.config import Settings
 from brain_api.infrastructure.db import models as m
+from brain_api.integrations.yandex_telemost import YandexTelemostError
 
 logger = logging.getLogger(__name__)
 
 REMINDER_LEAD_MINUTES = 5
+START_LOOKBACK_MINUTES = 15
 
 
 def _as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+async def run_scheduled_meeting_starts(
+    session_factory,
+    gateway,
+    settings: Settings,
+    now: datetime | None = None,
+) -> int:
+    """Create the actual meeting room when a scheduled Telegram meeting starts."""
+    now = now or datetime.now(UTC)
+    started = 0
+    async with session_factory() as session:
+        rows = await session.execute(
+            select(m.MeetingModel).where(
+                m.MeetingModel.state == "scheduled",
+                m.MeetingModel.scheduled_at.is_not(None),
+                m.MeetingModel.scheduled_at <= now,
+                m.MeetingModel.scheduled_at >= now - timedelta(minutes=START_LOOKBACK_MINUTES),
+            )
+        )
+        for meeting in rows.scalars():
+            meta = dict(meeting.metadata_json or {})
+            if meta.get("join_url") or meta.get("room_started_at"):
+                continue
+            team = await session.get(m.TeamModel, meeting.team_id)
+            if team is None or team.tg_chat_id is None:
+                continue
+
+            provider_label = "Яндекс Телемост"
+            provider = "yandex_telemost"
+            conference_id = None
+            join_url = None
+            try:
+                result = await telemost_svc.create_room_for_team(
+                    session,
+                    settings,
+                    team.id,
+                    title=meeting.title or f"Созвон Grey Cardinal - {team.name}",
+                )
+                join_url = result.get("join_url")
+                conference_id = result.get("conference_id")
+            except (telemost_svc.TelemostNotConnected, YandexTelemostError) as exc:
+                logger.warning(
+                    "Scheduled Telemost room creation failed for %s; using Jitsi: %s",
+                    meeting.public_id,
+                    exc,
+                )
+                provider = "jitsi"
+                provider_label = "Видеовстреча (Jitsi)"
+                join_url = telemost_svc.build_jitsi_url(team.name)
+
+            if not join_url:
+                meta["room_creation_failed_at"] = now.isoformat()
+                meeting.metadata_json = meta
+                continue
+
+            cfg = telemost_svc.effective_settings(
+                await telemost_svc.get_integration(session, team.id)
+            )
+            meta.update(
+                {
+                    "join_url": join_url,
+                    "provider": provider,
+                    "conference_id": conference_id,
+                    "room_started_at": now.isoformat(),
+                }
+            )
+            meeting.metadata_json = meta
+            meeting.external_source = provider
+            meeting.started_at = meeting.started_at or now
+            session.add(
+                m.MeetingAgentJoinJobModel(
+                    team_id=team.id,
+                    provider=provider,
+                    meeting_url=join_url,
+                    conference_id=conference_id,
+                    meeting_id=meeting.id,
+                    telegram_chat_id=team.tg_chat_id,
+                    created_by_user_id=meeting.created_by or meeting.created_by_user_id,
+                    status=(
+                        "queued"
+                        if provider == "yandex_telemost"
+                        and cfg["enable_meeting_agent_auto_join"]
+                        else "pending"
+                    ),
+                )
+            )
+
+            when = format_deadline(meeting.scheduled_at, team.timezone)
+            await gateway.send_message(
+                team.tg_chat_id,
+                (
+                    f"🎙 Созвон начинается ({when}) - {provider_label}\n\n"
+                    f"Ссылка: {join_url}\n\n"
+                    "Grey Cardinal подключится к встрече как видимый участник для записи, "
+                    "если автозапись включена для команды."
+                ),
+                rsvp_keyboard(meeting.id),
+            )
+            started += 1
+        await session.commit()
+    if started:
+        logger.info("Started %d scheduled meeting rooms", started)
+    return started
 
 
 async def run_meeting_finalize(
