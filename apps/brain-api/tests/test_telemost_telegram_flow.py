@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
@@ -213,17 +213,35 @@ async def test_prefixed_call_intent_with_time_prompts_scheduling_in_group(
     )
 
     text = _texts(resp)
-    keyboards = str([getattr(action, "reply_markup", None) for action in resp.actions])
+    reply_markup = next(
+        getattr(action, "reply_markup", None)
+        for action in resp.actions
+        if getattr(action, "reply_markup", None)
+    )
+    ok_data = reply_markup["inline_keyboard"][0][0]["callback_data"]
+    no_data = reply_markup["inline_keyboard"][1][0]["callback_data"]
+    keyboards = str([reply_markup])
     assert "Запланировать" in text
     assert "12:30" in text
     assert "mtg_ok:" in keyboards
     assert "mtg_no:" in keyboards
+    assert ok_data != "mtg_ok:None"
+    assert no_data != "mtg_no:None"
+    UUID(ok_data.split(":", 1)[1])
+    UUID(no_data.split(":", 1)[1])
     assert "tmcall:create" not in keyboards
     async with session_factory() as session:
         meeting = await session.scalar(select(m.MeetingModel))
         assert meeting is not None
         assert meeting.state == "proposed"
         assert meeting.scheduled_at is not None
+
+    callback_resp = await itg.ingest_callback(_callback(ok_data), container=container)
+    assert callback_resp.actions
+    async with session_factory() as session:
+        meeting = await session.scalar(select(m.MeetingModel))
+        assert meeting is not None
+        assert meeting.state == "scheduled"
 
 
 @pytest.mark.asyncio

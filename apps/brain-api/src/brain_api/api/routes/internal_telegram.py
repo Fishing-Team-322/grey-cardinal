@@ -517,6 +517,7 @@ async def _try_scheduled_call_prompt(
             },
         )
         session.add(meeting)
+        await session.flush()
         meeting_id = meeting.id
         team_timezone = team.timezone
         await session.commit()
