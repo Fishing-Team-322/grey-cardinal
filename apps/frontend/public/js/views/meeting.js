@@ -55,6 +55,7 @@ function render(content, meeting, liveLines = []) {
         ${(meeting.extracted_tasks || []).map((task) => `<div class="integration-row"><span><b>${escapeHtml(task.title)}</b><span class="meta">${escapeHtml(task.public_id)}</span></span><span class="pill info">${escapeHtml(task.status)}</span></div>`).join("")}
       </div>
     </div>
+    ${recordingAgentHtml(meeting.recording_agent)}
     <div class="card card-pad mt-20">
       <div class="card-head">
         <div><div class="card-title">Транскрипт созвона</div><div class="card-sub" id="transcript-count">${liveLines.length} реплик</div></div>
@@ -63,6 +64,20 @@ function render(content, meeting, liveLines = []) {
       <div class="transcript-toolbar"><input class="input" id="transcript-search" type="search" placeholder="Поиск по транскрипту"></div>
       <div id="transcript-lines" class="col gap-10 mt-12">${liveLines.map(lineHtml).join("") || '<div class="dim" id="transcript-empty">Строки появятся после начала записи.</div>'}</div>
     </div>`;
+}
+
+function recordingAgentHtml(agent) {
+  if (!agent) return "";
+  const active = ["joining", "recording", "stop_requested"].includes(agent.status);
+  return `<div class="card card-pad mt-20">
+    <div class="card-head"><div><div class="card-title">Агент записи Телемоста</div>
+      <div class="card-sub">Видимый участник · микрофон и камера выключены</div></div>
+      <span class="pill ${agent.status === "failed" ? "warn" : active ? "info" : "ok"}">
+        <span class="dot ${agent.status === "recording" ? "live" : ""}"></span>${escapeHtml(agent.status)}
+      </span>
+    </div>
+    ${agent.error_message ? `<div class="alert alert-error mt-12">${escapeHtml(agent.error_message)}</div>` : ""}
+  </div>`;
 }
 
 function bindActions(content, meeting) {

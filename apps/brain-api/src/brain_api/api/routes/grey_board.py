@@ -435,9 +435,15 @@ async def put_kanban_config(
     cleaned: list[dict[str, Any]] = []
     for col in body.columns:
         if col.status not in DB_TASK_STATUSES:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid status {col.status}")
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Invalid status {col.status}",
+            )
         if col.status in seen:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Duplicate status {col.status}")
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Duplicate status {col.status}",
+            )
         seen.add(col.status)
         cleaned.append({
             "status": col.status,
@@ -446,7 +452,10 @@ async def put_kanban_config(
             "visible": bool(col.visible),
         })
     if not any(c["visible"] for c in cleaned):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "At least one column must be visible")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "At least one column must be visible",
+        )
     team = await session.get(m.TeamModel, team_id)
     config = dict(team.board_config or {})
     config["kanban_columns"] = cleaned

@@ -855,6 +855,12 @@ async def get_v2_meeting(
             .order_by(m.TaskModel.created_at.desc())
         )
     ).scalars()
+    recording_job = await session.scalar(
+        select(m.MeetingAgentJoinJobModel)
+        .where(m.MeetingAgentJoinJobModel.meeting_id == meeting_id)
+        .order_by(m.MeetingAgentJoinJobModel.created_at.desc())
+        .limit(1)
+    )
     payload.update(
         {
             "participants": [
@@ -875,6 +881,19 @@ async def get_v2_meeting(
                 for line in transcripts
             ],
             "extracted_tasks": [_task_payload(task, None) for task in tasks],
+            "recording_agent": (
+                {
+                    "id": str(recording_job.id),
+                    "provider": recording_job.provider,
+                    "status": recording_job.status,
+                    "error_message": recording_job.error_message,
+                    "started_at": recording_job.started_at,
+                    "heartbeat_at": recording_job.heartbeat_at,
+                    "completed_at": recording_job.completed_at,
+                }
+                if recording_job
+                else None
+            ),
         }
     )
     return payload
@@ -1303,6 +1322,7 @@ class BotSettingsRequest(BaseModel):
     digest_hours: list[int] | None = None
     meeting_reminders: bool | None = None
     daemon_autorecord: bool | None = None
+    require_cardinal_mention: bool | None = None
 
 
 def _bot_settings_payload(team: m.TeamModel) -> dict:
@@ -1315,6 +1335,7 @@ def _bot_settings_payload(team: m.TeamModel) -> dict:
         "digest_hours": cfg.get("digest_hours"),
         "meeting_reminders": cfg.get("meeting_reminders", True),
         "daemon_autorecord": cfg.get("daemon_autorecord", True),
+        "require_cardinal_mention": cfg.get("require_cardinal_mention", False),
     }
 
 
@@ -1358,6 +1379,8 @@ async def set_bot_settings(
         cfg["meeting_reminders"] = bool(body.meeting_reminders)
     if body.daemon_autorecord is not None:
         cfg["daemon_autorecord"] = bool(body.daemon_autorecord)
+    if body.require_cardinal_mention is not None:
+        cfg["require_cardinal_mention"] = bool(body.require_cardinal_mention)
     team.board_config = cfg
     session.add(team)
     await session.commit()

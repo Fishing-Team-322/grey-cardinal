@@ -29,6 +29,7 @@ from brain_api.application.rendering import (
     CB_EDIT,
     CB_REJECT,
     EDIT_STUB_TEXT,
+    format_deadline,
     proposal_keyboard,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
@@ -45,6 +46,9 @@ from brain_api.application.use_cases.manage_meetings import (
     stop_meeting,
 )
 from brain_api.application.use_cases.meeting_flow import (
+    CB_MTG_NO,
+    CB_MTG_OK,
+    _parse_time_to_dt,
     build_meeting_proposal,
     handle_meeting_callback,
     handle_pending_meeting_time,
@@ -71,15 +75,13 @@ from brain_api.application.use_cases.task_status_flow import (
     handle_task_status_callback,
     is_task_status_callback,
 )
-from brain_api.application.use_cases.team_gamification import (
-    TASK_COMPLETED_XP,
-    grant_team_xp,
-    team_leaderboard_text_for_chat,
-)
+from brain_api.application.use_cases.team_gamification import team_leaderboard_text_for_chat
 from brain_api.application.use_cases.team_settings import (
+    addressed_message_text,
     handle_settings_callback,
     is_settings_callback,
     open_settings,
+    require_cardinal_mention,
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
@@ -399,8 +401,53 @@ async def ingest_message(
             if is_help_request_text(event.text):
                 return _html(event.chat.id, await materials_for_arg(session, event.text))
 
+    semantic_text = event.text
+    if event.chat.type in {"group", "supergroup", "channel"} and hasattr(
+        container, "session_factory"
+    ):
+        async with container.session_factory() as session:
+            team = await session.scalar(
+                select(m.TeamModel).where(m.TeamModel.tg_chat_id == event.chat.id)
+            )
+        if team is not None:
+            semantic_text = addressed_message_text(
+                event.text,
+                required=require_cardinal_mention(team),
+            )
+            if semantic_text is None:
+                return await _try_v2_semantic_message(
+                    event,
+                    container,
+                    ignore_reason="cardinal_mention_required",
+                ) or ActionsResponse(actions=[])
+
     # Группа: явный intent «нужен созвон» → спросить про Телемост (не создаём сами).
-    if event.chat.type in {"group", "supergroup"} and detect_call_intent(event.text):
+    if (
+        event.chat.type in {"group", "supergroup"}
+        and semantic_text is not None
+        and detect_call_intent(semantic_text)
+    ):
+        scheduled_response = await _try_scheduled_call_prompt(event, container, semantic_text)
+        if scheduled_response is not None:
+            return scheduled_response
+        # If message had digits (attempted time) but we couldn't parse it → ask for clarification
+        if re.search(r"\d", semantic_text or ""):
+            return ActionsResponse(
+                actions=[
+                    SendMessageAction(
+                        chat_id=event.chat.id,
+                        text=(
+                            "🎙 Не понял время. Напиши, например: "
+                            "«созвон в 15:00» или «созвон в 18:30»"
+                        ),
+                    )
+                ]
+            )
+        # Autonomous mode: создаём комнату без вопроса (immediate, no time mentioned)
+        if hasattr(container, "session_factory"):
+            auto_room = await _try_autonomous_call_create(event, container)
+            if auto_room is not None:
+                return auto_room
         return ActionsResponse(
             actions=[
                 SendMessageAction(
@@ -413,7 +460,11 @@ async def ingest_message(
             ]
         )
 
-    v2_response = await _try_v2_semantic_message(event, container)
+    v2_response = await _try_v2_semantic_message(
+        event,
+        container,
+        semantic_text=semantic_text,
+    )
     if v2_response is not None:
         return v2_response
 
@@ -426,6 +477,149 @@ async def ingest_message(
             container.board,
         )
         return await use_case.execute(event)
+
+
+async def _try_scheduled_call_prompt(
+    event: TelegramMessageEvent,
+    container: Container,
+    semantic_text: str,
+) -> ActionsResponse | None:
+    if not hasattr(container, "session_factory"):
+        return None
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == event.chat.id)
+        )
+        if team is None:
+            return None
+
+        now = datetime.now(UTC)
+        scheduled_at = _parse_time_to_dt(semantic_text, now, team.timezone)
+        if scheduled_at is None:
+            return None
+
+        sender = await session.scalar(
+            select(m.UserModel).where(m.UserModel.telegram_user_id == event.sender.id)
+        )
+        if sender is None:
+            sender = m.UserModel(
+                telegram_user_id=event.sender.id,
+                telegram_username=event.sender.username,
+                display_name=_display_name_from_event(event),
+            )
+            session.add(sender)
+            await session.flush()
+
+        is_autonomous = bool((team.board_config or {}).get("autonomous_mode"))
+        seq = int(await session.scalar(select(func.max(m.MeetingModel.seq))) or 0) + 1
+        meeting = m.MeetingModel(
+            seq=seq,
+            public_id=f"MTG-{seq}",
+            team_id=team.id,
+            title="Созвон",
+            status="scheduled" if is_autonomous else "proposed",
+            state="scheduled" if is_autonomous else "proposed",
+            created_by=sender.id,
+            scheduled_at=scheduled_at,
+            scheduled_timezone=team.timezone,
+            duration_minutes=60,
+            started_at=scheduled_at,
+            metadata_json={
+                "source": "telegram_call_intent",
+                "raw_text": event.text,
+                "semantic_text": semantic_text,
+            },
+        )
+        session.add(meeting)
+        await session.flush()
+        meeting_id = meeting.id
+        team_timezone = team.timezone
+        await session.commit()
+
+    when = format_deadline(scheduled_at, team_timezone)
+
+    if is_autonomous:
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.chat.id,
+                    text=f"✅ Созвон запланирован на {when}.\n\nКто придёт?",
+                    reply_markup=rsvp_keyboard(meeting_id),
+                )
+            ]
+        )
+
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=(
+                    "🎙 Похоже, нужно запланировать созвон.\n\n"
+                    f"Когда: {when}\n\n"
+                    "Запланировать?"
+                ),
+                reply_markup=_kb(
+                    [("✅ Да, запланировать", f"{CB_MTG_OK}:{meeting_id}")],
+                    [("❌ Нет", f"{CB_MTG_NO}:{meeting_id}")],
+                ),
+            )
+        ]
+    )
+
+
+async def _try_autonomous_call_create(
+    event: TelegramMessageEvent,
+    container: Container,
+) -> ActionsResponse | None:
+    """Если включён автономный режим — создать комнату созвона без подтверждения."""
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == event.chat.id)
+        )
+        if team is None or not (team.board_config or {}).get("autonomous_mode"):
+            return None
+
+        settings = get_settings()
+        provider_label = "Яндекс Телемост"
+        result: dict | None = None
+
+        integration = await telemost_svc.get_integration(session, team.id)
+        if integration is not None and integration.status == "connected":
+            try:
+                result = await telemost_svc.create_room_for_chat(
+                    session,
+                    settings,
+                    telegram_chat_id=event.chat.id,
+                    created_by_telegram_user_id=event.sender.id,
+                )
+            except (telemost_svc.TelemostNotConnected, YandexTelemostError) as exc:
+                logger.warning("[telemost] autonomous room creation failed, using Jitsi: %s", exc)
+                await session.rollback()
+                result = None
+
+        if result is None or not result.get("join_url"):
+            result = await telemost_svc.create_jitsi_room_for_chat(
+                session,
+                telegram_chat_id=event.chat.id,
+                created_by_telegram_user_id=event.sender.id,
+            )
+            provider_label = "Видеовстреча (Jitsi)"
+
+        await session.commit()
+
+    join_url = result.get("join_url") if result else None
+    if not join_url:
+        return None
+
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=f"🎙 {provider_label}\n\n🔗 {join_url}",
+            )
+        ]
+    )
 
 
 @router.post("/callback", response_model=ActionsResponse)
@@ -733,6 +927,7 @@ async def _try_v2_semantic_message(
     *,
     interaction_mode: InteractionMode = InteractionMode.AUTO_BACKGROUND,
     semantic_text: str | None = None,
+    ignore_reason: str | None = None,
 ) -> ActionsResponse | None:
     if event.chat.type not in {"group", "supergroup", "channel"}:
         return None
@@ -815,6 +1010,19 @@ async def _try_v2_semantic_message(
         session.add(message)
         await session.flush()
 
+        if ignore_reason is not None:
+            session.add(
+                m.AuditLogModel(
+                    actor_type="system",
+                    action="semantic_message_ignored",
+                    entity_type="chat_message",
+                    entity_id=message.id,
+                    payload={"team_id": str(team.id), "reason": ignore_reason},
+                )
+            )
+            await session.commit()
+            return ActionsResponse(actions=[])
+
         member_names = list(
             await session.scalars(
                 select(m.UserModel.display_name)
@@ -855,6 +1063,20 @@ async def _try_v2_semantic_message(
 
         kind = parsed["kind"]
         confidence = float(parsed["confidence"])
+
+        # ── Heuristic override: LLM often misclassifies "X сделал задачу Y"
+        # as task_candidate instead of status_update.
+        # Apply BEFORE routing so the correct handler runs.  ─────────────────
+        if kind == "task_candidate":
+            _heuristic_status = _detect_status_update_heuristic(semantic_text or event.text)
+            if _heuristic_status is not None:
+                _patched = dict(parsed)
+                _patched["kind"] = "status_update"
+                _patched["daily_report"] = {"detected_status": _heuristic_status, "summary": None}
+                return await _route_v2_status_update(
+                    session, container, team, sender, message, _patched, event
+                )
+
         if kind == "task_candidate":
             resolver = IdentityResolver(session)
             task_payload = parsed.get("task") or {}
@@ -862,10 +1084,11 @@ async def _try_v2_semantic_message(
                 team.id,
                 task_payload.get("assignee_reference") or task_payload.get("assignee_text"),
                 event.entities,
-                semantic_text or event.text,
+                event.text,
                 reply_sender.id if reply_sender else None,
                 interaction_mode,
             )
+            autonomous_mode = bool((team.board_config or {}).get("autonomous_mode"))
             return await _route_v2_task_candidate(
                 session,
                 team,
@@ -876,6 +1099,7 @@ async def _try_v2_semantic_message(
                 resolution,
                 interaction_mode,
                 semantic_text or event.text,
+                autonomous=autonomous_mode,
             )
         if kind == "meeting_candidate" and confidence >= 0.6:
             return await _route_v2_meeting_candidate(session, team, sender, message, parsed, event)
@@ -921,11 +1145,16 @@ async def _route_v2_task_candidate(
     resolution: AssigneeResolution,
     interaction_mode: InteractionMode,
     semantic_text: str,
+    *,
+    autonomous: bool = False,
 ):
     task = parsed.get("task") or {}
     title = str(task.get("title") or semantic_text[:120]).strip()
-    assignee_text = resolution.display_name or task.get("assignee_reference") or task.get(
-        "assignee_text"
+    assignee_text = (
+        resolution.display_name
+        or resolution.raw_reference
+        or task.get("assignee_reference")
+        or task.get("assignee_text")
     )
     deadline = _parse_dt(task.get("deadline"), team.timezone)
     duplicate = await _find_v2_duplicate(session, team.id, title, resolution.user_id)
@@ -940,47 +1169,60 @@ async def _route_v2_task_candidate(
         await session.commit()
         return ActionsResponse(actions=[])
     if decision.action == "create_ai_inbox_item":
-        session.add(
-            m.AIInboxItemModel(
-                team_id=team.id,
-                source_message_id=message.id,
-                kind=decision.reason
-                if decision.reason
-                in {
-                    "needs_assignee",
-                    "needs_task_object",
-                    "duplicate_suspected",
-                    "low_confidence",
-                }
-                else "task_candidate_uncertain",
-                status="pending",
-                reason=decision.reason,
-                raw_text=semantic_text,
-                semantic_payload=parsed,
-                identity_payload=resolution.payload(),
-                duplicate_task_id=duplicate.id if duplicate else None,
-                confidence=decision.confidence,
+        # Autonomous mode: fall through to auto-create when:
+        # - assignee is unknown but task is clear (needs_assignee)
+        # - task object looks vague only because user wrote "задачу" explicitly,
+        #   but LLM extracted a real title of ≥2 words (needs_task_object)
+        _auto_create_anyway = autonomous and decision.reason == "needs_assignee"
+        if not _auto_create_anyway and autonomous and decision.reason == "needs_task_object":
+            _auto_create_anyway = len(title.split()) >= 2
+        if _auto_create_anyway:
+            pass  # fall through to proposal/auto-create below
+        else:
+            session.add(
+                m.AIInboxItemModel(
+                    team_id=team.id,
+                    source_message_id=message.id,
+                    kind=decision.reason
+                    if decision.reason
+                    in {
+                        "needs_assignee",
+                        "needs_task_object",
+                        "duplicate_suspected",
+                        "low_confidence",
+                    }
+                    else "task_candidate_uncertain",
+                    status="pending",
+                    reason=decision.reason,
+                    raw_text=semantic_text,
+                    semantic_payload=parsed,
+                    identity_payload=resolution.payload(),
+                    duplicate_task_id=duplicate.id if duplicate else None,
+                    confidence=decision.confidence,
+                )
             )
-        )
-        await session.commit()
-        return ActionsResponse(actions=[])
+            await session.commit()
+            return ActionsResponse(actions=[])
     if decision.action == "ask_clarification":
         if decision.reason == "needs_assignee":
-            return await _create_assignee_draft(
-                session,
-                team,
-                message,
-                parsed,
-                semantic_text,
-                resolution,
+            if not autonomous:
+                return await _create_assignee_draft(
+                    session,
+                    team,
+                    message,
+                    parsed,
+                    semantic_text,
+                    resolution,
+                    event.chat.id,
+                )
+            # Autonomous mode: fall through to auto-create with text-only assignee
+        else:
+            await session.commit()
+            return _text(
                 event.chat.id,
+                "Я понял намерение создать задачу, но не понял конкретный результат. "
+                "Напиши, что именно нужно сделать.",
             )
-        await session.commit()
-        return _text(
-            event.chat.id,
-            "Я понял намерение создать задачу, но не понял конкретный результат. "
-            "Напиши, что именно нужно сделать.",
-        )
     if decision.action == "duplicate_warning" and duplicate is not None:
         proposal = m.TaskProposalModel(
             team_id=team.id,
@@ -1057,6 +1299,60 @@ async def _route_v2_task_candidate(
     )
     session.add(proposal)
     await session.flush()
+
+    if autonomous:
+        # Don't create phantom assignees: only link resolved users to the task.
+        unresolved_name: str | None = None
+        actual_assignee_id = resolution.user_id
+        actual_assignee_text = assignee_text
+        if resolution.status in {"unresolved", "ambiguous"}:
+            unresolved_name = assignee_text  # keep for notification warning
+            actual_assignee_id = None
+            actual_assignee_text = None
+
+        next_seq = int(
+            await session.scalar(
+                select(func.max(m.TaskModel.seq)).where(m.TaskModel.team_id == team.id)
+            ) or 0
+        ) + 1
+        auto_task = m.TaskModel(
+            seq=next_seq,
+            public_id=f"GC-{next_seq}",
+            team_id=team.id,
+            title=title,
+            description=task.get("description"),
+            assignee_id=actual_assignee_id,
+            assignee_text=actual_assignee_text,
+            deadline=deadline,
+            deadline_timezone=team.timezone,
+            priority=task.get("priority") or "medium",
+            status="todo",
+            source="telegram_chat",
+            source_message_id=message.id,
+            created_from_proposal_id=proposal.id,
+        )
+        session.add(auto_task)
+        # Capture before commit: SQLAlchemy expires attributes on commit.
+        auto_task_public_id = f"GC-{next_seq}"
+        await session.commit()
+        deadline_str = (
+            f"\nДедлайн: {format_deadline(deadline, team.timezone)}" if deadline else ""
+        )
+        if unresolved_name:
+            assignee_str = f"\n⚠️ «{unresolved_name}» не найден в команде — исполнитель не назначен"
+        elif actual_assignee_text:
+            assignee_str = f"\nИсполнитель: {actual_assignee_text}"
+        else:
+            assignee_str = ""
+        return ActionsResponse(
+            actions=[
+                SendMessageAction(
+                    chat_id=event.chat.id,
+                    text=f"✅ {auto_task_public_id}: {title}{assignee_str}{deadline_str}",
+                )
+            ]
+        )
+
     confirmation = m.ConfirmationModel(
         team_id=team.id,
         proposal_id=proposal.id,
@@ -1316,13 +1612,28 @@ async def _route_v2_meeting_candidate(session, team, sender, message, parsed, ev
         hint = _parse_time_to_dt(event.text, now, team.timezone)
         if hint is not None:
             scheduled_at = hint
+    is_autonomous = bool((team.board_config or {}).get("autonomous_mode"))
+
+    # Autonomous mode with no parseable time → ask for clarification, don't create
+    if is_autonomous and scheduled_at is None:
+        await session.commit()
+        return ActionsResponse(actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=(
+                    "🎙 Не понял время созвона. Напиши, например: "
+                    "«созвон в 15:00» или «созвон завтра в 18:30»"
+                ),
+            )
+        ])
+
     row = m.MeetingModel(
         seq=seq,
         public_id=f"MTG-{seq}",
         team_id=team.id,
         title=meeting.get("title") or "Созвон",
-        status="proposed",
-        state="proposed",
+        status="scheduled" if is_autonomous else "proposed",
+        state="scheduled" if is_autonomous else "proposed",
         created_by=sender.id,
         scheduled_at=scheduled_at,
         scheduled_timezone=team.timezone,
@@ -1332,7 +1643,26 @@ async def _route_v2_meeting_candidate(session, team, sender, message, parsed, ev
     )
     session.add(row)
     await session.flush()
-    return await build_meeting_proposal(session, team, sender, row, event.chat.id)
+
+    if is_autonomous:
+        await session.commit()
+        when = format_deadline(scheduled_at, team.timezone)
+        return ActionsResponse(actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=f"✅ Созвон запланирован на {when}.\n\nКто придёт?",
+                reply_markup=rsvp_keyboard(row.id),
+            )
+        ])
+
+    return await build_meeting_proposal(
+        session,
+        team,
+        sender,
+        row,
+        event.chat.id,
+        prefer_group_chat=event.chat.type in {"group", "supergroup"},
+    )
 
 
 async def _route_v2_daily_report(session, team, sender, message, parsed, event):
@@ -1386,14 +1716,14 @@ async def _route_v2_absence(session, team, sender, message, parsed, event):
 
 
 async def _route_v2_status_update(session, container, team, sender, message, parsed, event):
-    """Сотрудник пишет статус в чат («приступаю» / «готово» / «застрял») →
-    меняем статус задачи, двигаем карточку на доске и подтверждаем в чате."""
+    """Сотрудник пишет статус в чат → меняем статус задачи и подтверждаем."""
 
     detected = (parsed.get("daily_report") or {}).get("detected_status")
     if detected not in {"done", "in_progress", "blocked"}:
         await session.commit()
         return ActionsResponse(actions=[])
 
+    # ── Поиск задачи ─────────────────────────────────────────────────────────
     task = None
     public_match = re.search(r"(?:#)?GC-\d+", event.text, flags=re.IGNORECASE)
     if public_match:
@@ -1431,6 +1761,8 @@ async def _route_v2_status_update(session, container, team, sender, message, par
                         )
                     )
     if task is None:
+        task = await _find_task_by_keywords(session, team.id, event.text)
+    if task is None:
         session.add(
             m.AIInboxItemModel(
                 team_id=team.id,
@@ -1446,34 +1778,113 @@ async def _route_v2_status_update(session, container, team, sender, message, par
         await session.commit()
         return ActionsResponse(actions=[])
 
-    was_done = task.status == "done"
-    sync = await TaskStatusService(container.board_mirror).update_status(
-        task.id,
-        TaskStatus(detected),
-        actor_id=sender.id,
-        action="daily_report_status_update",
-    )
-    if detected == "done" and not was_done:
-        await grant_team_xp(
-            session,
-            user_id=task.assignee_id or sender.id,
-            team_id=team.id,
-            task_id=task.id,
-            kind="task_completed",
-            points=TASK_COMPLETED_XP,
-            reason=f"Закрыл задачу {task.public_id}",
-            idempotency_key=f"task_completed:{task.id}",
-        )
+    # ── Обновление статуса (прямо в сессии, надёжно) ─────────────────────────
+    task_public_id = task.public_id  # capture before any expire
+    task_title = task.title
+    task_id_cached = task.id
+
+    task.status = detected
+    task.last_status_update_at = datetime.now(UTC)
     await session.commit()
 
+    # ── Синхронизация с доской (некритично) ─────────────────────────────────
+    try:
+        await TaskStatusService(container.board_mirror).update_status(
+            task_id_cached,
+            TaskStatus(detected),
+            actor_id=sender.id,
+            action="daily_report_status_update",
+        )
+    except Exception:
+        logger.exception("Board sync failed for %s", task_public_id)
+
     labels = {"in_progress": "🔄 В работе", "done": "✅ Готово", "blocked": "⛔ Заблокирована"}
-    text = f"{task.public_id} {task.title}\n→ {labels[detected]}"
-    text += (
-        "\n(карточка на доске обновлена)"
-        if sync.sync_status != "error"
-        else f"\n(доску синхронизировать не удалось: {sync.sync_error})"
+    return _text(event.chat.id, f"✅ {task_public_id} {task_title}\n→ {labels[detected]}")
+
+
+# ── Детерминистический детектор статуса задачи (перебивает LLM-классификацию) ──
+
+_TASK_CREATE_GUARD_RE = re.compile(
+    r"\b(?:создай|добавь|поставь|назначь|создать|добавить|поставить|назначить)\s+задач",
+    re.IGNORECASE,
+)
+_DONE_HEURISTIC_RE = re.compile(
+    r"\b(?:сделал[аи]?|выполнил[аи]?|закончил[аи]?|завершил[аи]?|закрыл[аи]?|"
+    r"готово?|готова|готовы|написал[аи]?|решил[аи]?|сдал[аи]?|отправил[аи]?|"
+    r"запустил[аи]?|развернул[аи]?|done|finished|completed?|implement\w*)\b",
+    re.IGNORECASE,
+)
+_PROGRESS_HEURISTIC_RE = re.compile(
+    r"\b(?:приступ\w+|начинаю|начал[аи]?|взял[аи]?|берусь|делаю|работаю|работает|"
+    r"in\s*progress|in-progress)\b",
+    re.IGNORECASE,
+)
+_BLOCKED_HEURISTIC_RE = re.compile(
+    r"\b(?:застрял[аи]?|заблокирован\w*|не\s+могу|проблема\s+с|blocked|stuck)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_status_update_heuristic(text: str) -> str | None:
+    """Deterministically detect task status update intent.
+
+    Returns 'done' / 'in_progress' / 'blocked', or None if not a status update.
+    Prevents LLM from misclassifying "Денис сделал задачу X" as task_candidate.
+    """
+    if not text:
+        return None
+    # Guard: task creation phrases override everything
+    if _TASK_CREATE_GUARD_RE.search(text):
+        return None
+    if _DONE_HEURISTIC_RE.search(text):
+        return "done"
+    if _PROGRESS_HEURISTIC_RE.search(text):
+        return "in_progress"
+    if _BLOCKED_HEURISTIC_RE.search(text):
+        return "blocked"
+    return None
+
+
+_STATUS_STOP_WORDS = frozenset({
+    "что", "это", "задачу", "задача", "задание", "я", "он", "она", "мы", "вы", "они",
+    "уже", "сделал", "сделала", "сделан", "сделана", "готово", "готов", "выполнил",
+    "выполнила", "выполнен", "выполнена", "закрыл", "закрыла", "завершил", "завершила",
+    "done", "finished", "complete", "completed", "кардинал", "cardinal", "максим",
+    "привет", "всем",
+})
+
+
+async def _find_task_by_keywords(session, team_id, text: str):
+    """Найти активную задачу по ключевым словам из сообщения (без GC-N)."""
+    tokens = {
+        w for w in text.lower().replace("ё", "е").split()
+        if len(w) >= 4 and w not in _STATUS_STOP_WORDS
+    }
+    if not tokens:
+        return None
+
+    rows = await session.execute(
+        select(m.TaskModel).where(
+            m.TaskModel.team_id == team_id,
+            m.TaskModel.status.in_(["todo", "in_progress", "blocked"]),
+        )
     )
-    return _text(event.chat.id, text)
+    best_task, best_score = None, 0.0
+    for t in rows.scalars():
+        t_tokens = {w for w in t.title.lower().replace("ё", "е").split() if len(w) >= 4}
+        if not t_tokens:
+            continue
+        # Prefix-based matching to handle Russian word forms (запис~ / записать/запись)
+        matches = sum(
+            1 for mt in tokens
+            if any(mt[:5] == tt[:5] or mt in tt or tt in mt for tt in t_tokens)
+        )
+        score = matches / max(len(tokens), len(t_tokens))
+        if score > best_score and score >= 0.3:
+            best_score = score
+            best_task = t
+    return best_task
+
 
 async def _match_v2_assignee(session, team_id, assignee_text):
     if not assignee_text:
@@ -2059,8 +2470,12 @@ async def _handle_telemost_callback(
                         telegram_chat_id=chat_id,
                         created_by_telegram_user_id=event.from_user.id,
                     )
-                except (telemost_svc.TelemostNotConnected, YandexTelemostError):
+                except (telemost_svc.TelemostNotConnected, YandexTelemostError) as exc:
                     # Telemost unavailable (e.g. 403 no API access) → fall back.
+                    logger.warning(
+                        "[telemost] room creation failed; using Jitsi fallback: %s",
+                        exc,
+                    )
                     await session.rollback()
                     result = None
 

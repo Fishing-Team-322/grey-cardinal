@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from brain_api.application.use_cases import yandex_telemost as telemost_svc
 from brain_api.application.use_cases.meeting_flow import (
+    _parse_time_to_dt,
     build_meeting_proposal,
     handle_meeting_callback,
     handle_pending_meeting_time,
@@ -15,15 +18,41 @@ from brain_api.application.use_cases.meeting_flow import (
 from brain_api.application.use_cases.meeting_reminders import (
     run_meeting_finalize,
     run_meeting_reminders,
+    run_scheduled_meeting_starts,
 )
+from brain_api.config import Settings
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.telegram_gateway.client import NullTelegramGateway
 from grey_cardinal_contracts import TelegramCallbackEvent, TelegramMessageRef, TelegramSender
 
 NOW = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
+TZ = ZoneInfo("Europe/Moscow")
 MANAGER_TG = 5001
 EMP_TG = 5002
 GROUP_CHAT = -100999
+
+
+def test_parse_time_with_preposition_and_dot_minutes():
+    parsed = _parse_time_to_dt("давайте в 12.30", NOW, "Europe/Moscow")
+    assert parsed is not None
+    assert parsed.astimezone(TZ).hour == 12
+    assert parsed.astimezone(TZ).minute == 30
+
+
+@pytest.mark.parametrize(
+    ("text", "hour", "minute"),
+    [
+        ("Cardinal мне нужен зазвон на 12-37.", 12, 37),
+        ("Cardinal планируется звом на 12 40.", 12, 40),
+        ("Кардинал, созвон в 12: 45", 12, 45),
+        ("Кардинал, нужен звонок на 12", 12, 0),
+    ],
+)
+def test_parse_time_from_asr_variants(text: str, hour: int, minute: int):
+    parsed = _parse_time_to_dt(text, NOW, "Europe/Moscow")
+    assert parsed is not None
+    assert parsed.astimezone(TZ).hour == hour
+    assert parsed.astimezone(TZ).minute == minute
 
 
 async def _seed(session, *, scheduled_at):
@@ -114,6 +143,22 @@ async def test_rsvp_yes_updates_tally(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_rsvp_keeps_meeting_link_in_poll(session_factory):
+    async with session_factory() as session:
+        team, _mgr, emp, meeting = await _seed(session, scheduled_at=NOW + timedelta(hours=2))
+        meeting.state = "recording"
+        meeting.status = "active"
+        meeting.metadata_json = {"join_url": "https://telemost.yandex.ru/j/keep-link"}
+        await session.commit()
+        event = _cb(f"rsvp_yes:{meeting.id}", from_id=EMP_TG, chat_id=GROUP_CHAT)
+        resp = await handle_meeting_callback(session, event.data, event)
+
+    edit = [a for a in resp.actions if a.type == "edit_message"][0]
+    assert "https://telemost.yandex.ru/j/keep-link" in edit.text
+    assert "Придут: 1" in edit.text
+
+
+@pytest.mark.asyncio
 async def test_5min_reminder_pings_attendees(session_factory):
     async with session_factory() as session:
         team, _mgr, emp, meeting = await _seed(session, scheduled_at=NOW + timedelta(minutes=4))
@@ -128,6 +173,66 @@ async def test_5min_reminder_pings_attendees(session_factory):
     # повторный прогон не дублирует
     sent2 = await run_meeting_reminders(session_factory, gateway, now=NOW)
     assert sent2 == 0
+
+
+@pytest.mark.asyncio
+async def test_scheduled_meeting_start_creates_room_and_posts_link(
+    session_factory,
+    monkeypatch,
+) -> None:
+    async def fake_create_room_for_team(session, settings, team_id, *, title=None):
+        return {
+            "join_url": "https://telemost.yandex.ru/j/scheduled",
+            "conference_id": "conf-scheduled",
+            "raw": {},
+        }
+
+    monkeypatch.setattr(telemost_svc, "create_room_for_team", fake_create_room_for_team)
+    async with session_factory() as session:
+        team, _manager, _emp, meeting = await _seed(
+            session,
+            scheduled_at=NOW - timedelta(seconds=5),
+        )
+        meeting.state = "scheduled"
+        meeting.status = "scheduled"
+        session.add(
+            m.YandexTelemostIntegrationModel(
+                team_id=team.id,
+                provider="yandex_telemost",
+                status="connected",
+                settings={"enable_meeting_agent_auto_join": True},
+            )
+        )
+        await session.commit()
+
+    gateway = NullTelegramGateway()
+    started = await run_scheduled_meeting_starts(
+        session_factory,
+        gateway,
+        Settings(),
+        now=NOW,
+    )
+
+    assert started == 1
+    assert gateway.sent
+    assert gateway.sent[0][0] == GROUP_CHAT
+    assert "https://telemost.yandex.ru/j/scheduled" in gateway.sent[0][1]
+    async with session_factory() as session:
+        refreshed = await session.get(m.MeetingModel, meeting.id)
+        assert refreshed.metadata_json["join_url"] == "https://telemost.yandex.ru/j/scheduled"
+        job = await session.scalar(select_job(meeting.id))
+        assert job is not None
+        assert job.status == "queued"
+        assert job.meeting_url == "https://telemost.yandex.ru/j/scheduled"
+
+    started_again = await run_scheduled_meeting_starts(
+        session_factory,
+        gateway,
+        Settings(),
+        now=NOW + timedelta(seconds=20),
+    )
+    assert started_again == 0
+    assert len(gateway.sent) == 1
 
 
 @pytest.mark.asyncio
@@ -218,4 +323,12 @@ def select_xp(user_id, kind):
     return select(m.UserXpEventModel).where(
         m.UserXpEventModel.user_id == user_id,
         m.UserXpEventModel.kind == kind,
+    )
+
+
+def select_job(meeting_id):
+    from sqlalchemy import select
+
+    return select(m.MeetingAgentJoinJobModel).where(
+        m.MeetingAgentJoinJobModel.meeting_id == meeting_id
     )

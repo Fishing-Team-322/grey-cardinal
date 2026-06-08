@@ -79,3 +79,20 @@ test("yandex telemost API maps to the OAuth integration endpoints", async () => 
     "POST /api/integrations/yandex-telemost/test-create-room",
   ]);
 });
+
+test("team bot settings API maps to the team settings endpoints", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    return new Response(JSON.stringify({ require_cardinal_mention: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  await api.teams.botSettings("team-1");
+  await api.teams.saveBotSettings("team-1", { require_cardinal_mention: true });
+  assert.deepEqual(calls, [
+    "GET /api/teams/team-1/bot-settings",
+    "PUT /api/teams/team-1/bot-settings",
+  ]);
+});

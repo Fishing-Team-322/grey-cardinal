@@ -12,11 +12,11 @@ WORKDIR /app
 
 COPY packages/contracts/python /app/packages/contracts/python
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e /app/packages/contracts/python
+    pip install --no-build-isolation -e /app/packages/contracts/python
 
 COPY apps/telegram-bot /app/apps/telegram-bot
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e /app/apps/telegram-bot
+    pip install --no-build-isolation -e /app/apps/telegram-bot
 
 WORKDIR /app/apps/telegram-bot
 EXPOSE 8010

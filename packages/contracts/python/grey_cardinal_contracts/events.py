@@ -21,6 +21,8 @@ class EventName(StrEnum):
     reminder_suppressed = "reminder_suppressed"
     duplicate_task_detected = "duplicate_task_detected"
     transcript_line = "transcript_line"
+    meeting_recording_started = "meeting_recording_started"
+    meeting_finished = "meeting_finished"
 
 
 class WebsocketEvent(BaseModel):

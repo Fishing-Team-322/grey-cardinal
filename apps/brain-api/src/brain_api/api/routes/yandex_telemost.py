@@ -16,12 +16,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.api.rbac import build_tenant_context, require_team_member, require_team_role
 from brain_api.api.routes.accounts import CurrentUser, get_db
 from brain_api.application.use_cases import yandex_telemost as svc
 from brain_api.config import Settings, get_settings
+from brain_api.infrastructure.db import models as m
 from brain_api.integrations.yandex_telemost import YandexTelemostError
 
 logger = logging.getLogger(__name__)
@@ -142,6 +144,22 @@ class TeamBody(BaseModel):
     team_id: UUID | None = None
 
 
+def _recording_job_payload(job: m.MeetingAgentJoinJobModel) -> dict:
+    return {
+        "id": str(job.id),
+        "meeting_id": str(job.meeting_id) if job.meeting_id else None,
+        "meeting_url": job.meeting_url,
+        "conference_id": job.conference_id,
+        "status": job.status,
+        "error_message": job.error_message,
+        "attempts": job.attempts,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "heartbeat_at": job.heartbeat_at.isoformat() if job.heartbeat_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "created_at": job.created_at.isoformat(),
+    }
+
+
 @router.post("/disconnect")
 async def disconnect(
     body: TeamBody,
@@ -152,6 +170,67 @@ async def disconnect(
     await svc.disconnect(session, tid)
     await session.commit()
     return {"ok": True, "status": "disconnected"}
+
+
+# ── Recording agent jobs ──────────────────────────────────────────────────────
+
+
+@router.get("/recording-jobs")
+async def recording_jobs(
+    current_user: CurrentUser,
+    team_id: UUID | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    tid = await _resolve_team(current_user, session, team_id, role=None)
+    rows = (
+        await session.execute(
+            select(m.MeetingAgentJoinJobModel)
+            .where(
+                m.MeetingAgentJoinJobModel.team_id == tid,
+                m.MeetingAgentJoinJobModel.provider == "yandex_telemost",
+            )
+            .order_by(m.MeetingAgentJoinJobModel.created_at.desc())
+            .limit(20)
+        )
+    ).scalars()
+    return {"items": [_recording_job_payload(row) for row in rows]}
+
+
+@router.post("/recording-jobs/{job_id}/start")
+async def start_recording_job(
+    job_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    job = await session.get(m.MeetingAgentJoinJobModel, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recording job not found")
+    await _resolve_team(current_user, session, job.team_id, role="manager")
+    if job.status not in {"pending", "failed"}:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Recording job cannot be started")
+    job.status = "queued"
+    job.error_message = None
+    job.worker_id = None
+    await session.commit()
+    return _recording_job_payload(job)
+
+
+@router.post("/recording-jobs/{job_id}/stop")
+async def stop_recording_job(
+    job_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    job = await session.get(m.MeetingAgentJoinJobModel, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recording job not found")
+    await _resolve_team(current_user, session, job.team_id, role="manager")
+    if job.status in {"joining", "recording"}:
+        job.status = "stop_requested"
+    elif job.status in {"pending", "queued"}:
+        job.status = "completed"
+    await session.commit()
+    return _recording_job_payload(job)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────

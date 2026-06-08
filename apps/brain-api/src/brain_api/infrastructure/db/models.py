@@ -992,16 +992,13 @@ class YandexOAuthStateModel(Base):
 
 
 class MeetingAgentJoinJobModel(TimestampMixin, Base):
-    """Queue stub for the meeting recording agent joining a Telemost room.
-
-    MVP does NOT auto-join (no hidden recording). This row records intent so a
-    future worker can pick it up; until then it stays 'pending'.
-    """
+    """Persistent queue item for the visible Telemost recording participant."""
 
     __tablename__ = "meeting_agent_join_jobs"
     __table_args__ = (
         CheckConstraint(
-            "status in ('pending','queued','failed','completed')",
+            "status in "
+            "('pending','queued','joining','recording','stop_requested','failed','completed')",
             name="ck_meeting_agent_join_status",
         ),
     )
@@ -1017,3 +1014,8 @@ class MeetingAgentJoinJobModel(TimestampMixin, Base):
     created_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

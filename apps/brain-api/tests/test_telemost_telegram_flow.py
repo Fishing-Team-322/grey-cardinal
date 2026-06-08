@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 
 from brain_api.api.routes import internal_telegram as itg
 from brain_api.application.use_cases import yandex_telemost as svc
@@ -45,7 +46,11 @@ class FakeClient:
         return {"id": "conf-9", "join_url": "https://telemost.yandex.ru/j/zzz"}
 
 
-def _msg(text: str, chat_type: str = "supergroup") -> TelegramMessageEvent:
+def _msg(
+    text: str,
+    chat_type: str = "supergroup",
+    raw: dict | None = None,
+) -> TelegramMessageEvent:
     return TelegramMessageEvent(
         update_id=1,
         message_id=10,
@@ -53,7 +58,12 @@ def _msg(text: str, chat_type: str = "supergroup") -> TelegramMessageEvent:
         sender=TelegramSender(id=555, username="boss", first_name="Boss"),
         text=text,
         date=datetime.now(UTC),
+        raw=raw or {},
     )
+
+
+def _voice_msg(text: str) -> TelegramMessageEvent:
+    return _msg(text, raw={"gc": {"origin": "telegram_voice"}})
 
 
 def _callback(data: str) -> TelegramCallbackEvent:
@@ -66,14 +76,18 @@ def _callback(data: str) -> TelegramCallbackEvent:
     )
 
 
-async def _seed_team(session, *, connected: bool):
+async def _seed_team(session, *, connected: bool, require_cardinal_mention: bool = False):
     user = m.UserModel(id=uuid4(), display_name="Boss", telegram_user_id=555)
     session.add(user)
     company = m.CompanyModel(name="Co", timezone="Europe/Moscow", created_by=user.id)
     session.add(company)
     await session.flush()
     team = m.TeamModel(
-        company_id=company.id, name="Team", timezone="Europe/Moscow", tg_chat_id=CHAT_ID
+        company_id=company.id,
+        name="Team",
+        timezone="Europe/Moscow",
+        tg_chat_id=CHAT_ID,
+        board_config={"require_cardinal_mention": require_cardinal_mention},
     )
     session.add(team)
     await session.flush()
@@ -108,7 +122,7 @@ async def test_intent_asks_provider_without_creating() -> None:
     assert kbs, "expected an inline keyboard prompt"
     flat = str(kbs)
     assert "tmcall:create" in flat and "tmcall:dismiss" in flat
-    assert "Телемост" in _texts(resp)
+    assert "встреч" in _texts(resp).lower()
 
 
 @pytest.mark.asyncio
@@ -131,6 +145,247 @@ async def test_non_call_message_does_not_prompt(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_required_cardinal_mention_ignores_plain_call_intent(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(_msg("нужен созвон"), container=container)
+
+    assert resp.actions == []
+    async with session_factory() as session:
+        audit = await session.scalar(
+            select(m.AuditLogModel).where(
+                m.AuditLogModel.action == "semantic_message_ignored"
+            )
+        )
+        assert audit.payload["reason"] == "cardinal_mention_required"
+
+
+@pytest.mark.asyncio
+async def test_required_cardinal_mention_ignores_plain_voice_transcript(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(
+        _voice_msg("надо сделать задачу для Максима написать API"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    async with session_factory() as session:
+        audit = await session.scalar(
+            select(m.AuditLogModel).where(
+                m.AuditLogModel.action == "semantic_message_ignored"
+            )
+        )
+        assert audit.payload["reason"] == "cardinal_mention_required"
+
+
+@pytest.mark.asyncio
+async def test_required_cardinal_mention_allows_prefixed_call_intent(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(
+        _msg("Кардинал, нам нужен созвон"),
+        container=container,
+    )
+
+    assert "tmcall:create" in str([
+        getattr(action, "reply_markup", None) for action in resp.actions
+    ])
+
+
+@pytest.mark.asyncio
+async def test_prefixed_call_intent_with_time_prompts_scheduling_in_group(
+    session_factory,
+) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(
+        _msg("Кардинал, нам нужен созвон в 12.30"),
+        container=container,
+    )
+
+    text = _texts(resp)
+    reply_markup = next(
+        getattr(action, "reply_markup", None)
+        for action in resp.actions
+        if getattr(action, "reply_markup", None)
+    )
+    ok_data = reply_markup["inline_keyboard"][0][0]["callback_data"]
+    no_data = reply_markup["inline_keyboard"][1][0]["callback_data"]
+    keyboards = str([reply_markup])
+    assert "Запланировать" in text
+    assert "12:30" in text
+    assert "mtg_ok:" in keyboards
+    assert "mtg_no:" in keyboards
+    assert ok_data != "mtg_ok:None"
+    assert no_data != "mtg_no:None"
+    UUID(ok_data.split(":", 1)[1])
+    UUID(no_data.split(":", 1)[1])
+    assert "tmcall:create" not in keyboards
+    async with session_factory() as session:
+        meeting = await session.scalar(select(m.MeetingModel))
+        assert meeting is not None
+        assert meeting.state == "proposed"
+        assert meeting.scheduled_at is not None
+
+    callback_resp = await itg.ingest_callback(_callback(ok_data), container=container)
+    assert callback_resp.actions
+    async with session_factory() as session:
+        meeting = await session.scalar(select(m.MeetingModel))
+        assert meeting is not None
+        assert meeting.state == "scheduled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Cardinal мне нужен зазвон на 12.37.",
+        "Cardinal планируется звом на 12.40.",
+    ],
+)
+async def test_asr_call_intent_variants_prompt_scheduling_in_group(
+    session_factory,
+    text: str,
+) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(_msg(text), container=container)
+
+    action = resp.actions[0]
+    reply_markup = action.reply_markup
+    ok_data = reply_markup["inline_keyboard"][0][0]["callback_data"]
+    assert action.chat_id == CHAT_ID
+    assert "Запланировать" in action.text
+    assert ok_data.startswith("mtg_ok:")
+    assert ok_data != "mtg_ok:None"
+    UUID(ok_data.split(":", 1)[1])
+    assert "tmcall:create" not in str(reply_markup)
+
+
+@pytest.mark.asyncio
+async def test_group_meeting_candidate_fallback_replies_to_group(session_factory) -> None:
+    class Parser:
+        async def parse(self, payload):
+            return {
+                "kind": "meeting_candidate",
+                "confidence": 0.95,
+                "meeting": {
+                    "title": "Созвон",
+                    "scheduled_at": None,
+                    "duration_minutes": 60,
+                },
+            }
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _msg("Кардинал, планируется встреча в 12.40"),
+        container=container,
+    )
+
+    action = resp.actions[0]
+    assert action.chat_id == CHAT_ID
+    assert "Планируем созвон" in action.text
+    ok_data = action.reply_markup["inline_keyboard"][0][0]["callback_data"]
+    assert ok_data.startswith("mtg_ok:")
+    assert ok_data != "mtg_ok:None"
+
+
+@pytest.mark.asyncio
+async def test_disabled_cardinal_mention_keeps_plain_call_intent(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=False)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(_msg("нужен созвон"), container=container)
+
+    assert "tmcall:create" in str([
+        getattr(action, "reply_markup", None) for action in resp.actions
+    ])
+
+
+@pytest.mark.asyncio
+async def test_cardinal_prefix_is_removed_before_semantic_parse(session_factory) -> None:
+    captured = {}
+
+    class Parser:
+        async def parse(self, payload):
+            captured["text"] = payload.message_text
+            return {"kind": "noise", "confidence": 1.0}
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _msg("кардинал задача для Дениса написать API к 18 часам"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    assert captured["text"] == "задача для Дениса написать API к 18 часам"
+
+
+@pytest.mark.asyncio
+async def test_voice_cardinal_prefix_is_removed_before_semantic_parse(session_factory) -> None:
+    captured = {}
+
+    class Parser:
+        async def parse(self, payload):
+            captured["text"] = payload.message_text
+            return {"kind": "noise", "confidence": 1.0}
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _voice_msg("Кардинал, надо сделать задачу для Максима написать API"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    assert captured["text"] == "надо сделать задачу для Максима написать API"
+
+
+@pytest.mark.asyncio
+async def test_disabled_cardinal_mention_processes_plain_voice_transcript(
+    session_factory,
+) -> None:
+    captured = {}
+
+    class Parser:
+        async def parse(self, payload):
+            captured["text"] = payload.message_text
+            return {"kind": "noise", "confidence": 1.0}
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=False)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _voice_msg("надо сделать задачу для Максима написать API"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    assert captured["text"] == "надо сделать задачу для Максима написать API"
+
+
+@pytest.mark.asyncio
 async def test_button_creates_room_and_posts_link(session_factory, monkeypatch) -> None:
     monkeypatch.setattr(itg, "get_settings", lambda: CONFIGURED)
     monkeypatch.setattr(svc, "build_client", lambda settings: FakeClient())
@@ -146,29 +401,31 @@ async def test_button_creates_room_and_posts_link(session_factory, monkeypatch) 
 
     # a join job was queued
     async with session_factory() as session:
-        from sqlalchemy import select
-
         jobs = (await session.execute(select(m.MeetingAgentJoinJobModel))).scalars().all()
         assert len(jobs) == 1
         assert jobs[0].meeting_url == "https://telemost.yandex.ru/j/zzz"
 
 
 @pytest.mark.asyncio
-async def test_button_refuses_when_chat_not_bound(session_factory, monkeypatch) -> None:
+async def test_button_falls_back_to_jitsi_when_chat_not_bound(session_factory, monkeypatch) -> None:
     monkeypatch.setattr(itg, "get_settings", lambda: CONFIGURED)
     container = SimpleNamespace(session_factory=session_factory)
     resp = await itg.ingest_callback(_callback("tmcall:create"), container=container)
-    assert "не привязан" in _texts(resp).lower()
+    text = _texts(resp)
+    assert "Jitsi" in text
+    assert "https://meet.ffmuc.net/" in text
 
 
 @pytest.mark.asyncio
-async def test_button_refuses_when_not_connected(session_factory, monkeypatch) -> None:
+async def test_button_falls_back_to_jitsi_when_not_connected(session_factory, monkeypatch) -> None:
     monkeypatch.setattr(itg, "get_settings", lambda: CONFIGURED)
     async with session_factory() as session:
         await _seed_team(session, connected=False)
     container = SimpleNamespace(session_factory=session_factory)
     resp = await itg.ingest_callback(_callback("tmcall:create"), container=container)
-    assert "не подключ" in _texts(resp).lower()
+    text = _texts(resp)
+    assert "Jitsi" in text
+    assert "https://meet.ffmuc.net/" in text
 
 
 @pytest.mark.asyncio

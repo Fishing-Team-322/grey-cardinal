@@ -10,6 +10,7 @@ from sqlalchemy import select
 from brain_api.application.use_cases.meeting_reminders import (
     run_meeting_finalize,
     run_meeting_reminders,
+    run_scheduled_meeting_starts,
 )
 from brain_api.application.use_cases.send_deadline_reminders import SendDeadlineReminders
 from brain_api.application.use_cases.send_morning_task_summary import SendMorningTaskSummary
@@ -63,6 +64,14 @@ async def run_meeting_5min_reminders(container: Container) -> None:
     )
 
 
+async def run_scheduled_meeting_start_job(container: Container) -> None:
+    await run_scheduled_meeting_starts(
+        container.session_factory,
+        container.telegram_gateway,
+        container.settings,
+    )
+
+
 async def run_meeting_finalize_job(container: Container) -> None:
     await run_meeting_finalize(
         container.session_factory,
@@ -105,6 +114,7 @@ def register_jobs(scheduler, container: Container) -> None:
     """Зарегистрировать все P0-задания в планировщике."""
     scheduler.every(300, lambda: run_deadline_reminders(container), name="deadline_reminders")
     scheduler.every(1800, lambda: run_stale_reminders(container), name="stale_reminders")
+    scheduler.every(15, lambda: run_scheduled_meeting_start_job(container), name="meeting_starts")
     scheduler.every(60, lambda: run_meeting_5min_reminders(container), name="meeting_reminders")
     scheduler.every(60, lambda: run_meeting_finalize_job(container), name="meeting_finalize")
     scheduler.every(900, lambda: run_team_digests_job(container), name="team_digests")

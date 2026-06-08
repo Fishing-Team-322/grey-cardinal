@@ -50,7 +50,11 @@ MEETING_CB_PREFIXES = (
     f"{CB_RSVP_MAYBE}:",
 )
 
-_TIME_RE = re.compile(r"\b(\d{1,2})[:.\s](\d{2})\b|\b(?:в|к)\s+(\d{1,2})\b")
+_TIME_RE = re.compile(
+    r"\b(?:в|к|на)?\s*(\d{1,2})\s*[:.\-\s]\s*(\d{2})\b"
+    r"|\b(?:в|к|на)\s+(\d{1,2})\b",
+    re.IGNORECASE,
+)
 
 
 def is_meeting_callback(data: str) -> bool:
@@ -149,14 +153,18 @@ async def build_meeting_proposal(
     sender: m.UserModel,
     meeting: m.MeetingModel,
     group_chat_id: int,
+    *,
+    prefer_group_chat: bool = False,
 ) -> ActionsResponse:
     """Сформировать подтверждение созвона: ЛС руководителю либо запрос в чат."""
     manager = await _manager_for_team(session, team.id, prefer_user_id=sender.id)
 
     # Куда отправлять подтверждение: в личку руководителю, иначе — в чат команды.
-    target_chat = (
-        manager.telegram_user_id if manager is not None else None
-    ) or group_chat_id
+    target_chat = group_chat_id
+    if not prefer_group_chat:
+        target_chat = (
+            manager.telegram_user_id if manager is not None else None
+        ) or group_chat_id
 
     if meeting.scheduled_at is None:
         # Время не распозналось — просим вписать его (stateful в личке).
@@ -332,12 +340,15 @@ async def _record_rsvp(
 
     yes, no, maybe = await _rsvp_counts(session, meeting.id)
     label = {"yes": "Приду", "no": "Не приду", "maybe": "Возможно"}[status]
+    join_url = (meeting.metadata_json or {}).get("join_url")
     poll_text = (
         f"📊 Созвон {_when(meeting, team)}\n\n"
         f"{meeting.title or 'Созвон'}\n\n"
         "Кто придёт?\n\n"
         f"✅ Придут: {yes}   ❌ Нет: {no}   🤔 Возможно: {maybe}"
     )
+    if join_url:
+        poll_text = f"🔗 Ссылка: {join_url}\n\n" + poll_text
     return ActionsResponse(actions=[
         _answer(event.callback_query_id, f"Записал: {label}"),
         EditMessageAction(

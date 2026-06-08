@@ -56,6 +56,11 @@ class FixedAsrEngine:
         return "mock transcript text"
 
 
+class EmptyAsrEngine:
+    async def transcribe_wav(self, wav_bytes: bytes) -> str:
+        return ""
+
+
 def install_fakes(monkeypatch, tmp_path=None):
     fake_brain = FakeBrainClient()
     monkeypatch.setattr(audio_main, "brain_client", fake_brain)
@@ -115,6 +120,37 @@ def test_audio_chunk_accepts_tiny_wav_and_sends_transcript(monkeypatch):
     assert event.meeting_id == "meeting-1"
     assert event.is_final is True
     assert event.raw["chunk_seq"] == 3
+
+
+def test_audio_chunk_does_not_send_empty_transcript(monkeypatch):
+    fake_brain = install_fakes(monkeypatch)
+    monkeypatch.setattr(audio_main, "asr_engine", EmptyAsrEngine())
+    response = TestClient(audio_main.app).post(
+        "/audio/chunk",
+        content=tiny_wav(),
+        headers={"X-Internal-Token": "test-token", "X-Audio-Format": "wav"},
+    )
+    assert response.status_code == 200
+    assert response.json()["sent_to_brain"] is False
+    assert fake_brain.events == []
+
+
+def test_audio_chunk_marks_telemost_recorder_source(monkeypatch):
+    fake_brain = install_fakes(monkeypatch)
+    response = TestClient(audio_main.app).post(
+        "/audio/chunk",
+        content=tiny_wav(),
+        headers={
+            "X-Internal-Token": "test-token",
+            "X-Audio-Format": "wav",
+            "X-Audio-Source": "telemost_recorder",
+        },
+    )
+    assert response.status_code == 200
+    event = fake_brain.events[-1]
+    assert event.speaker_id == "telemost-recorder"
+    assert event.speaker_name == "Участники Телемоста"
+    assert event.raw["source"] == "audio-worker.telemost_recorder"
 
 
 def test_audio_chunk_rejects_missing_or_wrong_token(monkeypatch):

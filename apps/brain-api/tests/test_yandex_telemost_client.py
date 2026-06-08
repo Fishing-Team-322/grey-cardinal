@@ -72,9 +72,15 @@ async def test_create_conference_sends_oauth_header_and_returns_payload() -> Non
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == TELEMOST_CONFERENCES_URL
         assert request.headers["Authorization"] == "OAuth AT"
-        return httpx.Response(200, json={"id": "conf-1", "join_url": "https://telemost.yandex.ru/j/x"})
+        assert request.read() == b'{"waiting_room_level":"PUBLIC"}'
+        return httpx.Response(201, json={"id": "conf-1", "join_url": "https://telemost.yandex.ru/j/x"})
 
-    data = await _client(handler).create_conference("AT", title="Sync")
+    data = await _client(handler).create_conference(
+        "AT",
+        title="Sync",
+        description="Unsupported for a conference",
+        duration=60,
+    )
     assert data["id"] == "conf-1"
     assert data["join_url"].startswith("https://telemost.yandex.ru/")
 

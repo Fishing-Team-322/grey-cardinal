@@ -10,11 +10,11 @@ WORKDIR /app
 
 COPY packages/contracts/python /app/packages/contracts/python
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e /app/packages/contracts/python
+    pip install --no-build-isolation -e /app/packages/contracts/python
 
 COPY apps/brain-api /app/apps/brain-api
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e /app/apps/brain-api
+    pip install --no-build-isolation -e /app/apps/brain-api
 
 WORKDIR /app/apps/brain-api
 EXPOSE 8000

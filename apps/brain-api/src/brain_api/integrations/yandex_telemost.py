@@ -178,18 +178,12 @@ class YandexTelemostClient:
         duration: int | None = None,
         access_level: str = "PUBLIC",
     ) -> dict[str, Any]:
-        # Telemost's create payload is minimal (access_level / waiting_room). Optional
-        # title/description/starts_at are forwarded only if the API later accepts them;
-        # we keep a valid minimal body so room creation never breaks on extras.
-        payload: dict[str, Any] = {"access_level": access_level}
-        if title:
-            payload["title"] = title
-        if description:
-            payload["description"] = description
-        if starts_at is not None:
-            payload["starts_at"] = starts_at.astimezone(UTC).isoformat()
-        if duration is not None:
-            payload["duration"] = duration
+        # The create-conference endpoint does not accept meeting title, description,
+        # start time, or duration. Those belong to Calendar/live-stream flows.
+        # Keep the compatibility arguments for callers, but never send unsupported
+        # fields: Yandex rejects the whole request with 4xx when they are present.
+        del title, description, starts_at, duration
+        payload: dict[str, Any] = {"waiting_room_level": access_level}
         return await self._authed("POST", TELEMOST_CONFERENCES_URL, access_token, json=payload)
 
     async def read_conference(self, access_token: str, conference_id: str) -> dict[str, Any]:
