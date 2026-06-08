@@ -241,6 +241,9 @@ export const api = {
     saveKanbanConfig(teamId, columns) {
       return request("PUT", `/api/teams/${teamId}/kanban-config`, { body: { columns } });
     },
+    createTask(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/task-command/confirm`, { body });
+    },
   },
   aiInbox: {
     list(teamId) {

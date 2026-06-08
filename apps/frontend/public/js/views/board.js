@@ -1,5 +1,9 @@
 import { api } from "../api.js";
 import { escapeHtml, setTopbar, toast } from "../view-utils.js";
+import { wsOn } from "../ws.js";
+
+const LIVE_EVENTS = ["task_created", "task_status_changed", "task_proposed", "task_rejected", "duplicate_task_detected"];
+let boardUnsubs = [];
 
 const VIEWS = [
   ["status", "Статусы"],
@@ -54,6 +58,11 @@ function injectStyles() {
     font-weight:600;position:sticky;top:0;background:#121216;border-radius:14px 14px 0 0;z-index:1}
   .board-column>header .count{margin-left:auto;background:#222;border-radius:20px;padding:1px 9px;font-size:12px;color:#aaa}
   .board-column>header .col-collapse{cursor:pointer;opacity:.5;font-size:12px}
+  .board-column>header .col-add{cursor:pointer;opacity:.6;font-size:16px;font-weight:700;line-height:1}
+  .board-column>header .col-add:hover{opacity:1;color:#ff003c}
+  .quick-add{background:#1a1a1f;border:1px solid #ff003c;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+  .quick-add input{padding:8px 10px;border-radius:8px;border:1px solid #2a2a33;background:#121216;color:#ececf0;font:inherit}
+  .quick-add .qa-row{display:flex;gap:6px}
   .board-column>header .col-dot{width:9px;height:9px;border-radius:50%}
   .board-stack{padding:10px;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
   .board-column.collapsed .board-stack{display:none}
@@ -221,6 +230,34 @@ export default async function boardView(root, params, query) {
         if (col.classList.contains("collapsed")) collapsed.add(key); else collapsed.delete(key);
       });
     });
+    content.querySelectorAll(".col-add").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const col = btn.closest(".board-column");
+        const statusKey = col.dataset.colKey;
+        const stack = col.querySelector(".board-stack");
+        if (stack.querySelector(".quick-add")) { stack.querySelector(".quick-add input")?.focus(); return; }
+        const box = document.createElement("div");
+        box.className = "quick-add";
+        box.innerHTML = `<input type="text" placeholder="Название задачи, Enter — создать" maxlength="200"><div class="qa-row"><button class="btn btn-sm btn-primary qa-ok">Создать</button><button class="btn btn-sm btn-ghost qa-cancel">×</button></div>`;
+        stack.prepend(box);
+        const input = box.querySelector("input");
+        input.focus();
+        const submit = async () => {
+          const title = input.value.trim();
+          if (!title) { box.remove(); return; }
+          input.disabled = true;
+          try {
+            await api.greyBoard.createTask(teamId, { title, status: statusKey });
+            toast("Задача создана");
+            await load();
+          } catch (err) { toast("Ошибка: " + (err.message || "")); input.disabled = false; }
+        };
+        box.querySelector(".qa-ok").onclick = submit;
+        box.querySelector(".qa-cancel").onclick = () => box.remove();
+        input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); if (ev.key === "Escape") box.remove(); });
+      });
+    });
   }
 
   function bindDnd() {
@@ -274,6 +311,19 @@ export default async function boardView(root, params, query) {
     await load();
   };
   root.querySelector("#board-refresh").onclick = load;
+
+  // ── Live updates: reload (debounced) on relevant WS events for this team ──
+  boardUnsubs.forEach((off) => off());
+  boardUnsubs = [];
+  let liveTimer = null;
+  const onLive = (payload) => {
+    if (payload && payload.team_id && String(payload.team_id) !== String(teamId)) return;
+    if (!document.body.contains(content)) { boardUnsubs.forEach((o) => o()); boardUnsubs = []; return; }
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => { if (document.body.contains(content)) load(); }, 500);
+  };
+  for (const ev of LIVE_EVENTS) boardUnsubs.push(wsOn(ev, onLive));
+
   await load();
 }
 
@@ -286,7 +336,7 @@ function renderColumn(column, collapsed, view) {
   const dot = view === "status" && COL_DOT[key] ? `<span class="col-dot" style="background:${COL_DOT[key]}"></span>` : "";
   const droppable = DROP_VIEWS[view] ? `data-col-key="${escapeAttr(key)}"` : "";
   return `<section class="board-column ${collapsed.has(key) ? "collapsed" : ""}" ${droppable}>
-    <header>${dot}<span>${escapeHtml(title)}</span><span class="count">${cards.length}</span>${overdue ? `<span class="count" title="просрочено">⏰${overdue}</span>` : ""}<span class="col-collapse" title="Свернуть">▾</span></header>
+    <header>${dot}<span>${escapeHtml(title)}</span><span class="count">${cards.length}</span>${overdue ? `<span class="count" title="просрочено">⏰${overdue}</span>` : ""}${view === "status" ? '<span class="col-add" title="Добавить задачу">＋</span>' : ""}<span class="col-collapse" title="Свернуть">▾</span></header>
     <div class="board-stack">${cards.length ? cards.map((card) => renderCard(card, key)).join("") : '<div class="board-empty">Пусто</div>'}</div>
   </section>`;
 }
@@ -300,7 +350,12 @@ function renderCard(task, columnKey = null) {
     </div>`;
   }
   const aName = task.assignee?.display_name || "";
-  const ava = aName ? `<span class="c-ava" title="${escapeAttr(aName)}">${escapeHtml(initials(aName))}</span>` : `<span class="c-ava none" title="Без исполнителя">∅</span>`;
+  const photo = task.assignee?.photo_data_url;
+  const ava = aName
+    ? (photo
+      ? `<span class="c-ava" title="${escapeAttr(aName)}" style="background-image:url('${escapeAttr(photo)}');background-size:cover;background-position:center"></span>`
+      : `<span class="c-ava" title="${escapeAttr(aName)}">${escapeHtml(initials(aName))}</span>`)
+    : `<span class="c-ava none" title="Без исполнителя">∅</span>`;
   const dl = task.deadline ? `<span class="c-dl ${task.risk?.overdue ? "overdue" : ""}">⏰ ${escapeHtml(fmtDeadline(task.deadline))}</span>` : "";
   const sc = task.sync.status === "synced" ? "ok" : (task.sync.status === "error" || task.sync.status === "conflict") ? "err" : "warn";
   const prio = task.risk?.overdue ? "p-overdue" : task.risk?.due_soon ? "p-soon" : (task.priority === "high" || task.priority === "urgent") ? "p-high" : "";

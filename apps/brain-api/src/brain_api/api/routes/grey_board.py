@@ -83,6 +83,7 @@ class TaskCommandConfirmRequest(BaseModel):
     assignee_id: UUID | None = None
     deadline: datetime | None = None
     priority: str = "medium"
+    status: str | None = None
 
 
 async def _team_access(
@@ -764,6 +765,7 @@ async def confirm_web_task(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     await _team_access(team_id, current_user, session)
+    status_value = body.status if body.status in DB_TASK_STATUSES else "todo"
     task = await _create_task_row(
         session,
         team_id=team_id,
@@ -774,6 +776,7 @@ async def confirm_web_task(
         priority=body.priority,
         source_message_id=None,
         source="manual",
+        status=status_value,
     )
     await session.commit()
     sync = await container.board_mirror.create_external_task(task.id)
@@ -797,6 +800,7 @@ async def _create_task_row(
     source: str,
     assignee_text: str | None = None,
     created_from_proposal_id: UUID | None = None,
+    status: str = "todo",
 ) -> m.TaskModel:
     seq, public_id = await next_task_public_id(session, team_id)
     assignee = await session.get(m.UserModel, assignee_id) if assignee_id else None
@@ -806,7 +810,7 @@ async def _create_task_row(
         team_id=team_id,
         title=title,
         description=description,
-        status="todo",
+        status=status if status in DB_TASK_STATUSES else "todo",
         priority=priority if priority in {"low", "medium", "high", "critical"} else "medium",
         assignee_id=assignee_id,
         assignee_text=assignee.display_name if assignee else assignee_text,
@@ -1010,6 +1014,7 @@ def _user_payload(user: m.UserModel | None) -> dict[str, Any] | None:
         "display_name": user.display_name,
         "telegram_username": user.telegram_username,
         "telegram_user_id": user.telegram_user_id,
+        "photo_data_url": user.photo_data_url,
     }
 
 
