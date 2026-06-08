@@ -13,9 +13,7 @@ async def test_grey_board_contract_matches_frontend(session_factory):
         company = m.CompanyModel(
             id=uuid4(), name="Acme", timezone="Europe/Moscow", created_by=user.id
         )
-        team = m.TeamModel(
-            id=uuid4(), company_id=company.id, name="Team", timezone="Europe/Moscow"
-        )
+        team = m.TeamModel(id=uuid4(), company_id=company.id, name="Team", timezone="Europe/Moscow")
         task = m.TaskModel(
             id=uuid4(),
             seq=1,
@@ -26,13 +24,15 @@ async def test_grey_board_contract_matches_frontend(session_factory):
             priority="medium",
             source="manual",
         )
-        session.add_all([
-            user,
-            company,
-            team,
-            m.TeamMemberModel(id=uuid4(), team_id=team.id, user_id=user.id, role="manager"),
-            task,
-        ])
+        session.add_all(
+            [
+                user,
+                company,
+                team,
+                m.TeamMemberModel(id=uuid4(), team_id=team.id, user_id=user.id, role="manager"),
+                task,
+            ]
+        )
         await session.commit()
 
         payload = await grey_board(team.id, user, session, "agent")
@@ -51,3 +51,54 @@ async def test_grey_board_contract_matches_frontend(session_factory):
     assert all({"id", "title", "cards", "tasks"} <= set(column) for column in payload["columns"])
     assert all(column["cards"] == column["tasks"] for column in payload["columns"])
     assert payload["groups"] == payload["columns"]
+
+
+@pytest.mark.asyncio
+async def test_grey_board_drag_drop_columns_use_api_safe_keys(session_factory):
+    async with session_factory() as session:
+        manager = m.UserModel(id=uuid4(), display_name="Manager", email="m@example.com")
+        employee = m.UserModel(id=uuid4(), display_name="Employee", email="e@example.com")
+        company = m.CompanyModel(
+            id=uuid4(), name="Acme", timezone="Europe/Moscow", created_by=manager.id
+        )
+        team = m.TeamModel(id=uuid4(), company_id=company.id, name="Team", timezone="Europe/Moscow")
+        task = m.TaskModel(
+            id=uuid4(),
+            seq=1,
+            public_id="GC-1",
+            team_id=team.id,
+            title="Task",
+            status="todo",
+            priority="medium",
+            assignee_id=employee.id,
+            assignee_text=employee.display_name,
+            source="manual",
+        )
+        session.add_all(
+            [
+                manager,
+                employee,
+                company,
+                team,
+                m.TeamMemberModel(id=uuid4(), team_id=team.id, user_id=manager.id, role="manager"),
+                m.TeamMemberModel(
+                    id=uuid4(), team_id=team.id, user_id=employee.id, role="employee"
+                ),
+                task,
+            ]
+        )
+        await session.commit()
+
+        status_payload = await grey_board(team.id, manager, session, "status")
+        people_payload = await grey_board(team.id, manager, session, "people")
+
+    assert [column["id"] for column in status_payload["columns"]] == [
+        "todo",
+        "in_progress",
+        "blocked",
+        "review",
+        "done",
+    ]
+    people_columns = {column["title"]: column["id"] for column in people_payload["columns"]}
+    assert people_columns["Employee"] == str(employee.id)
+    assert people_columns["Без исполнителя"] == "unassigned"

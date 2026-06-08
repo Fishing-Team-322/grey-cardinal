@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Grey Cardinal — саммари</title>
+<style>
+  :root{--bg:#0d0d0f;--card:#16161a;--line:#26262e;--txt:#ececf0;--muted:#8a8a93;--red:#ff003c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;padding:24px 16px}
+  .wrap{max-width:720px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:9px;margin-bottom:18px}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 10px var(--red)}
+  .brand b{letter-spacing:.5px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:14px}
+  h1{font-size:22px;margin:0 0 4px}
+  .when{color:var(--muted);font-size:13px;margin-bottom:14px}
+  h3{font-size:14px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:18px 0 8px}
+  .summary{font-size:16px;line-height:1.6}
+  ul{margin:6px 0;padding-left:20px}
+  li{margin:5px 0}
+  .ai{background:#1a1410;border:1px solid #3a2a18;border-radius:10px;padding:10px 14px}
+  .empty{color:var(--muted);text-align:center;padding:50px}
+  .muted{color:var(--muted);font-size:13px;margin-top:18px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="dot"></span><b>GREY CARDINAL</b></div>
+  <div id="content"><div class="empty">Загрузка…</div></div>
+  <div class="muted">Доступ по защищённой ссылке · grey cardinal</div>
+</div>
+<script>
+const esc=(s)=>(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function fmt(iso){ if(!iso) return ""; const d=new Date(iso); return d.toLocaleString("ru-RU",{day:"2-digit",month:"long",hour:"2-digit",minute:"2-digit"}); }
+function list(title,arr){ return (arr&&arr.length)?`<h3>${title}</h3><ul>${arr.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""; }
+
+async function load(){
+  const t=new URLSearchParams(location.search).get("t");
+  const el=document.getElementById("content");
+  if(!t){ el.innerHTML='<div class="empty">Нет токена</div>'; return; }
+  try{
+    const r=await fetch(`/api/public/share/${encodeURIComponent(t)}`);
+    if(!r.ok) throw new Error("404");
+    const d=await r.json();
+    const p=d.payload||{};
+    if(d.kind==="meeting"){
+      el.innerHTML=`<div class="card">
+        <h1>📝 ${esc(p.title||d.title||"Созвон")}</h1>
+        <div class="when">${esc(fmt(p.when||d.created_at))}</div>
+        <div class="summary ai">${esc(p.summary||"")}</div>
+        ${list("Главное",p.highlights)}
+        ${list("Решения",p.decisions)}
+        ${list("Задачи",p.action_items)}
+        <div class="muted" style="text-align:left">Реплик в транскрипте: ${p.transcript_lines||0}</div>
+      </div>`;
+    } else if(d.kind==="digest"){
+      el.innerHTML=`<div class="card">
+        <h1>🌙 ${esc(d.title||"Вечерний дайджест")}</h1>
+        <div class="when">${esc(fmt(d.created_at))}</div>
+        ${list("Активные задачи",p.active)}
+        ${list("Просрочено",p.overdue)}
+        ${list("Закрыто сегодня",p.closed)}
+        ${p.text?`<div class="summary">${esc(p.text)}</div>`:""}
+      </div>`;
+    } else {
+      el.innerHTML=`<div class="card"><h1>${esc(d.title||"")}</h1><pre>${esc(JSON.stringify(p,null,2))}</pre></div>`;
+    }
+  }catch(e){ el.innerHTML='<div class="empty">Ссылка недействительна или устарела.</div>'; }
+}
+load();
+</script>
+</body>
+</html>

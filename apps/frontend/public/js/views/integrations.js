@@ -18,11 +18,11 @@ export default async function integrationsView(root) {
     ${row("Командный Telegram", teamTelegram.linked, "/app/integrations/telegram", team?.name || "")}
     ${row("YouGile", yougile.connected, "/app/integrations/yougile", team?.name || "")}
     ${row("LLM (семантика)", llm.status === "ok", "/app/integrations/llm", llm.primary?.provider || "")}
-    ${row("Windows Agent", agents.agents.length > 0, "/app/integrations/daemon", `${agents.agents.length} устройств`)}
-    ${row("Yandex Telemost", telemost.connected, "/app/integrations/telemost", telemost.status || "")}
+    ${row("Windows-агент", agents.agents.length > 0, "/app/integrations/daemon", `${agents.agents.length} устройств`)}
+    ${row("Яндекс Телемост", telemost.connected, "/app/integrations/telemost", telemost.status || "")}
   </div>`;
 }
 
 function row(name, connected, href, detail) {
-  return `<a class="integration-row" href="${href}"><span><b>${name}</b>${detail ? `<span class="meta">${detail}</span>` : ""}</span><span class="pill ${connected ? "ok" : "warn"}"><span class="dot"></span>${connected ? "connected" : "настроить"}</span></a>`;
+  return `<a class="integration-row" href="${href}"><span><b>${name}</b>${detail ? `<span class="meta">${detail}</span>` : ""}</span><span class="pill ${connected ? "ok" : "warn"}"><span class="dot"></span>${connected ? "подключено" : "настроить"}</span></a>`;
 }

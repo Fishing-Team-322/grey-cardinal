@@ -52,7 +52,7 @@ function render(root, overview, companyId) {
       </div>`).join("") || emptyState("Команд пока нет", "Создайте первую команду компании.")}
     </div>
     <div class="card card-pad mt-24">
-      <div class="card-head"><div class="card-title">Risk Radar</div><span class="pill ${hotspots.length ? "warn" : "ok"}"><span class="dot"></span>${hotspots.length}</span></div>
+      <div class="card-head"><div class="card-title">Риски</div><span class="pill ${hotspots.length ? "warn" : "ok"}"><span class="dot"></span>${hotspots.length}</span></div>
       ${hotspots.length ? hotspots.map((hotspot) => `<div class="note warn mt-8">${escapeHtml(hotspot.message)}</div>`).join("") : '<div class="dim">Активных рисков не обнаружено.</div>'}
     </div>`;
   root.querySelector("#create-team").onclick = () => openTeamModal(root, companyId, overview.company.timezone);

@@ -24,7 +24,7 @@ export default async function employeeView(root) {
       <div class="stat"><div class="stat-label">Мой XP</div><div class="stat-value mono">${gamification?.xp ?? 0}</div></div>
       <div class="stat"><div class="stat-label">Позиция</div><div class="stat-value mono">${gamification?.rank ?? "—"}</div></div>
       <div class="stat"><div class="stat-label">Созвонов</div><div class="stat-value mono">${meetings.length}</div></div>
-      <div class="stat"><div class="stat-label">Windows Agent</div><div class="stat-value" style="font-size:20px">${agents.agents.some((agent) => agent.online) ? "Online" : "Offline"}</div></div>
+      <div class="stat"><div class="stat-label">Windows-агент</div><div class="stat-value" style="font-size:20px">${agents.agents.some((agent) => agent.online) ? "Онлайн" : "Офлайн"}</div></div>
     </div>
     <div class="grid g2 mt-20">
       <div class="card card-pad"><div class="card-head"><div class="card-title">Мои задачи</div></div>

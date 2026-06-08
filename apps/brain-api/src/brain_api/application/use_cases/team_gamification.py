@@ -226,6 +226,7 @@ async def team_leaderboard_payload(session: AsyncSession, team_id: UUID) -> dict
                 "user_id": str(user.id),
                 "display_name": user.display_name,
                 "telegram_username": user.telegram_username,
+                "photo_data_url": user.photo_data_url,
                 "role": role,
                 "points": points,
                 "level": level_for_points(points),

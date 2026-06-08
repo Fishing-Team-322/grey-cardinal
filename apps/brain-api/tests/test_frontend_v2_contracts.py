@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -13,7 +14,10 @@ from brain_api.api.routes.v2_tenants import (
     company_leaderboard,
     list_team_members,
     list_team_tasks,
+    remove_team_member,
     task_status_response,
+    update_team_member_role,
+    TeamMemberRoleRequest,
 )
 from brain_api.infrastructure.auth.jwt import hash_password, verify_password
 from brain_api.infrastructure.db import models as m
@@ -76,14 +80,45 @@ async def _seed(session):
 async def test_members_and_tasks_are_tenant_scoped(session_factory):
     async with session_factory() as session:
         director, employee, outsider, _, team, _ = await _seed(session)
+        session.add(
+            m.DeviceModel(
+                id=uuid4(),
+                user_id=employee.id,
+                device_name="Employee PC",
+                platform="windows",
+                last_seen_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
         members = await list_team_members(team.id, employee, session)
         tasks = await list_team_tasks(team.id, employee, None, "me", session)
         with pytest.raises(HTTPException) as exc:
             await list_team_members(team.id, outsider, session)
 
     assert {item["role"] for item in members["items"]} == {"manager", "employee"}
+    assert any(item["online"] and item["last_seen_at"] for item in members["items"])
     assert tasks["items"][0]["assignee_id"] == str(employee.id)
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_director_can_manage_team_member_roles(session_factory):
+    async with session_factory() as session:
+        director, employee, _, _, team, _ = await _seed(session)
+
+        promoted = await update_team_member_role(
+            team.id,
+            employee.id,
+            TeamMemberRoleRequest(role="manager"),
+            director,
+            session,
+        )
+        removed = await remove_team_member(team.id, employee.id, director, session)
+        members = await list_team_members(team.id, director, session)
+
+    assert promoted["role"] == "manager"
+    assert removed is None
+    assert {item["id"] for item in members["items"]} == {str(director.id)}
 
 
 @pytest.mark.asyncio

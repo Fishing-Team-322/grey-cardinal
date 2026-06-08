@@ -9,7 +9,7 @@
   <script type="module">
     import { api } from "/js/api.js";
     const card = document.getElementById("invite-card");
-    const token = new URLSearchParams(location.search).get("token");
+    const token = new URLSearchParams(location.search).get("token") || new URLSearchParams(location.search).get("invite");
     try {
       const invite = await api.invites.preview(token);
       if (invite.expired || invite.uses >= invite.max_uses) throw new Error();

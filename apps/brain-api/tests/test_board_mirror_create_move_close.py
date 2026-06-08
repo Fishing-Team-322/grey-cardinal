@@ -80,9 +80,7 @@ async def test_board_mirror_creates_link_and_moves_task(session_factory):
     assert moved.ok is True
     async with session_factory() as session:
         link = await session.scalar(
-            select(m.ExternalTaskLinkModel).where(
-                m.ExternalTaskLinkModel.task_id == task_id
-            )
+            select(m.ExternalTaskLinkModel).where(m.ExternalTaskLinkModel.task_id == task_id)
         )
         task = await session.get(m.TaskModel, task_id)
         assert link is not None
@@ -156,6 +154,56 @@ async def test_board_mirror_updates_existing_task_without_duplicate(session_fact
     assert fake.created["task"] == []
     assert fake.created["task_update"][0]["id"] == "existing-task"
     assert fake.created["task_update"][0]["title"] == "GC-2 Новая формулировка"
+
+
+@pytest.mark.asyncio
+async def test_board_mirror_move_existing_link_without_selected_board_is_local_only(
+    session_factory,
+):
+    settings = Settings(llm_provider="disabled", yougile_api_base_url="https://example.invalid")
+    async with session_factory() as session:
+        owner = m.UserModel(id=uuid4(), display_name="Owner")
+        company = m.CompanyModel(
+            id=uuid4(), name="Acme", timezone="Europe/Moscow", created_by=owner.id
+        )
+        team = m.TeamModel(id=uuid4(), company_id=company.id, name="Team", timezone="Europe/Moscow")
+        task = m.TaskModel(
+            id=uuid4(),
+            seq=4,
+            public_id="GC-4",
+            team_id=team.id,
+            title="Move locally",
+            status="todo",
+            priority="medium",
+            source="manual",
+        )
+        link = m.ExternalTaskLinkModel(
+            id=uuid4(),
+            team_id=team.id,
+            task_id=task.id,
+            provider="yougile",
+            external_board_id="missing-board",
+            external_task_id="existing-task",
+            sync_status="synced",
+        )
+        session.add_all([owner, company, team, task, link])
+        await session.commit()
+        task_id = task.id
+
+    mirror = BoardMirrorService(session_factory, settings)
+    result = await mirror.move_task(task_id, TaskStatus.in_progress)
+
+    assert result.sync_status == "local_only"
+    assert result.error == "YouGile is not connected"
+    async with session_factory() as session:
+        task = await session.get(m.TaskModel, task_id)
+        link = await session.scalar(
+            select(m.ExternalTaskLinkModel).where(m.ExternalTaskLinkModel.task_id == task_id)
+        )
+        assert task is not None
+        assert task.status == TaskStatus.in_progress.value
+        assert link is not None
+        assert link.sync_status == "local_only"
 
 
 @pytest.mark.asyncio

@@ -95,6 +95,12 @@ export const api = {
     members(id) {
       return request("GET", `/api/teams/${id}/members`);
     },
+    updateMemberRole(teamId, userId, role) {
+      return request("PATCH", `/api/teams/${teamId}/members/${userId}`, { body: { role } });
+    },
+    removeMember(teamId, userId) {
+      return request("DELETE", `/api/teams/${teamId}/members/${userId}`);
+    },
     invite(team, role) {
       return request("POST", `/api/companies/${team.company_id}/invites`, {
         body: { scope: "team", team_id: team.id, role },
@@ -235,6 +241,15 @@ export const api = {
     get(teamId, view) {
       return request("GET", `/api/teams/${teamId}/grey-board`, { query: { view } });
     },
+    kanbanConfig(teamId) {
+      return request("GET", `/api/teams/${teamId}/kanban-config`);
+    },
+    saveKanbanConfig(teamId, columns) {
+      return request("PUT", `/api/teams/${teamId}/kanban-config`, { body: { columns } });
+    },
+    createTask(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/task-command/confirm`, { body });
+    },
   },
   aiInbox: {
     list(teamId) {
@@ -248,6 +263,20 @@ export const api = {
     },
     assign(itemId, userId) {
       return request("POST", `/api/ai-inbox/${itemId}/assign`, { body: { user_id: userId } });
+    },
+  },
+  people: {
+    me() {
+      return request("GET", "/api/users/me/profile");
+    },
+    profile(userId) {
+      return request("GET", `/api/users/me/profile`, { query: { user_id: userId } });
+    },
+    team(teamId) {
+      return request("GET", `/api/teams/${teamId}/people`);
+    },
+    update(body) {
+      return request("PATCH", "/api/auth/me", { body });
     },
   },
   leaderboards: {

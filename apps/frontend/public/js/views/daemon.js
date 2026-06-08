@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { escapeHtml, formatDate, setTopbar, toast } from "../view-utils.js";
 
 export default async function daemonView(root) {
-  setTopbar("Windows Agent");
+  setTopbar("Windows-агент");
   const content = root.querySelector("#daemon-content");
   let timer;
   let pairing = null;
@@ -13,7 +13,7 @@ export default async function daemonView(root) {
       <div class="card card-pad"><div class="card-head"><div class="card-title">Установка</div></div>
         <p class="dim">Windows-агент работает в трее. Запись запускается и останавливается только вручную из меню агента.</p>
         <a class="btn btn-primary mt-16" href="/downloads/GreyCardinalAgent-x64.msi?v=0.6.5" download>Скачать MSI для Windows</a>
-        <p class="faint mt-12">Установите MSI, запустите Grey Cardinal Agent из меню «Пуск», затем откройте значок в трее и выберите «Привязать по коду».</p>
+        <p class="faint mt-12">Установите MSI, запустите Windows-агент Grey Cardinal из меню «Пуск», затем откройте значок в трее и выберите «Привязать по коду».</p>
         <button class="btn btn-ghost mt-16" id="pair-agent">Получить код привязки</button>
         <div id="pairing-code" class="mt-16">${pairing ? pairingHtml(pairing) : ""}</div>
       </div>

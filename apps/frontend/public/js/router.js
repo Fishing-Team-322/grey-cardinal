@@ -9,6 +9,33 @@ function compile(pattern) {
   return { regex: new RegExp(`^${source || "/"}\\/?$`), keys };
 }
 
+function normalizePath(path) {
+  return (path || "/").replace(/\/+$/, "") || "/";
+}
+
+function pathFromHref(href) {
+  try {
+    return normalizePath(new URL(href, location.origin).pathname);
+  } catch {
+    return "";
+  }
+}
+
+function isNavItemActive(item, match, path) {
+  const current = normalizePath(path);
+  const pattern = item.dataset.route || "";
+  if (pattern) {
+    if (pattern === match.route.pattern) return true;
+    if (compile(pattern).regex.test(current)) return true;
+  }
+
+  const hrefPath = pathFromHref(item.getAttribute("href") || "");
+  if (hrefPath && hrefPath === current) return true;
+  if (hrefPath === "/app/employee" && current === "/app/me") return true;
+  if (hrefPath === "/app/meetings" && current.startsWith("/app/meetings/")) return true;
+  return false;
+}
+
 export const Router = {
   routes: [],
   current: null,
@@ -92,7 +119,7 @@ export const Router = {
       view: match.route.view,
     };
     document.querySelectorAll(".nav-item").forEach((item) => {
-      item.classList.toggle("active", item.dataset.route === match.route.pattern);
+      item.classList.toggle("active", isNavItemActive(item, match, location.pathname));
     });
     window.scrollTo?.(0, 0);
   },

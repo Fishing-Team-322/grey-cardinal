@@ -43,11 +43,36 @@ class SendEveningDigest:
         if await self._uow.digests.sent_today(chat_id, now):
             return 0
         text = await self._build_text(now)
-        await self._telegram.send_message(chat_id, text)
+        message = await self._linkify(chat_id, text)
+        await self._telegram.send_message(chat_id, message)
         await self._log(chat_id, text)
         await self._uow.commit()
         logger.info("Evening digest sent to chat %s", chat_id)
         return 1
+
+    async def _linkify(self, chat_id: int, text: str) -> str:
+        """Store the digest as a token-gated page; return a short message + link."""
+        session = getattr(self._uow, "_session", None)
+        if session is None:
+            return text
+        try:
+            from brain_api.application.use_cases.meeting_summary import (
+                create_share_link,
+                public_base,
+            )
+
+            token = await create_share_link(
+                session,
+                kind="digest",
+                team_id=None,
+                ref_id=None,
+                title="Вечерний дайджест",
+                payload={"text": text},
+            )
+            base = public_base(self._config) if hasattr(self._config, "public_base_url") else "https://fishingteam.su"
+            return f"🌙 Вечерний дайджест готов\n\n🔗 Открыть: {base}/s.html?t={token}"
+        except Exception:  # noqa: BLE001
+            return text
 
     async def as_actions(self, chat_id: int) -> ActionsResponse:
         """Запуск командой /digest: возвращает текст как ответ бота."""

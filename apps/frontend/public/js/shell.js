@@ -1,7 +1,8 @@
-import { Router } from "./router.js";
+import { Router } from "./router.js?v=20260608-2";
 import { getCurrentUser, guardFor, homeForUser, roleForUser } from "./auth.js";
 import { appStore } from "./store.js";
-import { wsConnect } from "./ws.js";
+import { wsConnect, wsOn } from "./ws.js";
+import { toast } from "./view-utils.js";
 
 import director from "./views/director.js";
 import companies from "./views/companies.js";
@@ -21,6 +22,7 @@ import settings from "./views/settings.js";
 import deploy from "./views/deploy.js";
 import board from "./views/board.js";
 import aiInbox from "./views/ai-inbox.js";
+import onboarding from "./views/onboarding.js";
 import { teamMapView, setupView, profileView } from "./views/agentic.js";
 
 function ensureMobileMenu() {
@@ -32,6 +34,28 @@ function ensureMobileMenu() {
   button.setAttribute("aria-label", "Открыть меню");
   button.innerHTML = window.gcIcon("menu");
   topbar.prepend(button);
+}
+
+function bindCabinetNotifications(user) {
+  const myId = String(user.id || "");
+  const myName = (user.display_name || user.login || "").trim().toLowerCase();
+  const myTeams = new Set((user.teams || []).map((team) => String(team.id)));
+  wsOn("task_assigned", (payload) => {
+    if (payload?.assignee_id && String(payload.assignee_id) !== myId) return;
+    toast(`Вам назначили задачу: ${payload?.public_id || ""} ${payload?.title || ""}`.trim(), "info");
+  });
+  wsOn("task_created", (payload) => {
+    const assignee = String(payload?.assignee || "").trim().toLowerCase();
+    if (!assignee || !myName || assignee !== myName) return;
+    toast(`Новая задача на вас: ${payload?.public_id || ""} ${payload?.title || ""}`.trim(), "info");
+  });
+  wsOn("meeting_reminder", (payload) => {
+    if (payload?.team_id && !myTeams.has(String(payload.team_id))) return;
+    toast(`Скоро созвон: ${payload?.title || payload?.public_id || "встреча"}`, "info");
+  });
+  wsOn("reminder_sent", (payload) => {
+    if (payload?.kind === "deadline") toast(`Скоро дедлайн: ${payload?.public_id || "задача"}`, "warn");
+  });
 }
 
 const topbar = document.getElementById("app-topbar");
@@ -62,6 +86,7 @@ async function boot() {
   appStore.state.selectedTeamId = user.teams?.[0]?.id || null;
   window.gcSidebar(user, roleForUser(user));
   wsConnect();
+  bindCabinetNotifications(user);
 
   Router.register("/app/companies", "/partials/companies.html", companies, guardFor("director"));
   Router.register("/app/companies/:id", "/partials/director.html", director, guardFor("director"));
@@ -88,8 +113,13 @@ async function boot() {
   Router.register("/app/deploy", "/partials/deploy.html", deploy, guardFor("director"));
   Router.register("/app/people/:userId", "/partials/agentic.html", profileView);
   Router.register("/app/me", "/partials/agentic.html", profileView);
+  Router.register("/app/welcome", "/partials/onboarding.html", onboarding);
 
-  if (location.pathname === "/app" || location.pathname === "/app/") {
+  // First-run: a user with no company and no team is sent to onboarding.
+  const needsOnboarding = !(user.companies || []).length && !(user.teams || []).length;
+  if (needsOnboarding && !location.pathname.startsWith("/app/welcome")) {
+    await Router.navigate("/app/welcome", true);
+  } else if (location.pathname === "/app" || location.pathname === "/app/") {
     await Router.navigate(homeForUser(user), true);
   } else {
     await Router.start();

@@ -29,6 +29,8 @@ from brain_api.infrastructure.db import models as m
 
 router = APIRouter(tags=["grey-board"])
 
+DB_TASK_STATUSES = {"todo", "in_progress", "blocked", "review", "done", "cancelled"}
+
 
 class MoveTaskRequest(BaseModel):
     status: TaskStatus
@@ -36,6 +38,27 @@ class MoveTaskRequest(BaseModel):
 
 class AssignTaskRequest(BaseModel):
     user_id: UUID | None = None
+
+
+_DEFAULT_KANBAN_COLUMNS = [
+    {"status": "todo", "label": "К выполнению", "color": "#3a7afe", "visible": True},
+    {"status": "in_progress", "label": "В работе", "color": "#f1c40f", "visible": True},
+    {"status": "review", "label": "На проверке", "color": "#a06bff", "visible": True},
+    {"status": "blocked", "label": "Заблокировано", "color": "#ff003c", "visible": False},
+    {"status": "done", "label": "Готово", "color": "#2ecc71", "visible": True},
+    {"status": "cancelled", "label": "Отменено", "color": "#6a6a73", "visible": False},
+]
+
+
+class KanbanColumn(BaseModel):
+    status: str
+    label: str
+    color: str = "#6a6a73"
+    visible: bool = True
+
+
+class KanbanConfigRequest(BaseModel):
+    columns: list[KanbanColumn]
 
 
 class DeadlineRequest(BaseModel):
@@ -60,6 +83,7 @@ class TaskCommandConfirmRequest(BaseModel):
     assignee_id: UUID | None = None
     deadline: datetime | None = None
     priority: str = "medium"
+    status: str | None = None
 
 
 async def _team_access(
@@ -197,6 +221,8 @@ async def move_task(
     container: Container = Depends(get_container),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    if body.status.value not in DB_TASK_STATUSES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported task status")
     task = await session.get(m.TaskModel, task_id)
     if task is None or task.team_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
@@ -249,6 +275,20 @@ async def assign_task(
         link.sync_status = "pending_update"
     await session.commit()
     sync = await container.board_mirror.sync_task_fields(task.id)
+    await container.websocket_manager.broadcast(
+        {
+            "event": "task_assigned",
+            "payload": {
+                "task_id": str(task.id),
+                "public_id": task.public_id,
+                "title": task.title,
+                "team_id": str(task.team_id),
+                "assignee_id": str(user.id) if user else None,
+                "assignee_name": user.display_name if user else None,
+                "actor_id": str(current_user.id),
+            },
+        }
+    )
     return {
         "task_id": str(task.id),
         "assignee": _user_payload(user),
@@ -313,7 +353,7 @@ class CommentBody(BaseModel):
     body: str
 
 
-def _comment_payload(c: "m.TaskCommentModel") -> dict[str, Any]:
+def _comment_payload(c: m.TaskCommentModel) -> dict[str, Any]:
     return {
         "id": str(c.id),
         "body": c.body,
@@ -368,6 +408,51 @@ async def add_comment(
     await session.commit()
     await session.refresh(comment)
     return _comment_payload(comment)
+
+
+@router.get("/api/teams/{team_id}/kanban-config")
+async def get_kanban_config(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _team_access(team_id, current_user, session)
+    team = await session.get(m.TeamModel, team_id)
+    columns = (team.board_config or {}).get("kanban_columns") if team else None
+    return {"columns": columns or _DEFAULT_KANBAN_COLUMNS}
+
+
+@router.put("/api/teams/{team_id}/kanban-config")
+async def put_kanban_config(
+    team_id: UUID,
+    body: KanbanConfigRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    seen: set[str] = set()
+    cleaned: list[dict[str, Any]] = []
+    for col in body.columns:
+        if col.status not in DB_TASK_STATUSES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid status {col.status}")
+        if col.status in seen:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Duplicate status {col.status}")
+        seen.add(col.status)
+        cleaned.append({
+            "status": col.status,
+            "label": col.label.strip()[:40] or col.status,
+            "color": col.color[:9],
+            "visible": bool(col.visible),
+        })
+    if not any(c["visible"] for c in cleaned):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "At least one column must be visible")
+    team = await session.get(m.TeamModel, team_id)
+    config = dict(team.board_config or {})
+    config["kanban_columns"] = cleaned
+    team.board_config = config
+    await session.commit()
+    return {"columns": cleaned}
 
 
 @router.get("/api/teams/{team_id}/ai-inbox")
@@ -694,6 +779,7 @@ async def confirm_web_task(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     await _team_access(team_id, current_user, session)
+    status_value = body.status if body.status in DB_TASK_STATUSES else "todo"
     task = await _create_task_row(
         session,
         team_id=team_id,
@@ -704,6 +790,7 @@ async def confirm_web_task(
         priority=body.priority,
         source_message_id=None,
         source="manual",
+        status=status_value,
     )
     await session.commit()
     sync = await container.board_mirror.create_external_task(task.id)
@@ -727,6 +814,7 @@ async def _create_task_row(
     source: str,
     assignee_text: str | None = None,
     created_from_proposal_id: UUID | None = None,
+    status: str = "todo",
 ) -> m.TaskModel:
     seq, public_id = await next_task_public_id(session, team_id)
     assignee = await session.get(m.UserModel, assignee_id) if assignee_id else None
@@ -736,7 +824,7 @@ async def _create_task_row(
         team_id=team_id,
         title=title,
         description=description,
-        status="todo",
+        status=status if status in DB_TASK_STATUSES else "todo",
         priority=priority if priority in {"low", "medium", "high", "critical"} else "medium",
         assignee_id=assignee_id,
         assignee_text=assignee.display_name if assignee else assignee_text,
@@ -818,7 +906,6 @@ def _task_card(
 def _group_cards(view: str, cards: list[dict[str, Any]]):
     if view == "status":
         spec = [
-            ("backlog", "Backlog"),
             ("todo", "Todo"),
             ("in_progress", "In Progress"),
             ("blocked", "Blocked"),
@@ -830,21 +917,26 @@ def _group_cards(view: str, cards: list[dict[str, Any]]):
             for key, title in spec
         ]
     if view == "people":
-        names = sorted(
-            {card["assignee"]["display_name"] for card in cards if card["assignee"]}
+        assignees = sorted(
+            {
+                (card["assignee"]["id"], card["assignee"]["display_name"])
+                for card in cards
+                if card["assignee"]
+            },
+            key=lambda item: item[1].lower(),
         )
         result = [
             (
-                name,
-                name,
+                user_id,
+                display_name,
                 [
                     card
                     for card in cards
                     if card["assignee"]
-                    and card["assignee"]["display_name"] == name
+                    and card["assignee"]["id"] == user_id
                 ],
             )
-            for name in names
+            for user_id, display_name in assignees
         ]
         result.append(
             ("unassigned", "Без исполнителя", [card for card in cards if not card["assignee"]])
@@ -936,6 +1028,7 @@ def _user_payload(user: m.UserModel | None) -> dict[str, Any] | None:
         "display_name": user.display_name,
         "telegram_username": user.telegram_username,
         "telegram_user_id": user.telegram_user_id,
+        "photo_data_url": user.photo_data_url,
     }
 
 
