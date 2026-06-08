@@ -29,6 +29,8 @@ from brain_api.infrastructure.db import models as m
 
 router = APIRouter(tags=["grey-board"])
 
+DB_TASK_STATUSES = {"todo", "in_progress", "blocked", "review", "done", "cancelled"}
+
 
 class MoveTaskRequest(BaseModel):
     status: TaskStatus
@@ -197,6 +199,8 @@ async def move_task(
     container: Container = Depends(get_container),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    if body.status.value not in DB_TASK_STATUSES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported task status")
     task = await session.get(m.TaskModel, task_id)
     if task is None or task.team_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
@@ -313,7 +317,7 @@ class CommentBody(BaseModel):
     body: str
 
 
-def _comment_payload(c: "m.TaskCommentModel") -> dict[str, Any]:
+def _comment_payload(c: m.TaskCommentModel) -> dict[str, Any]:
     return {
         "id": str(c.id),
         "body": c.body,
@@ -818,7 +822,6 @@ def _task_card(
 def _group_cards(view: str, cards: list[dict[str, Any]]):
     if view == "status":
         spec = [
-            ("backlog", "Backlog"),
             ("todo", "Todo"),
             ("in_progress", "In Progress"),
             ("blocked", "Blocked"),
@@ -830,21 +833,26 @@ def _group_cards(view: str, cards: list[dict[str, Any]]):
             for key, title in spec
         ]
     if view == "people":
-        names = sorted(
-            {card["assignee"]["display_name"] for card in cards if card["assignee"]}
+        assignees = sorted(
+            {
+                (card["assignee"]["id"], card["assignee"]["display_name"])
+                for card in cards
+                if card["assignee"]
+            },
+            key=lambda item: item[1].lower(),
         )
         result = [
             (
-                name,
-                name,
+                user_id,
+                display_name,
                 [
                     card
                     for card in cards
                     if card["assignee"]
-                    and card["assignee"]["display_name"] == name
+                    and card["assignee"]["id"] == user_id
                 ],
             )
-            for name in names
+            for user_id, display_name in assignees
         ]
         result.append(
             ("unassigned", "Без исполнителя", [card for card in cards if not card["assignee"]])

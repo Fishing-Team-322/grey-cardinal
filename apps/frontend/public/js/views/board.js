@@ -74,7 +74,7 @@ function injectStyles() {
   .board-toolbar2 .chip.on{border-color:#ff003c;color:#fff;background:#1c1216}
   .board-hidden{display:none!important}
   /* Centered, scrollable detail panel */
-  dialog.task-dialog{position:fixed;inset:0;margin:auto;width:min(620px,calc(100vw - 24px));
+  dialog.task-dialog{position:fixed;inset:0;margin:auto;width:min(720px,calc(100vw - 24px));
     max-height:90vh;overflow:auto;border:1px solid #26262e;border-radius:16px;background:#141418;color:#ececf0;padding:0}
   dialog.task-dialog::backdrop{background:rgba(0,0,0,.72)}
   .task-panel{padding:22px}
@@ -82,6 +82,9 @@ function injectStyles() {
   .tp-status-row select,.task-edit-grid select,.task-edit-grid input{padding:8px 10px;border-radius:9px;border:1px solid #2a2a33;background:#1a1a1f;color:inherit}
   .task-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0 14px}
   .task-edit-grid label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:#9a9aa3}
+  .task-details{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px 12px;margin:16px 0 0;padding:14px 0;border-block:1px solid #232329;font-size:13px}
+  .task-details dt{color:#9a9aa3}
+  .task-details dd{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
   .task-comments{margin-top:16px;border-top:1px solid #232329;padding-top:12px}
   .task-comments h4{margin:0 0 10px}
   .comments-list{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto;margin-bottom:10px}
@@ -210,6 +213,11 @@ export default async function boardView(root, params, query) {
         const target = col.dataset.colKey;
         const dragged = content.querySelector(`.gc-card[data-task-id="${taskId}"]`);
         if (!dragged || dragged.dataset.colKey === target) return;
+        if (mode === "move" && !ALLOWED_STATUSES.has(target)) {
+          toast("Нельзя перенести в этот статус");
+          await load();
+          return;
+        }
         col.querySelector(".board-stack")?.appendChild(dragged);
         dragged.dataset.colKey = target;
         try {
@@ -248,11 +256,11 @@ function renderColumn(column, collapsed, view) {
   const droppable = DROP_VIEWS[view] ? `data-col-key="${escapeAttr(key)}"` : "";
   return `<section class="board-column ${collapsed.has(key) ? "collapsed" : ""}" ${droppable}>
     <header>${dot}<span>${escapeHtml(title)}</span><span class="count">${cards.length}</span>${overdue ? `<span class="count" title="просрочено">⏰${overdue}</span>` : ""}<span class="col-collapse" title="Свернуть">▾</span></header>
-    <div class="board-stack">${cards.length ? cards.map(renderCard).join("") : '<div class="board-empty">Пусто</div>'}</div>
+    <div class="board-stack">${cards.length ? cards.map((card) => renderCard(card, key)).join("") : '<div class="board-empty">Пусто</div>'}</div>
   </section>`;
 }
 
-function renderCard(task) {
+function renderCard(task, columnKey = null) {
   if (task.is_inbox) {
     return `<div class="gc-card" data-inbox="${escapeAttr(task.id)}">
       <div class="c-top"><span class="c-pid">AI Inbox</span><span class="c-src">${escapeHtml(task.kind)}</span></div>
@@ -267,7 +275,7 @@ function renderCard(task) {
   const prio = task.risk?.overdue ? "p-overdue" : task.risk?.due_soon ? "p-soon" : (task.priority === "high" || task.priority === "urgent") ? "p-high" : "";
   const mine = currentUserId && task.assignee?.id === currentUserId ? "1" : "0";
   const searchText = `${task.public_id} ${task.title} ${aName} ${task.status}`.toLowerCase();
-  return `<div class="gc-card ${prio}" data-task-id="${escapeAttr(task.id)}" data-col-key="${escapeAttr(task.status)}" data-mine="${mine}" data-search="${escapeAttr(searchText)}" data-task='${escapeAttr(JSON.stringify(task))}'>
+  return `<div class="gc-card ${prio}" data-task-id="${escapeAttr(task.id)}" data-col-key="${escapeAttr(columnKey || task.status)}" data-mine="${mine}" data-search="${escapeAttr(searchText)}" data-task='${escapeAttr(JSON.stringify(task))}'>
     <button class="c-copy" data-copy="${escapeAttr(task.public_id)}" title="Скопировать ID">📋</button>
     <div class="c-top"><span class="c-pid">${escapeHtml(task.public_id)}</span><span class="c-src">${escapeHtml(task.source)}</span></div>
     <div class="c-title">${escapeHtml(task.title)}</div>
@@ -284,7 +292,7 @@ function openTask(root, task, members, reload) {
   ].join("");
   const statusOptions = STATUS_ORDER.map((s) => `<option value="${s}" ${task.status === s ? "selected" : ""}>${STATUS_RU[s]}</option>`).join("");
   const deadlineValue = task.deadline ? new Date(task.deadline).toISOString().slice(0, 16) : "";
-  dialog.innerHTML = `<form method="dialog" class="task-panel">
+  dialog.innerHTML = `<div class="task-panel">
     <header><div><div class="c-pid" style="font-size:12px">${escapeHtml(task.public_id)}</div><h3 style="margin:6px 0 0">${escapeHtml(task.title)}</h3></div><button class="icon-close" aria-label="Закрыть" type="button">×</button></header>
     <div class="tp-status-row">
       <label style="color:#9a9aa3;font-size:13px">Статус</label>
@@ -300,20 +308,18 @@ function openTask(root, task, members, reload) {
       <button type="button" class="btn btn-sm btn-ghost" id="ask-status">Спросить статус</button>
       ${task.sync.external_url ? `<a class="btn btn-sm btn-ghost" href="${escapeAttr(task.sync.external_url)}" target="_blank" rel="noreferrer">Открыть в YouGile</a>` : ""}
     </div>
-    <dl class="task-details" style="margin-top:14px;font-size:13px">
-      <div style="display:grid;grid-template-columns:140px 1fr;gap:6px 10px">
-        <dt style="color:#9a9aa3">Источник</dt><dd>${escapeHtml(task.source)}</dd>
-        <dt style="color:#9a9aa3">Confidence</dt><dd>${task.confidence == null ? "—" : `${Math.round(task.confidence * 100)}%`}</dd>
-        <dt style="color:#9a9aa3">Исходное сообщение</dt><dd>${escapeHtml(task.evidence?.raw_text || "—")}</dd>
-        <dt style="color:#9a9aa3">YouGile</dt><dd class="${task.sync.status === "error" ? "accent-text" : ""}">${escapeHtml(task.sync.status)}${task.sync.error ? `<br>${escapeHtml(task.sync.error)}` : ""}</dd>
-      </div>
+    <dl class="task-details">
+      <dt>Источник</dt><dd>${escapeHtml(task.source)}</dd>
+      <dt>Confidence</dt><dd>${task.confidence == null ? "—" : `${Math.round(task.confidence * 100)}%`}</dd>
+      <dt>Исходное сообщение</dt><dd>${escapeHtml(task.evidence?.raw_text || "—")}</dd>
+      <dt>YouGile</dt><dd class="${task.sync.status === "error" ? "accent-text" : ""}">${escapeHtml(task.sync.status)}${task.sync.error ? `<br>${escapeHtml(task.sync.error)}` : ""}</dd>
     </dl>
     <section class="task-comments">
       <h4>💬 Комментарии</h4>
       <div id="comments-list" class="comments-list"><div class="view-loading">Загрузка…</div></div>
       <form id="comment-form" class="comment-form"><input id="comment-input" type="text" placeholder="Написать комментарий…" autocomplete="off"><button type="submit" class="btn btn-sm btn-primary">Отправить</button></form>
     </section>
-  </form>`;
+  </div>`;
 
   dialog.querySelector(".icon-close").onclick = () => dialog.close();
   dialog.querySelector("#apply-status").onclick = async () => {

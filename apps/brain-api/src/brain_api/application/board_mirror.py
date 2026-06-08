@@ -202,7 +202,23 @@ class BoardMirrorService:
             if link is None or link.external_task_id.startswith("pending:"):
                 await session.commit()
                 return await self.create_external_task(task.id)
-            context = await self._context(session, task.team_id)
+            try:
+                context = await self._context(session, task.team_id)
+            except RuntimeError as exc:
+                link.sync_status = "local_only"
+                link.last_error = str(exc)
+                self._event(
+                    session,
+                    task.team_id,
+                    task_id=task.id,
+                    link_id=link.id,
+                    direction="outbound",
+                    action="move",
+                    status="local_only",
+                    error=str(exc),
+                )
+                await session.commit()
+                return SyncResult(False, "local_only", link.external_task_id, str(exc))
             target = context["status_columns"].get(status.value)
             if target is None:
                 return await self._mark_link_error(
