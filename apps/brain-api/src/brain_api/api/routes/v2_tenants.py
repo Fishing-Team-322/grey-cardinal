@@ -855,6 +855,12 @@ async def get_v2_meeting(
             .order_by(m.TaskModel.created_at.desc())
         )
     ).scalars()
+    recording_job = await session.scalar(
+        select(m.MeetingAgentJoinJobModel)
+        .where(m.MeetingAgentJoinJobModel.meeting_id == meeting_id)
+        .order_by(m.MeetingAgentJoinJobModel.created_at.desc())
+        .limit(1)
+    )
     payload.update(
         {
             "participants": [
@@ -875,6 +881,19 @@ async def get_v2_meeting(
                 for line in transcripts
             ],
             "extracted_tasks": [_task_payload(task, None) for task in tasks],
+            "recording_agent": (
+                {
+                    "id": str(recording_job.id),
+                    "provider": recording_job.provider,
+                    "status": recording_job.status,
+                    "error_message": recording_job.error_message,
+                    "started_at": recording_job.started_at,
+                    "heartbeat_at": recording_job.heartbeat_at,
+                    "completed_at": recording_job.completed_at,
+                }
+                if recording_job
+                else None
+            ),
         }
     )
     return payload

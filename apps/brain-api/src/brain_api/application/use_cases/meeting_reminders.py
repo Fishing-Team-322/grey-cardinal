@@ -41,13 +41,17 @@ async def run_meeting_finalize(
     async with session_factory() as session:
         rows = await session.execute(
             select(m.MeetingModel).where(
-                m.MeetingModel.state.in_(("scheduled", "armed", "recording")),
+                m.MeetingModel.state.in_(("scheduled", "armed", "recording", "stopped")),
                 m.MeetingModel.scheduled_at.is_not(None),
             )
         )
         for meeting in rows.scalars():
             duration = meeting.duration_minutes or 60
-            end_at = _as_utc(meeting.scheduled_at) + timedelta(minutes=duration)
+            end_at = (
+                _as_utc(meeting.stopped_at)
+                if meeting.state == "stopped" and meeting.stopped_at
+                else _as_utc(meeting.scheduled_at) + timedelta(minutes=duration)
+            )
             if now < end_at:
                 continue
             team = await session.get(m.TeamModel, meeting.team_id)

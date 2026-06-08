@@ -332,6 +332,17 @@ export const api = {
         body: { team_id: teamId },
       });
     },
+    recordingJobs(teamId) {
+      return request("GET", "/api/integrations/yandex-telemost/recording-jobs", {
+        query: { team_id: teamId },
+      });
+    },
+    startRecordingJob(jobId) {
+      return request("POST", `/api/integrations/yandex-telemost/recording-jobs/${jobId}/start`);
+    },
+    stopRecordingJob(jobId) {
+      return request("POST", `/api/integrations/yandex-telemost/recording-jobs/${jobId}/stop`);
+    },
   },
   deploy: {
     status() {

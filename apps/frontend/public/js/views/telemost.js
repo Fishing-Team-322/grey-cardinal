@@ -24,11 +24,15 @@ export default async function telemostView(root) {
   }
 
   async function render() {
-    const status = await api.yandexTelemost
-      .status(team.id)
-      .catch(() => ({ status: "error", connected: false, server_configured: false }));
+    const [status, jobsData] = await Promise.all([
+      api.yandexTelemost
+        .status(team.id)
+        .catch(() => ({ status: "error", connected: false, server_configured: false })),
+      api.yandexTelemost.recordingJobs(team.id).catch(() => ({ items: [] })),
+    ]);
     const pill = STATUS_PILL[status.status] || STATUS_PILL.disconnected;
     const settings = status.settings || {};
+    const jobs = jobsData.items || [];
 
     content.innerHTML = `<div class="card card-pad-lg" style="max-width:760px">
       <div class="card-head">
@@ -67,6 +71,24 @@ export default async function telemostView(root) {
         </label>
         <button class="btn btn-ghost mt-12" id="tm-save">Сохранить настройки</button>
       </div>
+
+      <div class="card card-pad mt-20">
+        <div class="card-title">Агент записи Телемоста</div>
+        <p class="dim mt-8">Агент входит видимым участником, микрофон и камера выключены.</p>
+        ${
+          jobs.length
+            ? jobs.slice(0, 8).map((job) => `<div class="integration-row">
+                <span><b>${escapeHtml(job.conference_id || "Телемост")}</b>
+                  <span class="meta">${escapeHtml(job.status)}${job.error_message ? ` · ${escapeHtml(job.error_message)}` : ""}</span>
+                </span>
+                <span class="flex gap-8">
+                  ${["pending", "failed"].includes(job.status) ? `<button class="btn btn-sm btn-ghost tm-job-start" data-id="${job.id}">Запустить</button>` : ""}
+                  ${["queued", "joining", "recording"].includes(job.status) ? `<button class="btn btn-sm btn-ghost tm-job-stop" data-id="${job.id}">Остановить</button>` : ""}
+                </span>
+              </div>`).join("")
+            : '<div class="dim mt-12">Заданий записи пока нет.</div>'
+        }
+      </div>
     </div>`;
 
     const byId = (id) => content.querySelector(`#${id}`);
@@ -100,6 +122,20 @@ export default async function telemostView(root) {
       });
       toast("Настройки сохранены");
       await render();
+    });
+    content.querySelectorAll(".tm-job-start").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await api.yandexTelemost.startRecordingJob(button.dataset.id);
+        toast("Агент записи поставлен в очередь");
+        await render();
+      });
+    });
+    content.querySelectorAll(".tm-job-stop").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await api.yandexTelemost.stopRecordingJob(button.dataset.id);
+        toast("Остановка записи запрошена");
+        await render();
+      });
     });
   }
 

@@ -72,10 +72,17 @@ notice that the Grey Cardinal meeting agent may join for notes/tasks (if enabled
   5xx → transient.
 
 ## Meeting agent / recording
-The recording agent is a **separate role** from the bot. MVP does **not** auto-join
-or do hidden recording: room creation enqueues a `MeetingAgentJoinJob`
-(`pending`, or `queued` if auto-join is enabled) for a future worker. The chat
-always gets the AI-recording notice.
+The recording agent is a **separate, visible participant** named
+`Grey Cardinal — запись`. When auto-join is enabled, room creation enqueues a
+`MeetingAgentJoinJob`; the `telemost-recorder` service claims it, joins with its
+microphone and camera disabled, captures the browser output through PulseAudio /
+FFmpeg, and sends WAV chunks through the common `audio-worker → ASR → brain-api`
+pipeline.
+
+The chat receives a second explicit notice when recording actually starts and
+another notice when it finishes. Recording job state and errors are visible in
+the Telemost integration page and the meeting card. Managers can start a pending
+job or request a running job to stop from the integration page.
 
 ## Alice "Конспект встреч"
 Not used in MVP — there is no public API to fetch the Alice summary, and we do not

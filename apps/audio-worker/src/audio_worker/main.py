@@ -165,6 +165,7 @@ async def receive_audio_chunk(
     x_meeting_id: str = Header(default="local-windows-demo", alias="X-Meeting-Id"),
     x_chunk_seq: int = Header(default=0, alias="X-Chunk-Seq"),
     x_audio_format: str = Header(default="wav", alias="X-Audio-Format"),
+    x_audio_source: str = Header(default="audio_worker", alias="X-Audio-Source"),
 ) -> dict[str, object]:
     _validate_internal_token(x_internal_token)
 
@@ -176,27 +177,30 @@ async def receive_audio_chunk(
     saved_path = _save_chunk(wav_bytes, x_meeting_id, x_chunk_seq)
     text = await asr_engine.transcribe_wav(wav_bytes)
 
-    event = TranscriptEvent(
-        meeting_id=x_meeting_id,
-        speaker_id="unknown",
-        speaker_name=None,
-        text=text,
-        ts=datetime.now(UTC),
-        is_final=True,
-        raw={
-            "source": "audio-worker.audio_chunk",
-            "chunk_seq": x_chunk_seq,
-            "audio_format": x_audio_format,
-            "byte_size": len(wav_bytes),
-            "saved_path": saved_path,
-            "headers": {
-                "x_audio_sample_rate": request.headers.get("x-audio-sample-rate"),
-                "x_audio_channels": request.headers.get("x-audio-channels"),
-                "x_audio_bits_per_sample": request.headers.get("x-audio-bits-per-sample"),
+    sent_to_brain = None
+    if text:
+        is_telemost = x_audio_source == "telemost_recorder"
+        event = TranscriptEvent(
+            meeting_id=x_meeting_id,
+            speaker_id="telemost-recorder" if is_telemost else "unknown",
+            speaker_name="Участники Телемоста" if is_telemost else None,
+            text=text,
+            ts=datetime.now(UTC),
+            is_final=True,
+            raw={
+                "source": f"audio-worker.{x_audio_source}",
+                "chunk_seq": x_chunk_seq,
+                "audio_format": x_audio_format,
+                "byte_size": len(wav_bytes),
+                "saved_path": saved_path,
+                "headers": {
+                    "x_audio_sample_rate": request.headers.get("x-audio-sample-rate"),
+                    "x_audio_channels": request.headers.get("x-audio-channels"),
+                    "x_audio_bits_per_sample": request.headers.get("x-audio-bits-per-sample"),
+                },
             },
-        },
-    )
-    sent_to_brain = await brain_client.send_transcript(event)
+        )
+        sent_to_brain = await brain_client.send_transcript(event)
 
     return {
         "ok": True,

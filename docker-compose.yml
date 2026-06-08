@@ -108,6 +108,25 @@ services:
       brain-api:
         condition: service_healthy
 
+  telemost-recorder:
+    build:
+      context: .
+      dockerfile: apps/telemost-recorder/Dockerfile
+    profiles: ["backend", "full"]
+    environment:
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      BRAIN_API_BASE_URL: ${BRAIN_API_BASE_URL:-http://brain-api:8000}
+      AUDIO_WORKER_BASE_URL: ${AUDIO_WORKER_BASE_URL:-http://audio-worker:8020}
+      TELEMOST_RECORDER_PARTICIPANT_NAME: ${TELEMOST_RECORDER_PARTICIPANT_NAME:-Grey Cardinal — запись}
+      TELEMOST_RECORDER_SEGMENT_SECONDS: ${TELEMOST_RECORDER_SEGMENT_SECONDS:-15}
+      TELEMOST_RECORDER_MAX_SESSION_MINUTES: ${TELEMOST_RECORDER_MAX_SESSION_MINUTES:-180}
+    depends_on:
+      brain-api:
+        condition: service_healthy
+      audio-worker:
+        condition: service_started
+    restart: unless-stopped
+
   frontend-dashboard:
     build:
       context: apps/frontend

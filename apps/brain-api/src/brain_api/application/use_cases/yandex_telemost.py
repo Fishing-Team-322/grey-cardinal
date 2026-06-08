@@ -311,25 +311,10 @@ async def create_room_for_chat(
             )
         )
 
-    # Queue stub — MVP does not auto-join/record. A future worker consumes 'pending'.
+    # Create the scheduled meeting first so the recorder always uploads into the
+    # same meeting/transcript shown in the cabinet.
     meeting_id = None
     if join_url:
-        session.add(
-            m.MeetingAgentJoinJobModel(
-                team_id=team.id,
-                provider="yandex_telemost",
-                meeting_url=join_url,
-                conference_id=result.get("conference_id"),
-                telegram_chat_id=telegram_chat_id,
-                created_by_user_id=created_by_user_id,
-                created_by_telegram_user_id=created_by_telegram_user_id,
-                # auto-join on => 'queued' (a future worker picks it up);
-                # off => 'pending' (intent recorded, nothing auto-joins/records).
-                status="queued" if cfg["enable_meeting_agent_auto_join"] else "pending",
-            )
-        )
-        # Create a scheduled Meeting so we can run a "who is coming?" RSVP poll
-        # in the chat alongside the link.
         meeting = await _create_scheduled_meeting(
             session,
             team_id=team.id,
@@ -338,6 +323,21 @@ async def create_room_for_chat(
             created_by_user_id=created_by_user_id,
         )
         meeting_id = meeting.id
+        session.add(
+            m.MeetingAgentJoinJobModel(
+                team_id=team.id,
+                provider="yandex_telemost",
+                meeting_url=join_url,
+                conference_id=result.get("conference_id"),
+                meeting_id=meeting.id,
+                telegram_chat_id=telegram_chat_id,
+                created_by_user_id=created_by_user_id,
+                created_by_telegram_user_id=created_by_telegram_user_id,
+                # Auto-join is explicit and the visible participant announces
+                # recording again when it actually enters the room.
+                status="queued" if cfg["enable_meeting_agent_auto_join"] else "pending",
+            )
+        )
 
     return {
         "ok": True,
