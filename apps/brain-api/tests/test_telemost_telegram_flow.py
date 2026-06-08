@@ -245,6 +245,66 @@ async def test_prefixed_call_intent_with_time_prompts_scheduling_in_group(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Cardinal мне нужен зазвон на 12.37.",
+        "Cardinal планируется звом на 12.40.",
+    ],
+)
+async def test_asr_call_intent_variants_prompt_scheduling_in_group(
+    session_factory,
+    text: str,
+) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(_msg(text), container=container)
+
+    action = resp.actions[0]
+    reply_markup = action.reply_markup
+    ok_data = reply_markup["inline_keyboard"][0][0]["callback_data"]
+    assert action.chat_id == CHAT_ID
+    assert "Запланировать" in action.text
+    assert ok_data.startswith("mtg_ok:")
+    assert ok_data != "mtg_ok:None"
+    UUID(ok_data.split(":", 1)[1])
+    assert "tmcall:create" not in str(reply_markup)
+
+
+@pytest.mark.asyncio
+async def test_group_meeting_candidate_fallback_replies_to_group(session_factory) -> None:
+    class Parser:
+        async def parse(self, payload):
+            return {
+                "kind": "meeting_candidate",
+                "confidence": 0.95,
+                "meeting": {
+                    "title": "Созвон",
+                    "scheduled_at": None,
+                    "duration_minutes": 60,
+                },
+            }
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _msg("Кардинал, планируется встреча в 12.40"),
+        container=container,
+    )
+
+    action = resp.actions[0]
+    assert action.chat_id == CHAT_ID
+    assert "Планируем созвон" in action.text
+    ok_data = action.reply_markup["inline_keyboard"][0][0]["callback_data"]
+    assert ok_data.startswith("mtg_ok:")
+    assert ok_data != "mtg_ok:None"
+
+
+@pytest.mark.asyncio
 async def test_disabled_cardinal_mention_keeps_plain_call_intent(session_factory) -> None:
     async with session_factory() as session:
         await _seed_team(session, connected=False, require_cardinal_mention=False)

@@ -15,6 +15,8 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"созвон"),  # созвон, созвонимся, «го созвон», «созвон по задаче»
     re.compile(r"созвонит"),                     # созвониться / созвонимся
     re.compile(r"созвонимся"),
+    re.compile(r"\b(?:за)?звон\w*"),             # ASR: «зазвон», «звонок» вместо «созвон»
+    re.compile(r"\bзвом\b"),                     # ASR: «звом» вместо «созвон»
     re.compile(r"телемост"),
     re.compile(r"\btelemost\b"),
     re.compile(r"видеозвон|видео-?звон|видео-?встреч"),

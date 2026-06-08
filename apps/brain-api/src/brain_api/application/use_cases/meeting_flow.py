@@ -153,14 +153,18 @@ async def build_meeting_proposal(
     sender: m.UserModel,
     meeting: m.MeetingModel,
     group_chat_id: int,
+    *,
+    prefer_group_chat: bool = False,
 ) -> ActionsResponse:
     """Сформировать подтверждение созвона: ЛС руководителю либо запрос в чат."""
     manager = await _manager_for_team(session, team.id, prefer_user_id=sender.id)
 
     # Куда отправлять подтверждение: в личку руководителю, иначе — в чат команды.
-    target_chat = (
-        manager.telegram_user_id if manager is not None else None
-    ) or group_chat_id
+    target_chat = group_chat_id
+    if not prefer_group_chat:
+        target_chat = (
+            manager.telegram_user_id if manager is not None else None
+        ) or group_chat_id
 
     if meeting.scheduled_at is None:
         # Время не распозналось — просим вписать его (stateful в личке).

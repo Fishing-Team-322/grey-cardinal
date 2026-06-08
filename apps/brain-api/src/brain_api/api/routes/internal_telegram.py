@@ -1459,7 +1459,14 @@ async def _route_v2_meeting_candidate(session, team, sender, message, parsed, ev
     )
     session.add(row)
     await session.flush()
-    return await build_meeting_proposal(session, team, sender, row, event.chat.id)
+    return await build_meeting_proposal(
+        session,
+        team,
+        sender,
+        row,
+        event.chat.id,
+        prefer_group_chat=event.chat.type in {"group", "supergroup"},
+    )
 
 
 async def _route_v2_daily_report(session, team, sender, message, parsed, event):
