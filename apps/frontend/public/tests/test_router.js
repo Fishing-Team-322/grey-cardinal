@@ -64,3 +64,55 @@ test("cleanup runs before route replacement", async () => {
   await Router._render();
   assert.equal(cleaned, true);
 });
+
+test("sidebar active state matches parameterized nav routes", async () => {
+  browser("/app/teams/team-1/board");
+  const boardItem = navItem("/app/teams/:id/board", "/app/teams/team-1/board");
+  const meetingsItem = navItem("/app/meetings", "/app/meetings");
+  const root = { innerHTML: "" };
+  globalThis.document = {
+    getElementById: () => root,
+    querySelectorAll: () => [boardItem, meetingsItem],
+  };
+  globalThis.fetch = async () => new Response("<div>Board</div>", { status: 200 });
+  Router.reset();
+  Router.register("/app/teams/:teamId/board", "/partials/board.html", async () => {});
+
+  await Router._render();
+
+  assert.equal(boardItem.active, true);
+  assert.equal(meetingsItem.active, false);
+});
+
+test("sidebar active state maps /app/me to employee panel", async () => {
+  browser("/app/me");
+  const employeeItem = navItem("/app/employee", "/app/employee");
+  const root = { innerHTML: "" };
+  globalThis.document = {
+    getElementById: () => root,
+    querySelectorAll: () => [employeeItem],
+  };
+  globalThis.fetch = async () => new Response("<div>Me</div>", { status: 200 });
+  Router.reset();
+  Router.register("/app/me", "/partials/agentic.html", async () => {});
+
+  await Router._render();
+
+  assert.equal(employeeItem.active, true);
+});
+
+function navItem(route, href) {
+  const item = {
+    active: false,
+    dataset: { route },
+    getAttribute(name) {
+      return name === "href" ? href : null;
+    },
+  };
+  item.classList = {
+    toggle(_className, value) {
+      item.active = value;
+    },
+  };
+  return item;
+}

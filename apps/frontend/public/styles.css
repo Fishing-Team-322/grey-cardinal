@@ -394,12 +394,12 @@ h3 { font-size: 22px; }
 }
 .nav-item {
   display: flex; align-items: center; gap: 11px;
-  padding: 9px 11px; border-radius: 9px; color: var(--text-dim);
-  font-weight: 500; font-size: 14px; transition: all .14s; margin-bottom: 1px;
+  padding: 9px 11px; border:1px solid transparent; border-radius: 9px; color: var(--text-dim);
+  font-weight: 500; font-size: 14px; transition: background .14s, border-color .14s, color .14s; margin-bottom: 1px;
 }
 .nav-item svg { width: 17px; height: 17px; flex: none; opacity: .8; }
 .nav-item:hover { background: var(--surface); color: var(--text); }
-.nav-item.active { background: var(--accent-soft); color: #fff; border:1px solid var(--accent-line); }
+.nav-item.active { background: var(--accent-soft); color: #fff; border-color: var(--accent-line); }
 .nav-item.active svg { opacity: 1; color: var(--accent-2); }
 .nav-item .nav-badge { margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:11px; }
 
