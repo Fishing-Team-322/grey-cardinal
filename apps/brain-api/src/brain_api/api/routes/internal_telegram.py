@@ -1713,6 +1713,30 @@ async def ingest_command(
             actions = await SendEveningDigest(
                 uow, container.telegram_gateway, container.config
             ).as_actions(chat_id)
+        # Post a short message + link to a site page instead of a wall of text.
+        full_text = actions.actions[0].text if actions.actions else ""
+        try:
+            from brain_api.application.use_cases.meeting_summary import (
+                create_share_link,
+                public_base,
+            )
+
+            async with container.session_factory() as session:
+                team = await session.scalar(
+                    select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+                )
+                token = await create_share_link(
+                    session,
+                    kind="digest",
+                    team_id=team.id if team else None,
+                    ref_id=None,
+                    title="Вечерний дайджест",
+                    payload={"text": full_text},
+                )
+                await session.commit()
+            url = f"{public_base(get_settings())}/s.html?t={token}"
+            return _text(chat_id, f"🌙 Вечерний дайджест готов\n\n🔗 Открыть: {url}")
+        except Exception:
             return actions
 
     # ── /tasks ────────────────────────────────────────────────────────────

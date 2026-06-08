@@ -208,15 +208,22 @@ def _confirmation(row: m.ConfirmationModel) -> Confirmation:
     )
 
 
+def _safe_enum(enum_cls, value, default):
+    try:
+        return enum_cls(value)
+    except ValueError:
+        return default
+
+
 def _task(row: m.TaskModel) -> Task:
     return Task(
         id=row.id,
         team_id=row.team_id,
         public_id=row.public_id,
         title=row.title,
-        status=TaskStatus(row.status),
-        priority=TaskPriority(row.priority),
-        source=TaskSource(row.source),
+        status=_safe_enum(TaskStatus, row.status, TaskStatus.todo),
+        priority=_safe_enum(TaskPriority, row.priority, TaskPriority.medium),
+        source=_safe_enum(TaskSource, row.source, TaskSource.manual),
         project_id=row.project_id,
         description=row.description,
         assignee_id=row.assignee_id,
