@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select
 
 from brain_api.infrastructure.db import models as m
@@ -18,7 +20,15 @@ from grey_cardinal_contracts import (
 )
 
 CB_SET_DIGEST = "cfg_dig"   # cfg_dig:<mode>
+CB_SET_CARDINAL_MENTION = "cfg_cardinal:toggle"
 CB_SET_CLOSE = "cfg_close"
+CARDINAL_MENTION_SETTING = "require_cardinal_mention"
+DEFAULT_REQUIRE_CARDINAL_MENTION = False
+
+_CARDINAL_PREFIX = re.compile(
+    r"^\s*(?:серый\s+)?кардинал(?=$|[\s,.:;!?—-])[\s,.:;!?—-]*",
+    re.IGNORECASE,
+)
 
 # mode -> (label, [часы по таймзоне команды])
 DIGEST_MODES: dict[str, tuple[str, list[int]]] = {
@@ -35,18 +45,45 @@ def digest_slots(mode: str) -> list[int]:
     return DIGEST_MODES.get(mode, DIGEST_MODES[DEFAULT_MODE])[1]
 
 
-def _settings_text(team: m.TeamModel, mode: str) -> str:
+def require_cardinal_mention(team: m.TeamModel) -> bool:
+    return bool((team.board_config or {}).get(
+        CARDINAL_MENTION_SETTING,
+        DEFAULT_REQUIRE_CARDINAL_MENTION,
+    ))
+
+
+def addressed_message_text(text: str, *, required: bool) -> str | None:
+    """Return command text without the leading bot name, or None when ignored."""
+    if not required:
+        return text
+    match = _CARDINAL_PREFIX.match(text)
+    if match is None:
+        return None
+    command = text[match.end():].strip()
+    return command or None
+
+
+def _settings_text(team: m.TeamModel, mode: str, cardinal_required: bool) -> str:
     label = DIGEST_MODES.get(mode, DIGEST_MODES[DEFAULT_MODE])[0]
+    mention_label = "только после «Кардинал, ...»" if cardinal_required else "все сообщения"
     return (
         f"⚙️ Настройки команды «{team.name}»\n"
         f"Часовой пояс: {team.timezone}\n\n"
+        f"🤖 Реакция бота: {mention_label}\n"
         f"🔔 Дайджест задач: {label}\n\n"
-        "Выбери, когда присылать сводку по задачам команды:"
+        "В режиме обращения по имени бот игнорирует обычные сообщения и реагирует "
+        "только на сообщения, начинающиеся с «Кардинал».\n\n"
+        "Выбери настройки:"
     )
 
 
-def _settings_keyboard(current: str) -> dict:
+def _settings_keyboard(current: str, cardinal_required: bool) -> dict:
     rows = []
+    mark = "✅" if cardinal_required else "⬜"
+    rows.append([{
+        "text": f"{mark} Отвечать только на «Кардинал, ...»",
+        "callback_data": CB_SET_CARDINAL_MENTION,
+    }])
     for mode, (label, _slots) in DIGEST_MODES.items():
         mark = "✅ " if mode == current else ""
         rows.append([{"text": f"{mark}{label}", "callback_data": f"{CB_SET_DIGEST}:{mode}"}])
@@ -67,12 +104,17 @@ async def open_settings(session, chat_id: int) -> ActionsResponse:
         )])
     mode = (team.board_config or {}).get("digest_mode", DEFAULT_MODE)
     return ActionsResponse(actions=[SendMessageAction(
-        chat_id=chat_id, text=_settings_text(team, mode), reply_markup=_settings_keyboard(mode),
+        chat_id=chat_id,
+        text=_settings_text(team, mode, require_cardinal_mention(team)),
+        reply_markup=_settings_keyboard(mode, require_cardinal_mention(team)),
     )])
 
 
 def is_settings_callback(data: str) -> bool:
-    return data.startswith(f"{CB_SET_DIGEST}:") or data == CB_SET_CLOSE
+    return (
+        data.startswith(f"{CB_SET_DIGEST}:")
+        or data in (CB_SET_CARDINAL_MENTION, CB_SET_CLOSE)
+    )
 
 
 async def handle_settings_callback(session, data: str, event) -> ActionsResponse:
@@ -84,24 +126,30 @@ async def handle_settings_callback(session, data: str, event) -> ActionsResponse
             AnswerCallbackAction(callback_query_id=cq, text=""),
             EditMessageAction(chat_id=chat_id, message_id=msg_id, text="⚙️ Настройки закрыты."),
         ])
-    mode = data.split(":", 1)[1]
-    if mode not in DIGEST_MODES:
-        return ActionsResponse(
-            actions=[AnswerCallbackAction(callback_query_id=cq, text="Неизвестный режим")]
-        )
     team = await _team_for_chat(session, chat_id)
     if team is None:
         return ActionsResponse(
             actions=[AnswerCallbackAction(callback_query_id=cq, text="Чат не привязан")]
         )
     cfg = dict(team.board_config or {})
-    cfg["digest_mode"] = mode
+    mode = cfg.get("digest_mode", DEFAULT_MODE)
+    if data == CB_SET_CARDINAL_MENTION:
+        cfg[CARDINAL_MENTION_SETTING] = not require_cardinal_mention(team)
+    else:
+        mode = data.split(":", 1)[1]
+        if mode not in DIGEST_MODES:
+            return ActionsResponse(
+                actions=[AnswerCallbackAction(callback_query_id=cq, text="Неизвестный режим")]
+            )
+        cfg["digest_mode"] = mode
     team.board_config = cfg
     await session.commit()
+    cardinal_required = require_cardinal_mention(team)
     return ActionsResponse(actions=[
         AnswerCallbackAction(callback_query_id=cq, text="Сохранено"),
         EditMessageAction(
             chat_id=chat_id, message_id=msg_id,
-            text=_settings_text(team, mode), reply_markup=_settings_keyboard(mode),
+            text=_settings_text(team, mode, cardinal_required),
+            reply_markup=_settings_keyboard(mode, cardinal_required),
         ),
     ])

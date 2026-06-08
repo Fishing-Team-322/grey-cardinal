@@ -112,6 +112,12 @@ export const api = {
     telegramBindCode(id) {
       return request("POST", `/api/teams/${id}/telegram/bind-code`);
     },
+    botSettings(id) {
+      return request("GET", `/api/teams/${id}/bot-settings`);
+    },
+    saveBotSettings(id, body) {
+      return request("PUT", `/api/teams/${id}/bot-settings`, { body });
+    },
   },
   invites: {
     preview(token) {

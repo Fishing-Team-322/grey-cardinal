@@ -3,10 +3,14 @@ import { bindForm, errorMessage, escapeHtml, setTopbar, toast } from "../view-ut
 
 export default async function settingsView(root) {
   setTopbar("Настройки");
-  const user = await api.auth.me();
+  const user = { ...(window.gcCurrentUser || {}), ...(await api.auth.me()) };
   const content = root.querySelector("#settings-content");
   const telegram = await api.telegram.status().catch(() => ({ linked: false }));
   const agents = await api.daemon.status().catch(() => ({ agents: [] }));
+  const managerTeam = (user.teams || []).find((team) => team.role === "manager");
+  const botSettings = managerTeam
+    ? await api.teams.botSettings(managerTeam.id).catch(() => null)
+    : null;
   const zones = typeof Intl.supportedValuesOf === "function"
     ? Intl.supportedValuesOf("timeZone")
     : ["Europe/Moscow", "Europe/London", "Asia/Dubai"];
@@ -26,6 +30,15 @@ export default async function settingsView(root) {
         <a class="integration-row" href="/app/integrations/telegram"><span>Telegram</span><span class="pill ${telegram.linked ? "ok" : "warn"}">${telegram.linked ? "привязан" : "настроить"}</span></a>
         <a class="integration-row" href="/app/integrations/daemon"><span>Windows-агент</span><span class="pill ${agents.agents.length ? "ok" : "warn"}">${agents.agents.length} устройств</span></a>
       </div>
+      ${botSettings ? `<form class="card card-pad col gap-16" id="bot-behavior-form">
+        <div class="card-head"><div><div class="card-title">Поведение Telegram-бота</div><div class="meta">${escapeHtml(botSettings.team_name)}</div></div></div>
+        <label class="integration-row">
+          <span class="col gap-8"><b>Отвечать только по имени</b><span class="meta">Обрабатывать сообщения, начинающиеся с «Кардинал»</span></span>
+          <input type="checkbox" name="require_cardinal_mention" ${botSettings.require_cardinal_mention ? "checked" : ""}>
+        </label>
+        <button class="btn btn-primary" type="submit">Сохранить поведение бота</button>
+        <div class="alert alert-error" id="bot-behavior-error" hidden></div>
+      </form>` : ""}
       <form class="card card-pad col gap-16" id="password-form"><div class="card-head"><div class="card-title">Безопасность</div></div><label>Текущий пароль<input class="input mt-6" type="password" name="old_password" required></label><label>Новый пароль<input class="input mt-6" type="password" name="new_password" minlength="6" required></label><button class="btn btn-primary" type="submit">Сменить пароль</button><div class="alert alert-error" id="password-error" hidden></div><button class="btn btn-ghost" type="button" id="logout">Выйти</button></form>
     </div>
   </div>`;
@@ -46,6 +59,20 @@ export default async function settingsView(root) {
       element.hidden = false;
     }
   });
+  if (botSettings) {
+    bindForm(root, "#bot-behavior-form", async (data) => {
+      try {
+        await api.teams.saveBotSettings(managerTeam.id, {
+          require_cardinal_mention: data.get("require_cardinal_mention") === "on",
+        });
+        toast("Поведение бота сохранено");
+      } catch (error) {
+        const element = root.querySelector("#bot-behavior-error");
+        element.textContent = errorMessage(error);
+        element.hidden = false;
+      }
+    });
+  }
   bindForm(root, "#password-form", async (data, form) => {
     try {
       await api.auth.changePassword(data.get("old_password"), data.get("new_password"));

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from brain_api.api.routes import internal_telegram as itg
 from brain_api.application.use_cases import yandex_telemost as svc
@@ -66,14 +67,18 @@ def _callback(data: str) -> TelegramCallbackEvent:
     )
 
 
-async def _seed_team(session, *, connected: bool):
+async def _seed_team(session, *, connected: bool, require_cardinal_mention: bool = False):
     user = m.UserModel(id=uuid4(), display_name="Boss", telegram_user_id=555)
     session.add(user)
     company = m.CompanyModel(name="Co", timezone="Europe/Moscow", created_by=user.id)
     session.add(company)
     await session.flush()
     team = m.TeamModel(
-        company_id=company.id, name="Team", timezone="Europe/Moscow", tg_chat_id=CHAT_ID
+        company_id=company.id,
+        name="Team",
+        timezone="Europe/Moscow",
+        tg_chat_id=CHAT_ID,
+        board_config={"require_cardinal_mention": require_cardinal_mention},
     )
     session.add(team)
     await session.flush()
@@ -131,6 +136,75 @@ async def test_non_call_message_does_not_prompt(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_required_cardinal_mention_ignores_plain_call_intent(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(_msg("нужен созвон"), container=container)
+
+    assert resp.actions == []
+    async with session_factory() as session:
+        audit = await session.scalar(
+            select(m.AuditLogModel).where(
+                m.AuditLogModel.action == "semantic_message_ignored"
+            )
+        )
+        assert audit.payload["reason"] == "cardinal_mention_required"
+
+
+@pytest.mark.asyncio
+async def test_required_cardinal_mention_allows_prefixed_call_intent(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(
+        _msg("Кардинал, нам нужен созвон"),
+        container=container,
+    )
+
+    assert "tmcall:create" in str([
+        getattr(action, "reply_markup", None) for action in resp.actions
+    ])
+
+
+@pytest.mark.asyncio
+async def test_disabled_cardinal_mention_keeps_plain_call_intent(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=False)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(_msg("нужен созвон"), container=container)
+
+    assert "tmcall:create" in str([
+        getattr(action, "reply_markup", None) for action in resp.actions
+    ])
+
+
+@pytest.mark.asyncio
+async def test_cardinal_prefix_is_removed_before_semantic_parse(session_factory) -> None:
+    captured = {}
+
+    class Parser:
+        async def parse(self, payload):
+            captured["text"] = payload.message_text
+            return {"kind": "noise", "confidence": 1.0}
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _msg("кардинал задача для Дениса написать API к 18 часам"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    assert captured["text"] == "задача для Дениса написать API к 18 часам"
+
+
+@pytest.mark.asyncio
 async def test_button_creates_room_and_posts_link(session_factory, monkeypatch) -> None:
     monkeypatch.setattr(itg, "get_settings", lambda: CONFIGURED)
     monkeypatch.setattr(svc, "build_client", lambda settings: FakeClient())
@@ -146,8 +220,6 @@ async def test_button_creates_room_and_posts_link(session_factory, monkeypatch) 
 
     # a join job was queued
     async with session_factory() as session:
-        from sqlalchemy import select
-
         jobs = (await session.execute(select(m.MeetingAgentJoinJobModel))).scalars().all()
         assert len(jobs) == 1
         assert jobs[0].meeting_url == "https://telemost.yandex.ru/j/zzz"

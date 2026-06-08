@@ -77,9 +77,11 @@ from brain_api.application.use_cases.team_gamification import (
     team_leaderboard_text_for_chat,
 )
 from brain_api.application.use_cases.team_settings import (
+    addressed_message_text,
     handle_settings_callback,
     is_settings_callback,
     open_settings,
+    require_cardinal_mention,
 )
 from brain_api.config import get_settings
 from brain_api.container import Container
@@ -399,8 +401,32 @@ async def ingest_message(
             if is_help_request_text(event.text):
                 return _html(event.chat.id, await materials_for_arg(session, event.text))
 
+    semantic_text = event.text
+    if event.chat.type in {"group", "supergroup", "channel"} and hasattr(
+        container, "session_factory"
+    ):
+        async with container.session_factory() as session:
+            team = await session.scalar(
+                select(m.TeamModel).where(m.TeamModel.tg_chat_id == event.chat.id)
+            )
+        if team is not None:
+            semantic_text = addressed_message_text(
+                event.text,
+                required=require_cardinal_mention(team),
+            )
+            if semantic_text is None:
+                return await _try_v2_semantic_message(
+                    event,
+                    container,
+                    ignore_reason="cardinal_mention_required",
+                ) or ActionsResponse(actions=[])
+
     # Группа: явный intent «нужен созвон» → спросить про Телемост (не создаём сами).
-    if event.chat.type in {"group", "supergroup"} and detect_call_intent(event.text):
+    if (
+        event.chat.type in {"group", "supergroup"}
+        and semantic_text is not None
+        and detect_call_intent(semantic_text)
+    ):
         return ActionsResponse(
             actions=[
                 SendMessageAction(
@@ -413,7 +439,11 @@ async def ingest_message(
             ]
         )
 
-    v2_response = await _try_v2_semantic_message(event, container)
+    v2_response = await _try_v2_semantic_message(
+        event,
+        container,
+        semantic_text=semantic_text,
+    )
     if v2_response is not None:
         return v2_response
 
@@ -733,6 +763,7 @@ async def _try_v2_semantic_message(
     *,
     interaction_mode: InteractionMode = InteractionMode.AUTO_BACKGROUND,
     semantic_text: str | None = None,
+    ignore_reason: str | None = None,
 ) -> ActionsResponse | None:
     if event.chat.type not in {"group", "supergroup", "channel"}:
         return None
@@ -815,6 +846,19 @@ async def _try_v2_semantic_message(
         session.add(message)
         await session.flush()
 
+        if ignore_reason is not None:
+            session.add(
+                m.AuditLogModel(
+                    actor_type="system",
+                    action="semantic_message_ignored",
+                    entity_type="chat_message",
+                    entity_id=message.id,
+                    payload={"team_id": str(team.id), "reason": ignore_reason},
+                )
+            )
+            await session.commit()
+            return ActionsResponse(actions=[])
+
         member_names = list(
             await session.scalars(
                 select(m.UserModel.display_name)
@@ -862,7 +906,7 @@ async def _try_v2_semantic_message(
                 team.id,
                 task_payload.get("assignee_reference") or task_payload.get("assignee_text"),
                 event.entities,
-                semantic_text or event.text,
+                event.text,
                 reply_sender.id if reply_sender else None,
                 interaction_mode,
             )

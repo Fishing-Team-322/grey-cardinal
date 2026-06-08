@@ -36,6 +36,27 @@ def test_is_help_request_text():
     assert not task_help.is_help_request_text("привет как дела")  # "как дела" не триггер
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Кардинал нам нужен созвон", "нам нужен созвон"),
+        ("кардинал, задача для Дениса", "задача для Дениса"),
+        ("Серый Кардинал: создай задачу", "создай задачу"),
+        ("  КАРДИНАЛ — нужен созвон", "нужен созвон"),
+        ("кардинальный вопрос", None),
+        ("нам нужен созвон", None),
+        ("Кардинал", None),
+    ],
+)
+def test_addressed_message_text(text, expected):
+    assert team_settings.addressed_message_text(text, required=True) == expected
+
+
+def test_addressed_message_text_disabled_keeps_original():
+    text = "нам нужен созвон"
+    assert team_settings.addressed_message_text(text, required=False) == text
+
+
 @pytest.mark.asyncio
 async def test_materials_for_gc_id(session_factory):
     async with session_factory() as session:
@@ -79,6 +100,7 @@ async def test_settings_open_and_set(session_factory):
         kb = opened.actions[0].reply_markup
         cbs = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
         assert any(c == "cfg_dig:both" for c in cbs)
+        assert team_settings.CB_SET_CARDINAL_MENTION in cbs
         # set mode
         ev = _cb("cfg_dig:both")
         resp = await team_settings.handle_settings_callback(session, "cfg_dig:both", ev)
@@ -87,6 +109,24 @@ async def test_settings_open_and_set(session_factory):
         )
         assert team.board_config["digest_mode"] == "both"
     assert any(a.type == "answer_callback" for a in resp.actions)
+
+
+@pytest.mark.asyncio
+async def test_settings_toggle_cardinal_mention(session_factory):
+    async with session_factory() as session:
+        await _seed_team(session)
+        await session.commit()
+        ev = _cb(team_settings.CB_SET_CARDINAL_MENTION)
+        resp = await team_settings.handle_settings_callback(
+            session,
+            team_settings.CB_SET_CARDINAL_MENTION,
+            ev,
+        )
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == CHAT)
+        )
+        assert team.board_config["require_cardinal_mention"] is True
+        assert "только после" in resp.actions[1].text
 
 
 @pytest.mark.asyncio

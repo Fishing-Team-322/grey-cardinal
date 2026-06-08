@@ -1322,6 +1322,7 @@ class BotSettingsRequest(BaseModel):
     digest_hours: list[int] | None = None
     meeting_reminders: bool | None = None
     daemon_autorecord: bool | None = None
+    require_cardinal_mention: bool | None = None
 
 
 def _bot_settings_payload(team: m.TeamModel) -> dict:
@@ -1334,6 +1335,7 @@ def _bot_settings_payload(team: m.TeamModel) -> dict:
         "digest_hours": cfg.get("digest_hours"),
         "meeting_reminders": cfg.get("meeting_reminders", True),
         "daemon_autorecord": cfg.get("daemon_autorecord", True),
+        "require_cardinal_mention": cfg.get("require_cardinal_mention", False),
     }
 
 
@@ -1377,6 +1379,8 @@ async def set_bot_settings(
         cfg["meeting_reminders"] = bool(body.meeting_reminders)
     if body.daemon_autorecord is not None:
         cfg["daemon_autorecord"] = bool(body.daemon_autorecord)
+    if body.require_cardinal_mention is not None:
+        cfg["require_cardinal_mention"] = bool(body.require_cardinal_mention)
     team.board_config = cfg
     session.add(team)
     await session.commit()
