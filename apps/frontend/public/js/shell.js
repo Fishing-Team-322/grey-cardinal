@@ -21,6 +21,7 @@ import settings from "./views/settings.js";
 import deploy from "./views/deploy.js";
 import board from "./views/board.js";
 import aiInbox from "./views/ai-inbox.js";
+import onboarding from "./views/onboarding.js";
 import { teamMapView, setupView, profileView } from "./views/agentic.js";
 
 function ensureMobileMenu() {
@@ -88,8 +89,13 @@ async function boot() {
   Router.register("/app/deploy", "/partials/deploy.html", deploy, guardFor("director"));
   Router.register("/app/people/:userId", "/partials/agentic.html", profileView);
   Router.register("/app/me", "/partials/agentic.html", profileView);
+  Router.register("/app/welcome", "/partials/onboarding.html", onboarding);
 
-  if (location.pathname === "/app" || location.pathname === "/app/") {
+  // First-run: a user with no company and no team is sent to onboarding.
+  const needsOnboarding = !(user.companies || []).length && !(user.teams || []).length;
+  if (needsOnboarding && !location.pathname.startsWith("/app/welcome")) {
+    await Router.navigate("/app/welcome", true);
+  } else if (location.pathname === "/app" || location.pathname === "/app/") {
     await Router.navigate(homeForUser(user), true);
   } else {
     await Router.start();
