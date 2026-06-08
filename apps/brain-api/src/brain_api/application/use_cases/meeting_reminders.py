@@ -15,7 +15,6 @@ from sqlalchemy import func, or_, select
 
 from brain_api.application.rendering import format_deadline
 from brain_api.application.use_cases import yandex_telemost as telemost_svc
-from brain_api.application.use_cases.meeting_flow import rsvp_keyboard
 from brain_api.application.use_cases.team_gamification import (
     MEETING_SUMMARY_XP,
     grant_team_xp,
@@ -125,11 +124,10 @@ async def run_scheduled_meeting_starts(
                 team.tg_chat_id,
                 (
                     f"🎙 Созвон начинается ({when}) - {provider_label}\n\n"
-                    f"Ссылка: {join_url}\n\n"
+                    f"🔗 Ссылка: {join_url}\n\n"
                     "Grey Cardinal подключится к встрече как видимый участник для записи, "
                     "если автозапись включена для команды."
                 ),
-                rsvp_keyboard(meeting.id),
             )
             started += 1
         await session.commit()

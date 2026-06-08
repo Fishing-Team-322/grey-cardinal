@@ -69,6 +69,10 @@ async def resolve_recipient(
             is_private=True,
             mention=user.display_name,
         )
+    # Don't spam group chat for tasks with a named but unresolvable assignee —
+    # no one can be pinged and it creates reminder loops.
+    if task.assignee_id is None and task.assignee_text:
+        return None
     if default_chat_id is None:
         return None
     mention: str | None

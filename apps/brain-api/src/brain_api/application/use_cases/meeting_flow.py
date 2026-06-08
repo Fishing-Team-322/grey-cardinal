@@ -340,12 +340,15 @@ async def _record_rsvp(
 
     yes, no, maybe = await _rsvp_counts(session, meeting.id)
     label = {"yes": "Приду", "no": "Не приду", "maybe": "Возможно"}[status]
+    join_url = (meeting.metadata_json or {}).get("join_url")
     poll_text = (
         f"📊 Созвон {_when(meeting, team)}\n\n"
         f"{meeting.title or 'Созвон'}\n\n"
         "Кто придёт?\n\n"
         f"✅ Придут: {yes}   ❌ Нет: {no}   🤔 Возможно: {maybe}"
     )
+    if join_url:
+        poll_text = f"🔗 {join_url}\n\n" + poll_text
     return ActionsResponse(actions=[
         _answer(event.callback_query_id, f"Записал: {label}"),
         EditMessageAction(
