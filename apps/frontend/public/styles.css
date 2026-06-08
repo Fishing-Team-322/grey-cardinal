@@ -540,6 +540,8 @@ h3 { font-size: 22px; }
 .toast-stack { position:fixed; right:20px; bottom:20px; z-index:100; display:grid; gap:8px; }
 .toast { padding:12px 16px; border-radius:var(--r); background:var(--surface-2); border:1px solid var(--line-2); box-shadow:var(--shadow-lg); }
 .toast.ok { border-color:rgba(63,182,96,.35); }
+.toast.info { border-color:rgba(68,147,248,.38); }
+.toast.warn { border-color:rgba(217,164,65,.38); }
 .toast.err { border-color:rgba(229,72,77,.35); }
 .empty-state { min-height:320px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; max-width:620px; }
 .modal-backdrop { position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.65); display:grid; place-items:center; padding:16px; }
@@ -593,6 +595,27 @@ h3 { font-size: 22px; }
 .org-team.green { border-color:rgba(63,182,96,.35); }
 .org-team.yellow { border-color:rgba(217,164,65,.35); }
 .org-team.red { border-color:rgba(229,72,77,.45); }
+.team-dashboard { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:18px; align-items:start; }
+.team-workspace { min-width:0; }
+.team-members-rail {
+  position:sticky; top:84px; display:grid; gap:14px; padding:16px;
+  border:1px solid var(--line); border-radius:var(--r); background:var(--surface);
+}
+.rail-head { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.member-list { display:grid; gap:8px; }
+.member-row {
+  display:grid; grid-template-columns:26px minmax(0,1fr) auto; gap:10px; align-items:center;
+  padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg-2);
+}
+.member-meta { min-width:0; }
+.member-name { font-weight:700; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.member-status { display:flex; align-items:center; gap:6px; color:var(--text-faint); font-size:12px; }
+.member-status span { width:7px; height:7px; border-radius:999px; background:var(--idle); }
+.member-status.online { color:#8fe3a6; }
+.member-status.online span { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+.member-actions { grid-column:1 / -1; display:flex; gap:6px; }
+.member-actions .btn { flex:1; }
+.btn:disabled { opacity:.45; cursor:not-allowed; }
 @media (max-width:720px) {
   .shell { display:block; }
   .sidebar {
@@ -619,4 +642,6 @@ h3 { font-size: 22px; }
   .board-switcher, .agent-rail { position:static; }
   .agent-board { grid-auto-flow:row; grid-auto-columns:auto; }
   .org-team { grid-template-columns:1fr; }
+  .team-dashboard { grid-template-columns:1fr; }
+  .team-members-rail { position:static; }
 }

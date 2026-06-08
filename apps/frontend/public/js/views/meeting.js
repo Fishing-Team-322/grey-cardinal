@@ -15,17 +15,21 @@ export default async function meetingView(root, params) {
   const liveLines = [...(meeting.transcript_lines || [])];
   render(content, meeting, liveLines);
   bindActions(content, meeting);
+  bindTranscriptControls(content, meeting, liveLines);
 
   const update = async (payload) => {
     if (payload?.meeting_id !== meeting.id && payload?.meeting_public_id !== meeting.public_id) return;
     meeting = await api.meetings.get(meeting.id);
     render(content, meeting, liveLines);
     bindActions(content, meeting);
+    bindTranscriptControls(content, meeting, liveLines);
   };
   const transcript = (payload) => {
     if (payload?.meeting_id !== meeting.id && payload?.meeting_public_id !== meeting.public_id) return;
     liveLines.push(payload);
+    content.querySelector("#transcript-empty")?.remove();
     content.querySelector("#transcript-lines")?.insertAdjacentHTML("beforeend", lineHtml(payload));
+    content.querySelector("#transcript-count").textContent = `${liveLines.length} реплик`;
   };
   const unsubs = [
     wsOn("meeting_armed", update),
@@ -51,7 +55,14 @@ function render(content, meeting, liveLines = []) {
         ${(meeting.extracted_tasks || []).map((task) => `<div class="integration-row"><span><b>${escapeHtml(task.title)}</b><span class="meta">${escapeHtml(task.public_id)}</span></span><span class="pill info">${escapeHtml(task.status)}</span></div>`).join("")}
       </div>
     </div>
-    <div class="card card-pad mt-20"><div class="card-head"><div class="card-title">Live-транскрипт</div></div><div id="transcript-lines" class="col gap-10">${liveLines.map(lineHtml).join("") || '<div class="dim">Строки появятся после начала записи.</div>'}</div></div>`;
+    <div class="card card-pad mt-20">
+      <div class="card-head">
+        <div><div class="card-title">Транскрипт созвона</div><div class="card-sub" id="transcript-count">${liveLines.length} реплик</div></div>
+        <button class="btn btn-sm btn-ghost" id="download-transcript" type="button">Скачать TXT</button>
+      </div>
+      <div class="transcript-toolbar"><input class="input" id="transcript-search" type="search" placeholder="Поиск по транскрипту"></div>
+      <div id="transcript-lines" class="col gap-10 mt-12">${liveLines.map(lineHtml).join("") || '<div class="dim" id="transcript-empty">Строки появятся после начала записи.</div>'}</div>
+    </div>`;
 }
 
 function bindActions(content, meeting) {
@@ -72,5 +83,24 @@ function bindActions(content, meeting) {
 }
 
 function lineHtml(line) {
-  return `<div class="code-msg"><span class="accent-text">${escapeHtml(line.speaker_name || line.speaker || "Участник")}</span> ${escapeHtml(line.text || "")}</div>`;
+  return `<div class="code-msg transcript-line" data-transcript="${escapeHtml(`${line.speaker_name || line.speaker || "Участник"} ${line.text || ""}`.toLowerCase())}"><span class="accent-text">${escapeHtml(line.speaker_name || line.speaker || "Участник")}</span> ${escapeHtml(line.text || "")}</div>`;
+}
+
+function bindTranscriptControls(content, meeting, lines) {
+  const search = content.querySelector("#transcript-search");
+  search?.addEventListener("input", () => {
+    const query = search.value.trim().toLowerCase();
+    content.querySelectorAll(".transcript-line").forEach((line) => {
+      line.hidden = query && !line.dataset.transcript.includes(query);
+    });
+  });
+  content.querySelector("#download-transcript")?.addEventListener("click", () => {
+    const body = lines.map((line) => `${line.speaker_name || line.speaker || "Участник"}: ${line.text || ""}`).join("\n");
+    const blob = new Blob([`${meeting.title}\n${meeting.public_id}\n\n${body}`], { type: "text/plain;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${meeting.public_id}-transcript.txt`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
 }

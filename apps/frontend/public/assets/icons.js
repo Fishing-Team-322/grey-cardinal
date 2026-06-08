@@ -62,53 +62,23 @@
         ${item("/app/companies", "company", "Компании", "/app/companies", ["director"])}
         ${item("/app/teams/:id", "team", "Команда", firstTeam(user), ["director", "manager"])}
         ${item("/app/employee", "user", "Моя панель", "/app/employee", ["employee"])}
+        ${item("/app/companies/:id/map", "map", "Карта команд", firstCompanyMap(user), ["director"])}
       </div>
       <div class="nav-group"><div class="nav-label">Аккаунт</div>
-        ${item("/app/me", "user", "Профиль", "/app/me", ["director", "manager", "employee"])}
         ${item("/app/settings", "cog", "Настройки", "/app/settings", ["director", "manager", "employee"])}
       </div>
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
         ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
-        ${item("/app/teams/:teamId/ai-inbox", "inbox", "AI Inbox", firstInbox(user), ["director", "manager"])}
+        ${item("/app/teams/:teamId/ai-inbox", "inbox", "Входящие AI", firstInbox(user), ["director", "manager"])}
         ${item("/app/meetings", "meet", "Созвоны", "/app/meetings", ["director", "manager", "employee"])}
         ${item("/app/leaderboard", "trophy", "Лидерборд", "/app/leaderboard", ["director", "manager", "employee"])}
       </div>
       <div class="nav-group"><div class="nav-label">Интеграции</div>
         ${item("/app/integrations", "plug", "Обзор", "/app/integrations", ["director", "manager"])}
         ${item("/app/integrations/telegram", "tg", "Telegram", "/app/integrations/telegram", ["director", "manager", "employee"])}
-        ${item("/app/integrations/daemon", "daemon", "Daemon", "/app/integrations/daemon", ["director", "manager", "employee"])}
+        ${item("/app/integrations/daemon", "daemon", "Windows-агент", "/app/integrations/daemon", ["director", "manager", "employee"])}
       </div>
       <div class="sidebar-foot">${item("/app/deploy", "deploy", "Деплой", "/app/deploy", ["director"])}</div>`;
-  };
-
-  const extendSidebar = (sidebar, user, role, item) => {
-    const teamId = user.teams?.[0]?.id;
-    const companyId = user.companies?.[0]?.id;
-    const firstGroup = sidebar.querySelector(".nav-group");
-    if (firstGroup && teamId) {
-      firstGroup.insertAdjacentHTML("beforeend", `
-        ${item("/app/teams/:id/board", "board", "Grey Board", `/app/teams/${teamId}/board`, ["director", "manager", "employee"])}
-        ${item("/app/teams/:id/ai-inbox", "inbox", "AI Inbox", `/app/teams/${teamId}/ai-inbox`, ["director", "manager"])}
-        ${item("/app/teams/:id/setup", "cog", "Setup Wizard", `/app/teams/${teamId}/setup`, ["director", "manager"])}
-        ${item("/app/teams/:id/yougile", "plug", "YouGile Sync", `/app/teams/${teamId}/yougile`, ["director", "manager"])}
-        ${item("/app/teams/:id/people", "team", "People", `/app/teams/${teamId}/people`, ["director", "manager", "employee"])}
-      `);
-    }
-    if (firstGroup && companyId) {
-      firstGroup.insertAdjacentHTML("beforeend", item("/app/companies/:id/map", "map", "Team Map", `/app/companies/${companyId}/map`, ["director"]));
-    }
-  };
-
-  const originalSidebar = window.gcSidebar;
-  window.gcSidebar = (user, role) => {
-    originalSidebar(user, role);
-    const sidebar = document.querySelector(".sidebar");
-    if (!sidebar) return;
-    const item = (pattern, icon, label, href, roles) =>
-      roles.includes(role)
-        ? `<a class="nav-item" data-route="${pattern}" href="${href}">${window.gcIcon(icon)}<span>${label}</span></a>`
-        : "";
-    extendSidebar(sidebar, user, role, item);
   };
 
   function firstTeam(user) {
@@ -119,6 +89,9 @@
   }
   function firstInbox(user) {
     return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/ai-inbox` : "/app/teams";
+  }
+  function firstCompanyMap(user) {
+    return user.companies?.[0] ? `/app/companies/${user.companies[0].id}/map` : "/app/companies";
   }
   function roleLabel(role) {
     return { director: "Директор", manager: "Руководитель", employee: "Сотрудник" }[role];

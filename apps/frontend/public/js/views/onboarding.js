@@ -29,6 +29,11 @@ export default async function onboardingView(root) {
     Router.navigate(homeForUser(user), true);
     return;
   }
+  const invite = inviteFromLocation();
+  if (invite) {
+    renderJoin(el, user || {}, invite);
+    return;
+  }
   renderChoice(el, user || {});
 }
 
@@ -53,11 +58,11 @@ function renderChoice(el, user) {
     </div>
   </div>`;
   el.querySelector("#ob-create").onclick = () => renderCreate(el);
-  el.querySelector("#ob-join").onclick = () => renderJoin(el, user);
+  el.querySelector("#ob-join").onclick = () => renderJoin(el, user, inviteFromLocation());
 }
 
 // ── Join flow ────────────────────────────────────────────────────────────────
-function renderJoin(el, user) {
+function renderJoin(el, user, invite = "") {
   el.innerHTML = `
   <div class="ob-wrap">
     <button class="ob-back" id="ob-back">← Назад</button>
@@ -65,7 +70,7 @@ function renderJoin(el, user) {
       <p>Попросите руководителя или директора пригласить вас. Если у вас есть код приглашения — введите его ниже.</p></div>
     <div class="ob-panel">
       <label class="ob-fld">Код или ссылка приглашения
-        <input id="ob-token" placeholder="вставьте код или ссылку">
+        <input id="ob-token" placeholder="вставьте код или ссылку" value="${escapeHtml(invite)}">
       </label>
       <button class="btn btn-primary" id="ob-accept">Присоединиться</button>
       <div class="ob-note" id="ob-join-msg"></div>
@@ -171,7 +176,7 @@ function renderCreate(el) {
   function stepYougile() {
     shell(`<h2>Подключите YouGile</h2><p class="ob-sub">Двусторонняя синхронизация задач с доской YouGile. Необязательно — можно подключить позже.</p>
       <div class="ob-row">
-        <a class="btn btn-primary" href="/app/teams/${state.teamId}/yougile">Открыть подключение YouGile</a>
+        <a class="btn btn-primary" href="/app/integrations/yougile?team=${encodeURIComponent(state.teamId)}">Открыть подключение YouGile</a>
         <button class="btn btn-ghost" id="y-skip">Пропустить</button>
       </div>
       <div class="ob-hint mt-12">Подключение откроется на отдельной странице. Вернитесь сюда, чтобы завершить настройку.</div>
@@ -205,6 +210,11 @@ function renderCreate(el) {
   }
 
   route();
+}
+
+function inviteFromLocation() {
+  const params = new URLSearchParams(location.search);
+  return params.get("invite") || params.get("token") || "";
 }
 
 function injectStyles() {

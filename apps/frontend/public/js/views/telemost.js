@@ -2,14 +2,14 @@ import { api } from "../api.js";
 import { currentTeam, escapeHtml, setTopbar, toast } from "../view-utils.js";
 
 const STATUS_PILL = {
-  connected: { cls: "ok", label: "connected" },
-  expired: { cls: "warn", label: "reconnect required" },
-  error: { cls: "warn", label: "error" },
-  disconnected: { cls: "warn", label: "not connected" },
+  connected: { cls: "ok", label: "подключено" },
+  expired: { cls: "warn", label: "нужно переподключить" },
+  error: { cls: "warn", label: "ошибка" },
+  disconnected: { cls: "warn", label: "не подключено" },
 };
 
 export default async function telemostView(root) {
-  setTopbar("Yandex Telemost");
+  setTopbar("Яндекс Телемост");
   const content = root.querySelector("#telemost-content");
   const team = currentTeam(window.gcCurrentUser, new URLSearchParams(location.search).get("team"));
 
@@ -32,7 +32,7 @@ export default async function telemostView(root) {
 
     content.innerHTML = `<div class="card card-pad-lg" style="max-width:760px">
       <div class="card-head">
-        <div class="card-title">Yandex Telemost</div>
+        <div class="card-title">Яндекс Телемост</div>
         <span class="pill ${pill.cls}"><span class="dot"></span>${pill.label}</span>
       </div>
       <p class="page-desc mt-12">Создавайте ссылки Яндекс Телемоста прямо из Telegram-чата.
@@ -44,10 +44,10 @@ export default async function telemostView(root) {
       <div class="flex gap-10 mt-16">
         ${
           status.connected
-            ? `<button class="btn btn-ghost" id="tm-reconnect">Reconnect</button>
-               <button class="btn btn-ghost" id="tm-disconnect">Disconnect</button>
-               <button class="btn btn-primary" id="tm-test">Test create room</button>`
-            : `<button class="btn btn-primary" id="tm-connect" ${status.server_configured ? "" : "disabled"}>Connect Yandex Telemost</button>`
+            ? `<button class="btn btn-ghost" id="tm-reconnect">Переподключить</button>
+               <button class="btn btn-ghost" id="tm-disconnect">Отключить</button>
+               <button class="btn btn-primary" id="tm-test">Создать тестовую комнату</button>`
+            : `<button class="btn btn-primary" id="tm-connect" ${status.server_configured ? "" : "disabled"}>Подключить Яндекс Телемост</button>`
         }
       </div>
       <div id="tm-test-result" class="mt-12"></div>
@@ -56,7 +56,7 @@ export default async function telemostView(root) {
         <div class="card-title">Настройки</div>
         <label class="flex center gap-10 mt-12">
           <input type="checkbox" id="tm-autojoin" ${settings.enable_meeting_agent_auto_join ? "checked" : ""}>
-          <span>Подключать meeting agent к встрече автоматически</span>
+          <span>Подключать агента записи к встрече автоматически</span>
         </label>
         <label class="flex center gap-10 mt-8">
           <input type="checkbox" checked disabled>
@@ -90,7 +90,7 @@ export default async function telemostView(root) {
         byId("tm-test-result").innerHTML = `<div class="alert">Комната создана:
           <a href="${escapeHtml(res.join_url)}" target="_blank" rel="noopener">${escapeHtml(res.join_url)}</a></div>`;
       } catch (e) {
-        byId("tm-test-result").innerHTML = `<div class="alert alert-error">Не удалось создать комнату: ${escapeHtml(e.code || "error")}</div>`;
+        byId("tm-test-result").innerHTML = `<div class="alert alert-error">Не удалось создать комнату: ${escapeHtml(e.code || "ошибка")}</div>`;
       }
     });
     byId("tm-save")?.addEventListener("click", async () => {

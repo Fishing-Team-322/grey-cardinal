@@ -83,14 +83,14 @@ async function renderConnected(content, team, status, reload) {
     <div class="stat"><div class="stat-label">Задач</div><div class="stat-value mono">${stats.tasks || 0}</div></div>
   </div>
   <section class="integration-band mt-20">
-    <div class="card-head"><div><div class="card-title">Подключено: ${escapeHtml(status.company?.name || team.name)}</div><div class="dim">Последняя синхронизация: ${escapeHtml(status.last_synced_at || "выполняется")}</div></div><span class="pill ${status.sync_errors ? "err" : "ok"}"><span class="dot"></span>${status.sync_errors ? `${status.sync_errors} ошибок` : "connected"}</span></div>
+    <div class="card-head"><div><div class="card-title">Подключено: ${escapeHtml(status.company?.name || team.name)}</div><div class="dim">Последняя синхронизация: ${escapeHtml(status.last_synced_at || "выполняется")}</div></div><span class="pill ${status.sync_errors ? "err" : "ok"}"><span class="dot"></span>${status.sync_errors ? `${status.sync_errors} ошибок` : "подключено"}</span></div>
     <div class="flex gap-8"><button class="btn btn-primary" id="yougile-sync">Синхронизировать</button><button class="btn btn-ghost" id="yougile-disconnect">Отключить</button></div>
   </section>
   <section class="integration-band mt-20">
-    <div class="card-head"><div><div class="card-title">Рабочая доска</div><div class="dim">Выберите board и сопоставьте колонки со статусами Grey Cardinal.</div></div></div>
-    <label>Board<select class="input mt-6" id="mirror-board">${boards.map((board) => `<option value="${board.id}" ${board.is_selected ? "selected" : ""}>${escapeHtml(board.name)}</option>`).join("")}</select></label>
+    <div class="card-head"><div><div class="card-title">Рабочая доска</div><div class="dim">Выберите доску и сопоставьте колонки со статусами Grey Cardinal.</div></div></div>
+    <label>Доска<select class="input mt-6" id="mirror-board">${boards.map((board) => `<option value="${board.id}" ${board.is_selected ? "selected" : ""}>${escapeHtml(board.name)}</option>`).join("")}</select></label>
     <div id="column-map" class="column-map mt-16"></div>
-    <div class="flex gap-8 mt-16"><button class="btn btn-primary" id="save-board">Сохранить mapping</button><button class="btn btn-ghost" id="import-board">Импортировать задачи</button></div>
+    <div class="flex gap-8 mt-16"><button class="btn btn-primary" id="save-board">Сохранить сопоставление</button><button class="btn btn-ghost" id="import-board">Импортировать задачи</button></div>
     <div id="import-result" class="dim mt-12"></div>
   </section>
   <section class="integration-band mt-20">

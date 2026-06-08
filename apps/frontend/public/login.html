@@ -23,13 +23,22 @@
   <script type="module">
     import { api } from "/js/api.js";
     document.getElementById("brand").innerHTML = window.gcBrand(32);
+    const params = new URLSearchParams(location.search);
+    const invite = params.get("invite") || params.get("token");
+    const registerLink = document.querySelector('a[href="/register.html"]');
+    if (invite && registerLink) registerLink.href = `/register.html?invite=${encodeURIComponent(invite)}`;
     document.getElementById("login-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const error = document.getElementById("error");
       try {
         await api.auth.login(data.get("email"), data.get("password"));
-        location.href = new URLSearchParams(location.search).get("next") || "/app";
+        if (invite) {
+          await api.invites.accept(invite);
+          location.href = "/app";
+          return;
+        }
+        location.href = params.get("next") || "/app";
       } catch {
         error.textContent = "Неверный email или пароль";
         error.hidden = false;

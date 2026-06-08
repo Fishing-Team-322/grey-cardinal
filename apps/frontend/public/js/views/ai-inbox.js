@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { escapeHtml, setTopbar, toast } from "../view-utils.js";
 
 export default async function aiInboxView(root, params) {
-  setTopbar("AI Inbox");
+  setTopbar("Входящие AI");
   const content = root.querySelector("#inbox-content");
   let filter = "pending";
   const members = await api.teams.members(params.teamId).then((data) => data.items).catch(() => []);
@@ -52,7 +52,7 @@ function renderItem(item, members) {
       <div class="flex gap-8"><span class="tag">${escapeHtml(item.kind)}</span><span class="pill ${item.status === "pending" ? "warn" : "idle"}">${escapeHtml(item.status)}</span></div>
       <h3>${escapeHtml(task.title || item.raw_text)}</h3>
       <p>${escapeHtml(item.raw_text)}</p>
-      <div class="task-meta"><span>Причина: ${escapeHtml(item.reason)}</span><span>Confidence: ${Math.round(item.confidence * 100)}%</span></div>
+      <div class="task-meta"><span>Причина: ${escapeHtml(item.reason)}</span><span>Уверенность: ${Math.round(item.confidence * 100)}%</span></div>
     </div>
     ${item.status === "pending" ? `<div class="inbox-actions"><select class="input" data-assignee="${item.id}">${memberOptions}</select><button class="btn btn-sm btn-primary" data-approve="${item.id}">Создать в Grey Board</button><button class="btn btn-sm btn-ghost" data-reject="${item.id}">Отклонить</button></div>` : ""}
   </article>`;

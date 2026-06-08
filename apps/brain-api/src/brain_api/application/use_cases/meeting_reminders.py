@@ -208,7 +208,12 @@ def _format_ai_summary(data: dict[str, Any], fallback: str) -> str:
     return "\n".join(result)[:3500]
 
 
-async def run_meeting_reminders(session_factory, gateway, now: datetime | None = None) -> int:
+async def run_meeting_reminders(
+    session_factory,
+    gateway,
+    now: datetime | None = None,
+    websocket_manager=None,
+) -> int:
     now = now or datetime.now(UTC)
     soon = now + timedelta(minutes=REMINDER_LEAD_MINUTES)
     sent = 0
@@ -238,6 +243,21 @@ async def run_meeting_reminders(session_factory, gateway, now: datetime | None =
             for tg_id in recipients:
                 await gateway.send_message(tg_id, text)
                 sent += 1
+            if websocket_manager is not None:
+                await websocket_manager.broadcast(
+                    {
+                        "event": "meeting_reminder",
+                        "payload": {
+                            "meeting_id": str(meeting.id),
+                            "public_id": meeting.public_id,
+                            "team_id": str(meeting.team_id) if meeting.team_id else None,
+                            "title": meeting.title,
+                            "scheduled_at": meeting.scheduled_at.isoformat()
+                            if meeting.scheduled_at
+                            else None,
+                        },
+                    }
+                )
             new_meta = dict(meta)
             new_meta["reminded_5min"] = True
             meeting.metadata_json = new_meta

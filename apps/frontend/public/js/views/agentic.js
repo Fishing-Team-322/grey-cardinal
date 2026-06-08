@@ -2,12 +2,12 @@ import { api } from "../api.js";
 import { bindForm, currentTeam, errorMessage, escapeHtml, formatDate, setTopbar, toast } from "../view-utils.js";
 
 const BOARD_VIEWS = [
-  ["agent", "Agent View"],
-  ["status", "Status View"],
-  ["people", "People View"],
-  ["risk", "Risk View"],
-  ["timeline", "Timeline View"],
-  ["source", "Source View"],
+  ["agent", "Ассистент"],
+  ["status", "Статусы"],
+  ["people", "Люди"],
+  ["risk", "Риски"],
+  ["timeline", "Сроки"],
+  ["source", "Источник"],
 ];
 
 function managedTeam(params = {}) {
@@ -25,7 +25,7 @@ export async function greyBoardView(root, params, query) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
   const view = query.view || "agent";
-  setHeader(root, "Grey Board", "Живая доска задач, источников, рисков и действий агента.", `<a class="btn btn-ghost" href="/app/teams/${team.id}/ai-inbox">AI Inbox</a><a class="btn btn-primary" href="/app/teams/${team.id}/yougile">YouGile</a>`);
+  setHeader(root, "Grey Board", "Живая доска задач, источников, рисков и действий ассистента.", `<a class="btn btn-ghost" href="/app/teams/${team.id}/ai-inbox">Входящие AI</a><a class="btn btn-primary" href="/app/teams/${team.id}/yougile">YouGile</a>`);
   await renderBoard(root, team.id, view);
 }
 
@@ -41,7 +41,7 @@ async function renderBoard(root, teamId, view) {
         <div class="agent-board">${(data.groups || data.columns || []).map(groupHtml).join("")}</div>
       </section>
       <aside class="agent-rail">
-        <div class="rail-title">Agent Recommendations</div>
+        <div class="rail-title">Рекомендации ассистента</div>
         ${(data.recommendations || []).map(recommendationHtml).join("") || '<div class="dim">Критичных рекомендаций нет.</div>'}
       </aside>
     </div>`;
@@ -59,13 +59,13 @@ function healthBar(health) {
     ${healthPill("LLM", health.llm === "configured")}
     ${healthPill("Telegram", health.telegram === "linked")}
     ${healthPill("YouGile", health.yougile === "synced")}
-    <span class="pill ${health.open_risks ? "warn" : "ok"}"><span class="dot"></span>${health.open_risks || 0} risks</span>
-    <span class="pill idle">last sync: ${escapeHtml(health.last_sync || "never")}</span>
+    <span class="pill ${health.open_risks ? "warn" : "ok"}"><span class="dot"></span>${health.open_risks || 0} рисков</span>
+    <span class="pill idle">последняя синхронизация: ${escapeHtml(health.last_sync || "не было")}</span>
   </div>`;
 }
 
 function healthPill(label, ok) {
-  return `<span class="pill ${ok ? "ok" : "warn"}"><span class="dot"></span>${label} ${ok ? "OK" : "setup"}</span>`;
+  return `<span class="pill ${ok ? "ok" : "warn"}"><span class="dot"></span>${label} ${ok ? "готово" : "настроить"}</span>`;
 }
 
 function groupHtml(group) {
@@ -80,18 +80,18 @@ function cardHtml(card) {
   return `<article class="task-evidence-card">
     <div class="flex between gap-8"><b>${escapeHtml(card.public_id)} ${escapeHtml(card.title)}</b><span class="pill ${card.yougile.sync_status === "conflict" ? "err" : "info"}">${escapeHtml(card.yougile.sync_status)}</span></div>
     <div class="task-meta">${escapeHtml(card.assignee_name || card.assignee_text || "Без исполнителя")} · ${escapeHtml(card.priority)} · ${card.deadline ? formatDate(card.deadline) : "без дедлайна"}</div>
-    <div class="evidence-line"><span>Источник</span><b>${escapeHtml(card.source.type)}</b><span>Confidence</span><b>${Math.round((card.confidence || 0) * 100)}%</b></div>
+    <div class="evidence-line"><span>Источник</span><b>${escapeHtml(sourceLabel(card.source.type))}</b><span>Уверенность</span><b>${Math.round((card.confidence || 0) * 100)}%</b></div>
     ${card.signals.length ? `<div class="signal-list">${card.signals.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
     <details class="mt-8"><summary>Доказательства агента</summary>
       <div class="source-text">${escapeHtml(card.source.text || card.description || "Источник не сохранен")}</div>
       <div class="agent-log">${card.agent_history.map((item) => `<div><span>${escapeHtml(item.at || "")}</span>${escapeHtml(item.text)}</div>`).join("")}</div>
-      <div class="code-msg mt-8">YouGile: ${escapeHtml(card.yougile.external_task_id || "not linked")} · ${escapeHtml(card.yougile.last_sync || "no sync")}</div>
+      <div class="code-msg mt-8">YouGile: ${escapeHtml(card.yougile.external_task_id || "не связано")} · ${escapeHtml(card.yougile.last_sync || "синхронизации не было")}</div>
     </details>
     <div class="card-actions">
       ${actionBtn(card, "start", "В работу")}
       ${actionBtn(card, "done", "Готово")}
       ${actionBtn(card, "blocked", "Блок")}
-      ${actionBtn(card, "review", "Review")}
+      ${actionBtn(card, "review", "На проверку")}
       ${card.yougile.external_url ? `<a class="btn btn-sm btn-ghost" target="_blank" href="${escapeHtml(card.yougile.external_url)}">YouGile</a>` : ""}
     </div>
   </article>`;
@@ -112,15 +112,15 @@ function recommendationHtml(item) {
 export async function aiInboxView(root, params) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
-  setHeader(root, "AI Inbox", "Human-in-the-loop входящие: предложения задач, конфликты, дубли и низкая уверенность.");
+  setHeader(root, "Входящие AI", "Входящие решения: предложения задач, конфликты, дубли и низкая уверенность.");
   const content = root.querySelector("#agentic-content");
   const data = await api.aiInbox.list(team.id);
-  content.innerHTML = `<div class="inbox-list">${data.items.map(inboxItem).join("") || '<div class="note warn">AI Inbox пуст.</div>'}</div>`;
+  content.innerHTML = `<div class="inbox-list">${data.items.map(inboxItem).join("") || '<div class="note warn">Входящие AI пусты.</div>'}</div>`;
   content.querySelectorAll("[data-inbox]").forEach((button) => {
     button.onclick = async () => {
       const fn = button.dataset.inboxAction === "approve" ? api.aiInbox.approve : api.aiInbox.reject;
       await fn(button.dataset.inbox);
-      toast("AI Inbox обновлен");
+      toast("Входящие AI обновлены");
       await aiInboxView(root, params);
     };
   });
@@ -138,7 +138,7 @@ function inboxItem(item) {
 export async function setupView(root, params) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
-  setHeader(root, "Setup Wizard", "Мастер внедрения: компания, команда, Telegram, YouGile, LLM и тестовый сценарий.", `<button class="btn btn-primary" id="run-demo">Запустить demo</button>`);
+  setHeader(root, "Мастер настройки", "Мастер внедрения: компания, команда, Telegram, YouGile, LLM и тестовый сценарий.", `<button class="btn btn-primary" id="run-demo">Запустить демо</button>`);
   const data = await api.setup.status(team.id);
   root.querySelector("#agentic-content").innerHTML = `<div class="setup-steps">${data.steps.map(step => `<div class="check-item ${step.status === "done" ? "done" : step.status === "warning" ? "active" : ""}"><div class="check-box">✓</div><div><div class="check-title">${escapeHtml(step.title)}</div><div class="check-desc">${escapeHtml(step.status)}</div></div></div>`).join("")}</div>`;
   document.getElementById("run-demo").onclick = async () => {
@@ -151,11 +151,11 @@ export async function setupView(root, params) {
 export async function yougileFullView(root, params) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
-  setHeader(root, "YouGile Full Sync", "Подключение, выбор реальной доски, mapping колонок, импорт и manual sync.");
+  setHeader(root, "Синхронизация YouGile", "Подключение, выбор реальной доски, сопоставление колонок, импорт и ручная синхронизация.");
   const content = root.querySelector("#agentic-content");
   const status = await api.yougile.statusFull(team.id).catch(() => ({ connected: false }));
   if (!status.connected) {
-    content.innerHTML = `<div class="card card-pad-lg"><h2>Подключить YouGile</h2><form id="yg-full" class="grid g2 mt-20"><label>Login<input class="input mt-6" name="login"></label><label>Password<input class="input mt-6" name="password" type="password"></label><label>Company ID<input class="input mt-6" name="company_id"></label><label>API key<input class="input mt-6" name="api_key"></label><button class="btn btn-primary" type="submit">Проверить и подключить</button></form></div>`;
+    content.innerHTML = `<div class="card card-pad-lg"><h2>Подключить YouGile</h2><form id="yg-full" class="grid g2 mt-20"><label>Логин<input class="input mt-6" name="login"></label><label>Пароль<input class="input mt-6" name="password" type="password"></label><label>ID компании<input class="input mt-6" name="company_id"></label><label>API-ключ<input class="input mt-6" name="api_key"></label><button class="btn btn-primary" type="submit">Проверить и подключить</button></form></div>`;
     bindForm(content, "#yg-full", async (data) => {
       await api.yougile.connectFull(team.id, Object.fromEntries(data.entries()));
       toast("YouGile подключен");
@@ -189,22 +189,22 @@ export async function yougileFullView(root, params) {
   };
   content.querySelector("#sync-now").onclick = async () => {
     await api.yougile.syncFull(team.id);
-    toast("Manual sync выполнен");
+    toast("Ручная синхронизация выполнена");
     await yougileFullView(root, params);
   };
 }
 
 export async function teamMapView(root, params) {
   const companyId = params.companyId || params.id;
-  setHeader(root, "Team Map", "Операционная карта команд, рисков и sync health.");
+  setHeader(root, "Карта команд", "Операционная карта команд, рисков и состояния синхронизации.");
   const data = await api.companies.map(companyId);
-  root.querySelector("#agentic-content").innerHTML = `<div class="org-map"><div class="org-root">${escapeHtml(data.company.name)}</div>${data.teams.map(team => `<a href="/app/teams/${team.id}/board" class="org-team ${team.status}"><b>${escapeHtml(team.name)}</b><span>Open ${team.open_tasks}</span><span>Risks ${team.risks}</span><span>${escapeHtml(team.sync_health)}</span></a>`).join("")}</div>`;
+  root.querySelector("#agentic-content").innerHTML = `<div class="org-map"><div class="org-root">${escapeHtml(data.company.name)}</div>${data.teams.map(team => `<a href="/app/teams/${team.id}/board" class="org-team ${team.status}"><b>${escapeHtml(team.name)}</b><span>Открыто ${team.open_tasks}</span><span>Риски ${team.risks}</span><span>${escapeHtml(team.sync_health)}</span></a>`).join("")}</div>`;
 }
 
 export async function recommendationsView(root, params) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
-  setHeader(root, "Agent Recommendations", "Следующие действия руководителя.");
+  setHeader(root, "Рекомендации ассистента", "Следующие действия руководителя.");
   const data = await api.recommendations.team(team.id);
   root.querySelector("#agentic-content").innerHTML = `<div class="grid g2">${data.items.map(recommendationHtml).join("") || '<div class="note warn">Рекомендаций нет.</div>'}</div>`;
 }
@@ -212,7 +212,7 @@ export async function recommendationsView(root, params) {
 export async function peopleView(root, params) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
-  setHeader(root, "People", "Сотрудники, нагрузка, отсутствие, достижения.");
+  setHeader(root, "Сотрудники", "Сотрудники, нагрузка, отсутствие, достижения.");
   const data = await api.people.team(team.id);
   root.querySelector("#agentic-content").innerHTML = `<div class="grid g3">${data.items.map(personCard).join("")}</div>`;
 }
@@ -427,9 +427,9 @@ function injectProfileStyles() {
 export async function telegramTopicsView(root, params) {
   const team = managedTeam(params);
   if (!team) return empty(root, "Команда не найдена");
-  setHeader(root, "Telegram Topics", "Привязка Telegram topics к team/board/source stream.");
+  setHeader(root, "Темы Telegram", "Привязка тем Telegram к команде, доске и источнику.");
   const data = await api.topics.list(team.id);
-  root.querySelector("#agentic-content").innerHTML = `<div class="card card-pad"><table class="tbl"><thead><tr><th>Chat</th><th>Thread</th><th>Source</th><th>Status</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.chat_title || item.telegram_chat_id)}</td><td class="mono">${item.message_thread_id}</td><td>${escapeHtml(item.source_name || "Telegram topic")}</td><td><span class="pill ${item.bound ? "ok" : "warn"}">${item.bound ? "bound" : "new"}</span></td></tr>`).join("") || '<tr><td colspan="4">Темы появятся после сообщений из Telegram topics.</td></tr>'}</tbody></table></div>`;
+  root.querySelector("#agentic-content").innerHTML = `<div class="card card-pad"><table class="tbl"><thead><tr><th>Чат</th><th>Тема</th><th>Источник</th><th>Статус</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.chat_title || item.telegram_chat_id)}</td><td class="mono">${item.message_thread_id}</td><td>${escapeHtml(item.source_name || "Тема Telegram")}</td><td><span class="pill ${item.bound ? "ok" : "warn"}">${item.bound ? "привязано" : "новая"}</span></td></tr>`).join("") || '<tr><td colspan="4">Темы появятся после сообщений из Telegram.</td></tr>'}</tbody></table></div>`;
 }
 
 function personCard(item) {
@@ -439,6 +439,16 @@ function personCard(item) {
 
 function stat(label, value) {
   return `<div class="stat"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value mono">${escapeHtml(String(value))}</div></div>`;
+}
+
+function sourceLabel(value) {
+  return {
+    manual: "вручную",
+    telegram: "Telegram",
+    meeting: "созвон",
+    meeting_transcript: "транскрипт",
+    yougile: "YouGile",
+  }[value] || value || "источник";
 }
 
 function empty(root, text) {

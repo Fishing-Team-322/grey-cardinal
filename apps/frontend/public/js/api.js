@@ -95,6 +95,12 @@ export const api = {
     members(id) {
       return request("GET", `/api/teams/${id}/members`);
     },
+    updateMemberRole(teamId, userId, role) {
+      return request("PATCH", `/api/teams/${teamId}/members/${userId}`, { body: { role } });
+    },
+    removeMember(teamId, userId) {
+      return request("DELETE", `/api/teams/${teamId}/members/${userId}`);
+    },
     invite(team, role) {
       return request("POST", `/api/companies/${team.company_id}/invites`, {
         body: { scope: "team", team_id: team.id, role },

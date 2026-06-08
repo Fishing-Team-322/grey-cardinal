@@ -56,7 +56,11 @@ async def run_morning_task_summary(container: Container) -> None:
 
 
 async def run_meeting_5min_reminders(container: Container) -> None:
-    await run_meeting_reminders(container.session_factory, container.telegram_gateway)
+    await run_meeting_reminders(
+        container.session_factory,
+        container.telegram_gateway,
+        websocket_manager=container.websocket_manager,
+    )
 
 
 async def run_meeting_finalize_job(container: Container) -> None:

@@ -1,7 +1,8 @@
 import { Router } from "./router.js?v=20260608-2";
 import { getCurrentUser, guardFor, homeForUser, roleForUser } from "./auth.js";
 import { appStore } from "./store.js";
-import { wsConnect } from "./ws.js";
+import { wsConnect, wsOn } from "./ws.js";
+import { toast } from "./view-utils.js";
 
 import director from "./views/director.js";
 import companies from "./views/companies.js";
@@ -35,6 +36,28 @@ function ensureMobileMenu() {
   topbar.prepend(button);
 }
 
+function bindCabinetNotifications(user) {
+  const myId = String(user.id || "");
+  const myName = (user.display_name || user.login || "").trim().toLowerCase();
+  const myTeams = new Set((user.teams || []).map((team) => String(team.id)));
+  wsOn("task_assigned", (payload) => {
+    if (payload?.assignee_id && String(payload.assignee_id) !== myId) return;
+    toast(`Вам назначили задачу: ${payload?.public_id || ""} ${payload?.title || ""}`.trim(), "info");
+  });
+  wsOn("task_created", (payload) => {
+    const assignee = String(payload?.assignee || "").trim().toLowerCase();
+    if (!assignee || !myName || assignee !== myName) return;
+    toast(`Новая задача на вас: ${payload?.public_id || ""} ${payload?.title || ""}`.trim(), "info");
+  });
+  wsOn("meeting_reminder", (payload) => {
+    if (payload?.team_id && !myTeams.has(String(payload.team_id))) return;
+    toast(`Скоро созвон: ${payload?.title || payload?.public_id || "встреча"}`, "info");
+  });
+  wsOn("reminder_sent", (payload) => {
+    if (payload?.kind === "deadline") toast(`Скоро дедлайн: ${payload?.public_id || "задача"}`, "warn");
+  });
+}
+
 const topbar = document.getElementById("app-topbar");
 if (topbar) new MutationObserver(ensureMobileMenu).observe(topbar, { childList: true });
 ensureMobileMenu();
@@ -63,6 +86,7 @@ async function boot() {
   appStore.state.selectedTeamId = user.teams?.[0]?.id || null;
   window.gcSidebar(user, roleForUser(user));
   wsConnect();
+  bindCabinetNotifications(user);
 
   Router.register("/app/companies", "/partials/companies.html", companies, guardFor("director"));
   Router.register("/app/companies/:id", "/partials/director.html", director, guardFor("director"));

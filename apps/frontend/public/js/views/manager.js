@@ -41,6 +41,8 @@ async function render(root, team) {
     api.llm.health(team.id).catch(() => ({ status: "error" })),
   ]);
   root.querySelector("#manager-content").innerHTML = `
+    <div class="team-dashboard">
+    <section class="team-workspace">
     <div class="grid g4">
       <div class="stat"><div class="stat-label">Активных задач</div><div class="stat-value mono">${localTasks.items.filter((task) => !["done", "cancelled"].includes(task.status)).length}</div></div>
       <div class="stat"><div class="stat-label">Созвонов</div><div class="stat-value mono">${meetings.items.length}</div></div>
@@ -60,9 +62,13 @@ async function render(root, team) {
         ${integration("Telegram-чат", telegram.linked, "/app/integrations/telegram")}
         ${integration("YouGile", yougile.connected, "/app/integrations/yougile")}
         ${integration("LLM (семантика)", llm.status === "ok", "/app/integrations/llm")}
-        ${integration("Windows Agent", agents.agents.length > 0, "/app/integrations/daemon")}
+        ${integration("Windows-агент", agents.agents.length > 0, "/app/integrations/daemon")}
       </div>
+    </div>
+    </section>
+    ${membersRail(team, members.items || [])}
     </div>`;
+  bindMemberActions(root, team);
 }
 
 function taskKanban(tasks) {
@@ -92,7 +98,89 @@ async function loadBoard(teamId) {
 }
 
 function integration(name, connected, href) {
-  return `<a class="integration-row" href="${href}"><span>${name}</span><span class="pill ${connected ? "ok" : "warn"}"><span class="dot"></span>${connected ? "connected" : "настроить"}</span></a>`;
+  return `<a class="integration-row" href="${href}"><span>${name}</span><span class="pill ${connected ? "ok" : "warn"}"><span class="dot"></span>${connected ? "подключено" : "настроить"}</span></a>`;
+}
+
+function membersRail(team, members) {
+  const currentUser = window.gcCurrentUser || {};
+  const teamRole = currentUser.teams?.find((item) => item.id === team.id)?.role;
+  const canManage = teamRole === "manager" || currentUser.companies?.some((company) => company.id === team.company_id && company.role === "director");
+  const sorted = [...members].sort((a, b) => Number(b.online) - Number(a.online) || roleRank(a.role) - roleRank(b.role) || (a.display_name || "").localeCompare(b.display_name || "", "ru"));
+  return `<aside class="team-members-rail">
+    <div class="rail-head">
+      <div><div class="eyebrow muted">Участники отдела</div><div class="rail-title">${sorted.length} человек</div></div>
+      <button class="btn btn-sm btn-primary" id="rail-invite" type="button">Пригласить</button>
+    </div>
+    <div class="member-list">
+      ${sorted.map((member) => memberRow(member, canManage, String(currentUser.id || ""))).join("") || '<div class="dim">В команде пока никого нет.</div>'}
+    </div>
+  </aside>`;
+}
+
+function memberRow(member, canManage, currentUserId) {
+  const initials = (member.display_name || member.email || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  const avatarStyle = member.photo_data_url
+    ? `background-image:url('${escapeHtml(member.photo_data_url)}');background-size:cover;background-position:center`
+    : "background:#2a2a33";
+  const isSelf = String(member.id) === currentUserId;
+  const nextRole = member.role === "manager" ? "employee" : "manager";
+  const roleAction = member.role === "manager" ? "Снять" : "Назначить";
+  return `<div class="member-row" data-user="${escapeHtml(member.id)}">
+    <div class="member-avatar av sm" style="${avatarStyle}">${member.photo_data_url ? "" : escapeHtml(initials)}</div>
+    <div class="member-meta">
+      <div class="member-name">${escapeHtml(member.display_name || member.email)}</div>
+      <div class="member-status ${member.online ? "online" : ""}"><span></span>${member.online ? "онлайн" : `был ${formatLastSeen(member.last_seen_at)}`}</div>
+    </div>
+    <span class="tag">${member.role === "manager" ? "Руководитель" : "Сотрудник"}</span>
+    ${canManage ? `<div class="member-actions">
+      <button class="btn btn-sm btn-ghost member-role" data-role="${nextRole}" type="button">${roleAction}</button>
+      <button class="btn btn-sm btn-ghost member-remove" type="button" ${isSelf ? "disabled" : ""}>Удалить</button>
+    </div>` : ""}
+  </div>`;
+}
+
+function bindMemberActions(root, team) {
+  root.querySelector("#rail-invite")?.addEventListener("click", () => createInvite(root, team));
+  root.querySelectorAll(".member-role").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const userId = button.closest(".member-row")?.dataset.user;
+      try {
+        await api.teams.updateMemberRole(team.id, userId, button.dataset.role);
+        toast(button.dataset.role === "manager" ? "Руководитель назначен" : "Роль обновлена");
+        await render(root, team);
+      } catch (error) {
+        toast(errorMessage(error), "err");
+      }
+    });
+  });
+  root.querySelectorAll(".member-remove").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest(".member-row");
+      const name = row?.querySelector(".member-name")?.textContent || "сотрудника";
+      if (!confirm(`Удалить ${name} из отдела?`)) return;
+      try {
+        await api.teams.removeMember(team.id, row.dataset.user);
+        toast("Сотрудник удалён");
+        await render(root, team);
+      } catch (error) {
+        toast(errorMessage(error), "err");
+      }
+    });
+  });
+}
+
+function roleRank(role) {
+  return role === "manager" ? 0 : 1;
+}
+
+function formatLastSeen(value) {
+  if (!value) return "не появлялся";
+  const date = new Date(value);
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return "только что";
+  if (minutes < 60) return `${minutes} мин назад`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)} ч назад`;
+  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
 }
 
 async function createInvite(root, team) {

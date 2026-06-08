@@ -115,6 +115,10 @@ class TaskStatusResponseRequest(BaseModel):
     reason: str | None = None
 
 
+class TeamMemberRoleRequest(BaseModel):
+    role: str
+
+
 @router.post("/api/companies", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 async def create_company(
     body: CompanyCreateRequest,
@@ -282,10 +286,10 @@ async def get_team(
     team_id: UUID, current_user: CurrentUser, session: AsyncSession = Depends(get_db)
 ) -> TeamResponse:
     ctx = await build_tenant_context(current_user.id, session)
-    require_team_member(ctx, team_id)
     team = await session.get(m.TeamModel, team_id)
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    _require_team_access(ctx, team)
     return TeamResponse(
         id=team.id,
         company_id=team.company_id,
@@ -303,13 +307,28 @@ async def list_team_members(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     ctx = await build_tenant_context(current_user.id, session)
-    require_team_member(ctx, team_id)
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    _require_team_access(ctx, team)
     rows = await session.execute(
-        select(m.UserModel, m.TeamMemberModel.role, m.TeamMemberModel.joined_at)
+        select(
+            m.UserModel,
+            m.TeamMemberModel.role,
+            m.TeamMemberModel.joined_at,
+            func.max(m.DeviceModel.last_seen_at),
+            func.max(m.ClientSessionModel.last_seen_at),
+            func.max(m.MeetingParticipantModel.last_seen_at),
+        )
         .join(m.TeamMemberModel, m.TeamMemberModel.user_id == m.UserModel.id)
+        .outerjoin(m.DeviceModel, m.DeviceModel.user_id == m.UserModel.id)
+        .outerjoin(m.ClientSessionModel, m.ClientSessionModel.user_id == m.UserModel.id)
+        .outerjoin(m.MeetingParticipantModel, m.MeetingParticipantModel.user_id == m.UserModel.id)
         .where(m.TeamMemberModel.team_id == team_id)
+        .group_by(m.UserModel.id, m.TeamMemberModel.role, m.TeamMemberModel.joined_at)
         .order_by(m.TeamMemberModel.joined_at, m.UserModel.display_name)
     )
+    now = datetime.now(UTC)
     return {
         "items": [
             {
@@ -320,10 +339,72 @@ async def list_team_members(
                 "telegram_username": user.telegram_username,
                 "telegram_linked": user.telegram_user_id is not None,
                 "joined_at": joined_at,
+                "last_seen_at": _latest_dt(device_seen, session_seen, meeting_seen),
+                "online": _is_online(_latest_dt(device_seen, session_seen, meeting_seen), now),
+                "photo_data_url": user.photo_data_url,
             }
-            for user, role, joined_at in rows.all()
+            for user, role, joined_at, device_seen, session_seen, meeting_seen in rows.all()
         ]
     }
+
+
+@router.patch("/api/teams/{team_id}/members/{user_id}")
+async def update_team_member_role(
+    team_id: UUID,
+    user_id: UUID,
+    body: TeamMemberRoleRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    if body.role not in {"manager", "employee"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid member role")
+    ctx = await build_tenant_context(current_user.id, session)
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    _require_member_admin(ctx, team)
+    member = await session.scalar(
+        select(m.TeamMemberModel).where(
+            m.TeamMemberModel.team_id == team_id,
+            m.TeamMemberModel.user_id == user_id,
+        )
+    )
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team member not found")
+    if member.user_id == current_user.id and member.role == "manager" and body.role != "manager":
+        managers = await _manager_count(session, team_id)
+        if managers <= 1:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Нельзя снять последнего руководителя")
+    member.role = body.role
+    session.add(member)
+    await session.commit()
+    return {"id": str(member.user_id), "role": member.role}
+
+
+@router.delete("/api/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_team_member(
+    team_id: UUID,
+    user_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    ctx = await build_tenant_context(current_user.id, session)
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    _require_member_admin(ctx, team)
+    member = await session.scalar(
+        select(m.TeamMemberModel).where(
+            m.TeamMemberModel.team_id == team_id,
+            m.TeamMemberModel.user_id == user_id,
+        )
+    )
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team member not found")
+    if member.role == "manager" and await _manager_count(session, team_id) <= 1:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Нельзя удалить последнего руководителя")
+    await session.delete(member)
+    await session.commit()
 
 
 @router.get("/api/teams/{team_id}/tasks")
@@ -335,7 +416,10 @@ async def list_team_tasks(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     ctx = await build_tenant_context(current_user.id, session)
-    require_team_member(ctx, team_id)
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    _require_team_access(ctx, team)
     statement = (
         select(m.TaskModel, m.UserModel)
         .outerjoin(m.UserModel, m.UserModel.id == m.TaskModel.assignee_id)
@@ -723,7 +807,10 @@ async def list_team_meetings(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     ctx = await build_tenant_context(current_user.id, session)
-    require_team_member(ctx, team_id)
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found")
+    _require_team_access(ctx, team)
     rows = (
         await session.execute(
             select(m.MeetingModel)
@@ -1291,6 +1378,38 @@ async def _unique_telegram_link_code(session: AsyncSession) -> str:
 
 def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _latest_dt(*values: datetime | None) -> datetime | None:
+    normalized = [_as_utc(value) for value in values if value is not None]
+    return max(normalized) if normalized else None
+
+
+def _is_online(last_seen_at: datetime | None, now: datetime) -> bool:
+    return bool(last_seen_at and now - _as_utc(last_seen_at) <= timedelta(minutes=5))
+
+
+async def _manager_count(session: AsyncSession, team_id: UUID) -> int:
+    return int(
+        await session.scalar(
+            select(func.count())
+            .select_from(m.TeamMemberModel)
+            .where(m.TeamMemberModel.team_id == team_id, m.TeamMemberModel.role == "manager")
+        )
+        or 0
+    )
+
+
+def _require_member_admin(ctx, team: m.TeamModel) -> None:
+    if ctx.company_roles.get(team.company_id) == "director":
+        return
+    require_team_role(ctx, team.id, "manager")
+
+
+def _require_team_access(ctx, team: m.TeamModel) -> None:
+    if ctx.company_roles.get(team.company_id) == "director":
+        return
+    require_team_member(ctx, team.id)
 
 
 def _meeting_payload(row: m.MeetingModel) -> dict:

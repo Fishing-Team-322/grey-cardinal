@@ -7,7 +7,7 @@ let boardUnsubs = [];
 
 const VIEWS = [
   ["status", "Статусы"],
-  ["agent", "Agent"],
+  ["agent", "Ассистент"],
   ["people", "Люди"],
   ["risk", "Риски"],
   ["timeline", "Сроки"],
@@ -363,7 +363,7 @@ function renderCard(task, columnKey = null) {
   const searchText = `${task.public_id} ${task.title} ${aName} ${task.status}`.toLowerCase();
   return `<div class="gc-card ${prio}" data-task-id="${escapeAttr(task.id)}" data-col-key="${escapeAttr(columnKey || task.status)}" data-mine="${mine}" data-search="${escapeAttr(searchText)}" data-task='${escapeAttr(JSON.stringify(task))}'>
     <button class="c-copy" data-copy="${escapeAttr(task.public_id)}" title="Скопировать ID">📋</button>
-    <div class="c-top"><span class="c-pid">${escapeHtml(task.public_id)}</span><span class="c-src">${escapeHtml(task.source)}</span></div>
+    <div class="c-top"><span class="c-pid">${escapeHtml(task.public_id)}</span><span class="c-src">${escapeHtml(sourceLabel(task.source))}</span></div>
     <div class="c-title">${escapeHtml(task.title)}</div>
     <div class="c-foot">${ava}${dl}<span class="sync-dot ${sc}" title="YouGile: ${escapeHtml(task.sync.status)}"></span></div>
   </div>`;
@@ -529,4 +529,14 @@ function openStatusEditor(root, teamId, reload) {
 
 function escapeAttr(value) {
   return String(value).replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+}
+
+function sourceLabel(value) {
+  return {
+    manual: "вручную",
+    telegram: "Telegram",
+    meeting: "созвон",
+    meeting_transcript: "транскрипт",
+    yougile: "YouGile",
+  }[value] || value || "источник";
 }

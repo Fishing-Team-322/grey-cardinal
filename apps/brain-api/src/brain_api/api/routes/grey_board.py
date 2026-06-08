@@ -275,6 +275,20 @@ async def assign_task(
         link.sync_status = "pending_update"
     await session.commit()
     sync = await container.board_mirror.sync_task_fields(task.id)
+    await container.websocket_manager.broadcast(
+        {
+            "event": "task_assigned",
+            "payload": {
+                "task_id": str(task.id),
+                "public_id": task.public_id,
+                "title": task.title,
+                "team_id": str(task.team_id),
+                "assignee_id": str(user.id) if user else None,
+                "assignee_name": user.display_name if user else None,
+                "actor_id": str(current_user.id),
+            },
+        }
+    )
     return {
         "task_id": str(task.id),
         "assignee": _user_payload(user),
