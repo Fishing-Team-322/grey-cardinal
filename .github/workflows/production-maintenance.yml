@@ -1,0 +1,92 @@
+name: Production maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Maintenance operation to run"
+        required: true
+        type: choice
+        options:
+          - clean-operational-db
+
+concurrency:
+  group: production-maintenance
+  cancel-in-progress: false
+
+jobs:
+  clean-operational-db:
+    if: inputs.operation == 'clean-operational-db'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean operational production data
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          port: ${{ secrets.PROD_PORT }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            export PROD_PATH="${{ secrets.PROD_PATH }}"
+            cd "$PROD_PATH"
+
+            echo "Stopping write-heavy services..."
+            docker compose -f docker-compose.prod.yml stop telegram-bot telemost-recorder || true
+
+            echo "Cleaning operational tables..."
+            docker compose -f docker-compose.prod.yml exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+            DO $$
+            DECLARE
+              table_names text[] := ARRAY[
+                'meeting_agent_join_jobs',
+                'transcript_events',
+                'meeting_rsvp',
+                'meeting_participants',
+                'meetings',
+                'confirmations',
+                'task_comments',
+                'board_cards',
+                'ai_inbox_items',
+                'agent_recommendations',
+                'sync_events',
+                'external_task_links',
+                'task_proposals',
+                'tasks',
+                'chat_messages',
+                'reminder_logs',
+                'digest_logs',
+                'daily_sync_reports',
+                'daily_sync_sessions',
+                'absence_periods',
+                'gamification_events',
+                'user_xp_events',
+                'user_xp_totals',
+                'yougile_sync_log'
+              ];
+              existing_tables text;
+            BEGIN
+              SELECT string_agg(format('%I', tablename), ', ')
+                INTO existing_tables
+              FROM pg_tables
+              WHERE schemaname = 'public'
+                AND tablename = ANY(table_names);
+
+              IF existing_tables IS NULL THEN
+                RAISE NOTICE 'No operational tables found to truncate';
+              ELSE
+                EXECUTE 'TRUNCATE TABLE ' || existing_tables || ' RESTART IDENTITY CASCADE';
+                RAISE NOTICE 'Truncated tables: %', existing_tables;
+              END IF;
+            END $$;
+            SQL
+
+            echo "Restarting app services..."
+            docker compose -f docker-compose.prod.yml up -d brain-api telegram-bot audio-worker telemost-recorder caddy
+
+            echo "Health checks..."
+            sleep 8
+            curl -fsS https://fishingteam.su/health && echo
+            curl -fsS https://fishingteam.su/ready && echo
+            echo "Operational DB cleanup complete"
