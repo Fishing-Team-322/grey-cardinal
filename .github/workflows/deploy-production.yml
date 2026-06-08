@@ -53,7 +53,7 @@ jobs:
 
       # Архив ровно из закоммиченного дерева (без .git/.env/node_modules).
       - name: Create deploy archive
-        run: git archive --format=tar.gz -o /tmp/gc-deploy.tar.gz HEAD
+        run: git archive --format=tar.gz -o gc-deploy.tar.gz HEAD
 
       - name: Copy archive to server
         uses: appleboy/scp-action@v0.1.7
@@ -62,7 +62,7 @@ jobs:
           port: ${{ secrets.PROD_PORT }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
-          source: /tmp/gc-deploy.tar.gz
+          source: gc-deploy.tar.gz
           target: /tmp
 
       - name: Deploy over SSH
