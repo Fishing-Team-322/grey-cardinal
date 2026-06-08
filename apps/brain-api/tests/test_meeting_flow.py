@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from brain_api.application.use_cases.meeting_flow import (
+    _parse_time_to_dt,
     build_meeting_proposal,
     handle_meeting_callback,
     handle_pending_meeting_time,
@@ -21,9 +23,17 @@ from brain_api.infrastructure.telegram_gateway.client import NullTelegramGateway
 from grey_cardinal_contracts import TelegramCallbackEvent, TelegramMessageRef, TelegramSender
 
 NOW = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
+TZ = ZoneInfo("Europe/Moscow")
 MANAGER_TG = 5001
 EMP_TG = 5002
 GROUP_CHAT = -100999
+
+
+def test_parse_time_with_preposition_and_dot_minutes():
+    parsed = _parse_time_to_dt("давайте в 12.30", NOW, "Europe/Moscow")
+    assert parsed is not None
+    assert parsed.astimezone(TZ).hour == 12
+    assert parsed.astimezone(TZ).minute == 30
 
 
 async def _seed(session, *, scheduled_at):

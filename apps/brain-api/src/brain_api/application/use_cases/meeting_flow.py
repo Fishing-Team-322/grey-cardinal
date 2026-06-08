@@ -50,7 +50,11 @@ MEETING_CB_PREFIXES = (
     f"{CB_RSVP_MAYBE}:",
 )
 
-_TIME_RE = re.compile(r"\b(\d{1,2})[:.\s](\d{2})\b|\b(?:в|к)\s+(\d{1,2})\b")
+_TIME_RE = re.compile(
+    r"\b(?:в|к)\s+(\d{1,2})[:.](\d{2})\b"
+    r"|\b(\d{1,2})[:.\s](\d{2})\b"
+    r"|\b(?:в|к)\s+(\d{1,2})\b"
+)
 
 
 def is_meeting_callback(data: str) -> bool:
@@ -372,8 +376,10 @@ def _parse_time_to_dt(text: str, now: datetime, timezone: str) -> datetime | Non
         return None
     if match.group(1) is not None:
         hour, minute = int(match.group(1)), int(match.group(2))
+    elif match.group(3) is not None:
+        hour, minute = int(match.group(3)), int(match.group(4))
     else:
-        hour, minute = int(match.group(3)), 0
+        hour, minute = int(match.group(5)), 0
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return None
     tz = ZoneInfo(timezone)

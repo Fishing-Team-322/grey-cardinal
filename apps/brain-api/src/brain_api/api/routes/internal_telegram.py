@@ -29,6 +29,7 @@ from brain_api.application.rendering import (
     CB_EDIT,
     CB_REJECT,
     EDIT_STUB_TEXT,
+    format_deadline,
     proposal_keyboard,
 )
 from brain_api.application.semantic_parser import SemanticMessageInput
@@ -45,6 +46,9 @@ from brain_api.application.use_cases.manage_meetings import (
     stop_meeting,
 )
 from brain_api.application.use_cases.meeting_flow import (
+    CB_MTG_NO,
+    CB_MTG_OK,
+    _parse_time_to_dt,
     build_meeting_proposal,
     handle_meeting_callback,
     handle_pending_meeting_time,
@@ -427,6 +431,9 @@ async def ingest_message(
         and semantic_text is not None
         and detect_call_intent(semantic_text)
     ):
+        scheduled_response = await _try_scheduled_call_prompt(event, container, semantic_text)
+        if scheduled_response is not None:
+            return scheduled_response
         return ActionsResponse(
             actions=[
                 SendMessageAction(
@@ -456,6 +463,81 @@ async def ingest_message(
             container.board,
         )
         return await use_case.execute(event)
+
+
+async def _try_scheduled_call_prompt(
+    event: TelegramMessageEvent,
+    container: Container,
+    semantic_text: str,
+) -> ActionsResponse | None:
+    if not hasattr(container, "session_factory"):
+        return None
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == event.chat.id)
+        )
+        if team is None:
+            return None
+
+        now = datetime.now(UTC)
+        scheduled_at = _parse_time_to_dt(semantic_text, now, team.timezone)
+        if scheduled_at is None:
+            return None
+
+        sender = await session.scalar(
+            select(m.UserModel).where(m.UserModel.telegram_user_id == event.sender.id)
+        )
+        if sender is None:
+            sender = m.UserModel(
+                telegram_user_id=event.sender.id,
+                telegram_username=event.sender.username,
+                display_name=_display_name_from_event(event),
+            )
+            session.add(sender)
+            await session.flush()
+
+        seq = int(await session.scalar(select(func.max(m.MeetingModel.seq))) or 0) + 1
+        meeting = m.MeetingModel(
+            seq=seq,
+            public_id=f"MTG-{seq}",
+            team_id=team.id,
+            title="Созвон",
+            status="proposed",
+            state="proposed",
+            created_by=sender.id,
+            scheduled_at=scheduled_at,
+            scheduled_timezone=team.timezone,
+            duration_minutes=60,
+            started_at=scheduled_at,
+            metadata_json={
+                "source": "telegram_call_intent",
+                "raw_text": event.text,
+                "semantic_text": semantic_text,
+            },
+        )
+        session.add(meeting)
+        meeting_id = meeting.id
+        team_timezone = team.timezone
+        await session.commit()
+
+    when = format_deadline(scheduled_at, team_timezone)
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=(
+                    "🎙 Похоже, нужно запланировать созвон.\n\n"
+                    f"Когда: {when}\n\n"
+                    "Запланировать?"
+                ),
+                reply_markup=_kb(
+                    [("✅ Да, запланировать", f"{CB_MTG_OK}:{meeting_id}")],
+                    [("❌ Нет", f"{CB_MTG_NO}:{meeting_id}")],
+                ),
+            )
+        ]
+    )
 
 
 @router.post("/callback", response_model=ActionsResponse)

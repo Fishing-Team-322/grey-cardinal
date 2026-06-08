@@ -200,6 +200,33 @@ async def test_required_cardinal_mention_allows_prefixed_call_intent(session_fac
 
 
 @pytest.mark.asyncio
+async def test_prefixed_call_intent_with_time_prompts_scheduling_in_group(
+    session_factory,
+) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(
+        _msg("Кардинал, нам нужен созвон в 12.30"),
+        container=container,
+    )
+
+    text = _texts(resp)
+    keyboards = str([getattr(action, "reply_markup", None) for action in resp.actions])
+    assert "Запланировать" in text
+    assert "12:30" in text
+    assert "mtg_ok:" in keyboards
+    assert "mtg_no:" in keyboards
+    assert "tmcall:create" not in keyboards
+    async with session_factory() as session:
+        meeting = await session.scalar(select(m.MeetingModel))
+        assert meeting is not None
+        assert meeting.state == "proposed"
+        assert meeting.scheduled_at is not None
+
+
+@pytest.mark.asyncio
 async def test_disabled_cardinal_mention_keeps_plain_call_intent(session_factory) -> None:
     async with session_factory() as session:
         await _seed_team(session, connected=False, require_cardinal_mention=False)
