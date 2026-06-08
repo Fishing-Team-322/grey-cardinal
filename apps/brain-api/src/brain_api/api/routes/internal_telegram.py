@@ -75,12 +75,7 @@ from brain_api.application.use_cases.task_status_flow import (
     handle_task_status_callback,
     is_task_status_callback,
 )
-from brain_api.application.use_cases.team_gamification import (
-    ACHIEVEMENTS,
-    TASK_COMPLETED_XP,
-    grant_team_xp,
-    team_leaderboard_text_for_chat,
-)
+from brain_api.application.use_cases.team_gamification import team_leaderboard_text_for_chat
 from brain_api.application.use_cases.team_settings import (
     addressed_message_text,
     handle_settings_callback,
@@ -441,7 +436,10 @@ async def ingest_message(
                 actions=[
                     SendMessageAction(
                         chat_id=event.chat.id,
-                        text="🎙 Не понял время. Напиши, например: «созвон в 15:00» или «созвон в 18:30»",
+                        text=(
+                            "🎙 Не понял время. Напиши, например: "
+                            "«созвон в 15:00» или «созвон в 18:30»"
+                        ),
                     )
                 ]
             )
@@ -1334,7 +1332,8 @@ async def _route_v2_task_candidate(
             created_from_proposal_id=proposal.id,
         )
         session.add(auto_task)
-        auto_task_public_id = f"GC-{next_seq}"  # capture before commit — SQLAlchemy expires on commit
+        # Capture before commit: SQLAlchemy expires attributes on commit.
+        auto_task_public_id = f"GC-{next_seq}"
         await session.commit()
         deadline_str = (
             f"\nДедлайн: {format_deadline(deadline, team.timezone)}" if deadline else ""
@@ -1621,7 +1620,10 @@ async def _route_v2_meeting_candidate(session, team, sender, message, parsed, ev
         return ActionsResponse(actions=[
             SendMessageAction(
                 chat_id=event.chat.id,
-                text="🎙 Не понял время созвона. Напиши, например: «созвон в 15:00» или «созвон завтра в 18:30»",
+                text=(
+                    "🎙 Не понял время созвона. Напиши, например: "
+                    "«созвон в 15:00» или «созвон завтра в 18:30»"
+                ),
             )
         ])
 

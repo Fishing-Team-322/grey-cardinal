@@ -348,7 +348,7 @@ async def _record_rsvp(
         f"✅ Придут: {yes}   ❌ Нет: {no}   🤔 Возможно: {maybe}"
     )
     if join_url:
-        poll_text = f"🔗 {join_url}\n\n" + poll_text
+        poll_text = f"🔗 Ссылка: {join_url}\n\n" + poll_text
     return ActionsResponse(actions=[
         _answer(event.callback_query_id, f"Записал: {label}"),
         EditMessageAction(

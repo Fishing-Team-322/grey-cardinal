@@ -73,9 +73,13 @@ def addressed_message_text(text: str, *, required: bool) -> str | None:
 
 def _settings_text(team: m.TeamModel, mode: str, cardinal_required: bool) -> str:
     label = DIGEST_MODES.get(mode, DIGEST_MODES[DEFAULT_MODE])[0]
-    mention_label = "только после «Кардинал, ...»" if cardinal_required else "все сообщения"
+    mention_label = (
+        "только после «Кардинал, ...»" if cardinal_required else "все сообщения"
+    )
     autonomous = autonomous_mode_enabled(team)
-    autonomous_label = "включён (без подтверждений)" if autonomous else "выключен (с подтверждением)"
+    autonomous_label = (
+        "включён (без подтверждений)" if autonomous else "выключен (с подтверждением)"
+    )
     return (
         f"⚙️ Настройки команды «{team.name}»\n"
         f"Часовой пояс: {team.timezone}\n\n"
@@ -122,7 +126,11 @@ async def open_settings(session, chat_id: int) -> ActionsResponse:
     return ActionsResponse(actions=[SendMessageAction(
         chat_id=chat_id,
         text=_settings_text(team, mode, require_cardinal_mention(team)),
-        reply_markup=_settings_keyboard(mode, require_cardinal_mention(team), autonomous_mode_enabled(team)),
+        reply_markup=_settings_keyboard(
+            mode,
+            require_cardinal_mention(team),
+            autonomous_mode_enabled(team),
+        ),
     )])
 
 

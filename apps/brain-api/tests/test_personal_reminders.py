@@ -89,7 +89,13 @@ async def test_reminder_goes_to_assignee_private(make_uow, seed_chat, telegram, 
 async def test_reminder_fallback_to_chat_when_assignee_unknown(
     make_uow, seed_chat, telegram, events, config
 ):
-    await _assigned_task(make_uow, seed_chat, assignee_id=None, deadline=NOW + timedelta(hours=1))
+    await _assigned_task(
+        make_uow,
+        seed_chat,
+        assignee_id=None,
+        assignee_text=None,
+        deadline=NOW + timedelta(hours=1),
+    )
     async with make_uow() as uow:
         sent = await SendDeadlineReminders(uow, telegram, events, config).execute()
     assert sent == 1

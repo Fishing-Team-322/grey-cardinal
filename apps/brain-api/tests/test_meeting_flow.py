@@ -143,6 +143,22 @@ async def test_rsvp_yes_updates_tally(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_rsvp_keeps_meeting_link_in_poll(session_factory):
+    async with session_factory() as session:
+        team, _mgr, emp, meeting = await _seed(session, scheduled_at=NOW + timedelta(hours=2))
+        meeting.state = "recording"
+        meeting.status = "active"
+        meeting.metadata_json = {"join_url": "https://telemost.yandex.ru/j/keep-link"}
+        await session.commit()
+        event = _cb(f"rsvp_yes:{meeting.id}", from_id=EMP_TG, chat_id=GROUP_CHAT)
+        resp = await handle_meeting_callback(session, event.data, event)
+
+    edit = [a for a in resp.actions if a.type == "edit_message"][0]
+    assert "https://telemost.yandex.ru/j/keep-link" in edit.text
+    assert "Придут: 1" in edit.text
+
+
+@pytest.mark.asyncio
 async def test_5min_reminder_pings_attendees(session_factory):
     async with session_factory() as session:
         team, _mgr, emp, meeting = await _seed(session, scheduled_at=NOW + timedelta(minutes=4))
