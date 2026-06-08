@@ -41,7 +41,9 @@ jobs:
         run: python -m mypy apps/brain-api/src packages/contracts/python/grey_cardinal_contracts
 
       - name: Validate production compose
-        run: docker compose -f docker-compose.prod.yml config
+        run: |
+          cp .env.production.example .env.production
+          docker compose -f docker-compose.prod.yml config
 
   deploy:
     needs: quality-gate
