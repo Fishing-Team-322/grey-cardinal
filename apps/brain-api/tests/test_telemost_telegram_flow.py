@@ -46,7 +46,11 @@ class FakeClient:
         return {"id": "conf-9", "join_url": "https://telemost.yandex.ru/j/zzz"}
 
 
-def _msg(text: str, chat_type: str = "supergroup") -> TelegramMessageEvent:
+def _msg(
+    text: str,
+    chat_type: str = "supergroup",
+    raw: dict | None = None,
+) -> TelegramMessageEvent:
     return TelegramMessageEvent(
         update_id=1,
         message_id=10,
@@ -54,7 +58,12 @@ def _msg(text: str, chat_type: str = "supergroup") -> TelegramMessageEvent:
         sender=TelegramSender(id=555, username="boss", first_name="Boss"),
         text=text,
         date=datetime.now(UTC),
+        raw=raw or {},
     )
+
+
+def _voice_msg(text: str) -> TelegramMessageEvent:
+    return _msg(text, raw={"gc": {"origin": "telegram_voice"}})
 
 
 def _callback(data: str) -> TelegramCallbackEvent:
@@ -154,6 +163,27 @@ async def test_required_cardinal_mention_ignores_plain_call_intent(session_facto
 
 
 @pytest.mark.asyncio
+async def test_required_cardinal_mention_ignores_plain_voice_transcript(session_factory) -> None:
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory)
+
+    resp = await itg.ingest_message(
+        _voice_msg("надо сделать задачу для Максима написать API"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    async with session_factory() as session:
+        audit = await session.scalar(
+            select(m.AuditLogModel).where(
+                m.AuditLogModel.action == "semantic_message_ignored"
+            )
+        )
+        assert audit.payload["reason"] == "cardinal_mention_required"
+
+
+@pytest.mark.asyncio
 async def test_required_cardinal_mention_allows_prefixed_call_intent(session_factory) -> None:
     async with session_factory() as session:
         await _seed_team(session, connected=False, require_cardinal_mention=True)
@@ -202,6 +232,52 @@ async def test_cardinal_prefix_is_removed_before_semantic_parse(session_factory)
 
     assert resp.actions == []
     assert captured["text"] == "задача для Дениса написать API к 18 часам"
+
+
+@pytest.mark.asyncio
+async def test_voice_cardinal_prefix_is_removed_before_semantic_parse(session_factory) -> None:
+    captured = {}
+
+    class Parser:
+        async def parse(self, payload):
+            captured["text"] = payload.message_text
+            return {"kind": "noise", "confidence": 1.0}
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=True)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _voice_msg("Кардинал, надо сделать задачу для Максима написать API"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    assert captured["text"] == "надо сделать задачу для Максима написать API"
+
+
+@pytest.mark.asyncio
+async def test_disabled_cardinal_mention_processes_plain_voice_transcript(
+    session_factory,
+) -> None:
+    captured = {}
+
+    class Parser:
+        async def parse(self, payload):
+            captured["text"] = payload.message_text
+            return {"kind": "noise", "confidence": 1.0}
+
+    async with session_factory() as session:
+        await _seed_team(session, connected=False, require_cardinal_mention=False)
+    container = SimpleNamespace(session_factory=session_factory, semantic_parser=Parser())
+
+    resp = await itg.ingest_message(
+        _voice_msg("надо сделать задачу для Максима написать API"),
+        container=container,
+    )
+
+    assert resp.actions == []
+    assert captured["text"] == "надо сделать задачу для Максима написать API"
 
 
 @pytest.mark.asyncio

@@ -11,13 +11,13 @@ from sqlalchemy import select
 from brain_api.api.routes.accounts import ChangePasswordRequest, change_password
 from brain_api.api.routes.v2_tenants import (
     TaskStatusResponseRequest,
+    TeamMemberRoleRequest,
     company_leaderboard,
     list_team_members,
     list_team_tasks,
     remove_team_member,
     task_status_response,
     update_team_member_role,
-    TeamMemberRoleRequest,
 )
 from brain_api.infrastructure.auth.jwt import hash_password, verify_password
 from brain_api.infrastructure.db import models as m

@@ -156,40 +156,69 @@ async def _handle_voice(
 
     logger.info("Voice message received (duration=%ss) from chat %s", duration, chat_id)
 
-    # Get file path from Telegram
-    file_info = await client.get_file(file_id)
-    if not file_info:
-        logger.warning("Could not get file info for voice %s", file_id)
+    try:
+        # Get file path from Telegram
+        file_info = await client.get_file(file_id)
+        if not file_info:
+            logger.warning("Could not get Telegram file info for voice message in chat %s", chat_id)
+            return
+
+        file_path = file_info.get("file_path", "")
+        if not file_path:
+            logger.warning(
+                "Telegram file info has no file_path for voice message in chat %s",
+                chat_id,
+            )
+            return
+
+        # Download file bytes
+        audio_bytes = await client.download_file(file_path)
+        if not audio_bytes:
+            logger.warning("Could not download Telegram voice file for chat %s", chat_id)
+            return
+
+        # Transcribe via ASR service
+        transcript = (await _transcribe(audio_bytes, file_path) or "").strip()
+        if not transcript:
+            logger.info("ASR returned empty transcript for voice in chat %s", chat_id)
+            return
+    except Exception:
+        logger.exception("Voice message processing failed for chat %s", chat_id)
         return
 
-    file_path = file_info.get("file_path", "")
-    if not file_path:
-        return
-
-    # Download file bytes
-    audio_bytes = await client.download_file(file_path)
-    if not audio_bytes:
-        logger.warning("Could not download voice file %s", file_path)
-        return
-
-    # Transcribe via ASR service
-    transcript = await _transcribe(audio_bytes, file_path)
-    if not transcript:
-        logger.info("ASR returned empty transcript for voice in chat %s", chat_id)
-        return
-
-    logger.info("Voice transcribed (%d chars): %s...", len(transcript), transcript[:60])
+    logger.info("Voice transcribed (%d chars) for chat %s", len(transcript), chat_id)
 
     # Inject the clean transcript as a regular text message so the brain-api
     # pipeline (task extraction + call-intent detection) sees natural text,
     # not a decorated string. The "voice" origin is preserved in raw.update.
+    origin = "telegram_voice" if "voice" in message else "telegram_audio"
     synthetic_message = {
         **message,
         "text": transcript,
     }
-    msg_event = build_message_event(update, synthetic_message)
+    synthetic_update = _with_synthetic_message(update, message, synthetic_message)
+    synthetic_update["gc"] = {
+        "origin": origin,
+        "telegram_file_path": file_path,
+        "duration": duration,
+    }
+    msg_event = build_message_event(synthetic_update, synthetic_message)
     actions = await brain.send_message_event(msg_event)
     await execute_actions(client, actions.actions)
+
+
+def _with_synthetic_message(
+    update: dict[str, Any],
+    original_message: dict[str, Any],
+    synthetic_message: dict[str, Any],
+) -> dict[str, Any]:
+    synthetic_update = dict(update)
+    for key in ("message", "edited_message", "channel_post", "edited_channel_post"):
+        raw_message = synthetic_update.get(key)
+        if raw_message is original_message or raw_message == original_message:
+            synthetic_update[key] = synthetic_message
+            return synthetic_update
+    return synthetic_update
 
 
 async def _transcribe(audio_bytes: bytes, file_path: str) -> str:
@@ -223,4 +252,6 @@ async def _transcribe(audio_bytes: bytes, file_path: str) -> str:
             logger.warning("ASR service returned %s: %s", resp.status_code, resp.text[:200])
     except httpx.HTTPError as exc:
         logger.error("ASR transcription failed: %s", exc)
+    except Exception:
+        logger.exception("ASR transcription failed")
     return ""
