@@ -281,6 +281,24 @@ class TaskCommentModel(TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class ShareLinkModel(Base):
+    __tablename__ = "share_links"
+
+    id: Mapped[UUID] = _uuid_pk()
+    token: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), nullable=True
+    )
+    ref_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class BoardCardModel(TimestampMixin, Base):
     __tablename__ = "board_cards"
 

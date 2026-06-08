@@ -1830,6 +1830,9 @@ async def ingest_command(
     if command in ("unlink", "unbind", "logout"):
         return await _handle_unlink_command(container, event, is_group)
 
+    if command in ("summary", "саммари", "итоги"):
+        return await _handle_summary_command(container, event)
+
     if command == "bind_chat":
         if container.settings.app_env == "dev":
             async with container.make_uow() as uow:
@@ -1851,6 +1854,36 @@ async def ingest_command(
             )
         ]
     )
+
+
+async def _handle_summary_command(
+    container: Container, event: TelegramCommandEvent
+) -> ActionsResponse:
+    """Generate a summary for the team's latest meeting and post a short link."""
+    from brain_api.application.use_cases.meeting_summary import generate_meeting_summary
+
+    chat_id = event.chat.id
+    settings = get_settings()
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Этот чат не привязан к команде Grey Cardinal.")
+        meeting = await session.scalar(
+            select(m.MeetingModel)
+            .where(m.MeetingModel.team_id == team.id)
+            .order_by(m.MeetingModel.created_at.desc())
+        )
+        if meeting is None:
+            return _text(chat_id, "Пока нет созвонов для саммари.")
+        result = await generate_meeting_summary(session, settings, meeting)
+        await session.commit()
+    short = (result.get("summary") or "").strip()
+    if len(short) > 160:
+        short = short[:157] + "…"
+    text = f"📝 Саммари созвона «{result['title']}»\n\n{short}\n\n🔗 Подробнее: {result['url']}"
+    return _text(chat_id, text)
 
 
 async def _handle_unlink_command(
