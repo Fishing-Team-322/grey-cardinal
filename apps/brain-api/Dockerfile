@@ -8,6 +8,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel
+
 COPY packages/contracts/python /app/packages/contracts/python
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-build-isolation -e /app/packages/contracts/python

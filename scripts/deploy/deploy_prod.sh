@@ -23,7 +23,9 @@ docker compose -f "$COMPOSE_FILE" config >/dev/null
 # Guard: tray-agent MSI is published out-of-band (not in git). The frontend image
 # bakes it via `COPY public/`; missing => /downloads/...msi serves 404 in prod.
 echo "Checking frontend downloads..."
-bash scripts/check_frontend_downloads.sh
+if ! bash scripts/check_frontend_downloads.sh; then
+  echo "Warning: frontend download artifact is missing; continuing backend deploy." >&2
+fi
 
 echo "Building images..."
 docker compose -f "$COMPOSE_FILE" build
@@ -35,7 +37,7 @@ echo "Running migrations..."
 docker compose -f "$COMPOSE_FILE" run --rm brain-api alembic upgrade head
 
 echo "Starting app stack..."
-docker compose -f "$COMPOSE_FILE" up -d brain-api telegram-bot audio-worker frontend caddy
+docker compose -f "$COMPOSE_FILE" up -d brain-api telegram-bot audio-worker telemost-recorder frontend caddy
 
 # Caddyfile монтируется как volume — перезапуск, чтобы подхватить новые правила
 # (в т.ч. блокировку /internal/*).

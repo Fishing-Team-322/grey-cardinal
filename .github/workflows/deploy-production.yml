@@ -41,7 +41,9 @@ jobs:
         run: python -m mypy apps/brain-api/src packages/contracts/python/grey_cardinal_contracts
 
       - name: Validate production compose
-        run: docker compose -f docker-compose.prod.yml config
+        run: |
+          cp .env.production.example .env.production
+          docker compose -f docker-compose.prod.yml config
 
   deploy:
     needs: quality-gate
@@ -51,7 +53,7 @@ jobs:
 
       # Архив ровно из закоммиченного дерева (без .git/.env/node_modules).
       - name: Create deploy archive
-        run: git archive --format=tar.gz -o /tmp/gc-deploy.tar.gz HEAD
+        run: git archive --format=tar.gz -o gc-deploy.tar.gz HEAD
 
       - name: Copy archive to server
         uses: appleboy/scp-action@v0.1.7
@@ -60,7 +62,7 @@ jobs:
           port: ${{ secrets.PROD_PORT }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
-          source: /tmp/gc-deploy.tar.gz
+          source: gc-deploy.tar.gz
           target: /tmp
 
       - name: Deploy over SSH
