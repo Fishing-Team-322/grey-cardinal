@@ -108,7 +108,7 @@ async def test_intent_asks_provider_without_creating() -> None:
     assert kbs, "expected an inline keyboard prompt"
     flat = str(kbs)
     assert "tmcall:create" in flat and "tmcall:dismiss" in flat
-    assert "Телемост" in _texts(resp)
+    assert "встреч" in _texts(resp).lower()
 
 
 @pytest.mark.asyncio
@@ -154,21 +154,25 @@ async def test_button_creates_room_and_posts_link(session_factory, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_button_refuses_when_chat_not_bound(session_factory, monkeypatch) -> None:
+async def test_button_falls_back_to_jitsi_when_chat_not_bound(session_factory, monkeypatch) -> None:
     monkeypatch.setattr(itg, "get_settings", lambda: CONFIGURED)
     container = SimpleNamespace(session_factory=session_factory)
     resp = await itg.ingest_callback(_callback("tmcall:create"), container=container)
-    assert "не привязан" in _texts(resp).lower()
+    text = _texts(resp)
+    assert "Jitsi" in text
+    assert "https://meet.ffmuc.net/" in text
 
 
 @pytest.mark.asyncio
-async def test_button_refuses_when_not_connected(session_factory, monkeypatch) -> None:
+async def test_button_falls_back_to_jitsi_when_not_connected(session_factory, monkeypatch) -> None:
     monkeypatch.setattr(itg, "get_settings", lambda: CONFIGURED)
     async with session_factory() as session:
         await _seed_team(session, connected=False)
     container = SimpleNamespace(session_factory=session_factory)
     resp = await itg.ingest_callback(_callback("tmcall:create"), container=container)
-    assert "не подключ" in _texts(resp).lower()
+    text = _texts(resp)
+    assert "Jitsi" in text
+    assert "https://meet.ffmuc.net/" in text
 
 
 @pytest.mark.asyncio

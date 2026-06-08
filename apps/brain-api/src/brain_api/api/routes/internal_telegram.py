@@ -2059,8 +2059,12 @@ async def _handle_telemost_callback(
                         telegram_chat_id=chat_id,
                         created_by_telegram_user_id=event.from_user.id,
                     )
-                except (telemost_svc.TelemostNotConnected, YandexTelemostError):
+                except (telemost_svc.TelemostNotConnected, YandexTelemostError) as exc:
                     # Telemost unavailable (e.g. 403 no API access) → fall back.
+                    logger.warning(
+                        "[telemost] room creation failed; using Jitsi fallback: %s",
+                        exc,
+                    )
                     await session.rollback()
                     result = None
 
