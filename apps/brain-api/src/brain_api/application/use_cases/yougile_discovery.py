@@ -150,27 +150,54 @@ async def discover_yougile_workspace(
                         await repo.upsert("task", str(t["id"]), payload=t)
                         stats["tasks"] += 1
 
-        primary_boards = [
-            board for board in all_boards if str(board.get("projectId")) == str(primary_id)
-        ]
-        if primary_boards and not config.get("default_board_id"):
-            config["default_board_id"] = str(primary_boards[0]["id"])
-        selected_external_id = str(config.get("default_board_id") or "")
         board_rows = list(
             await session.scalars(
                 select(m.YouGileBoardModel).where(m.YouGileBoardModel.team_id == team_id)
             )
         )
+        # ── Robust auto board selection (zero manual steps) ──────────────────
+        # Priority: explicit config -> already-selected -> best status coverage.
+        selected_external_id = str(config.get("default_board_id") or "")
         existing_selected = next((row for row in board_rows if row.is_selected), None)
         if not selected_external_id and existing_selected is not None:
             selected_external_id = existing_selected.external_id
-            config["default_board_id"] = selected_external_id
-        if not selected_external_id and len(board_rows) == 1:
-            selected_external_id = board_rows[0].external_id
-            config["default_board_id"] = selected_external_id
+        if not selected_external_id:
+            primary_boards = [
+                b for b in all_boards if str(b.get("projectId")) == str(primary_id)
+            ]
+            candidates = [
+                row
+                for row in board_rows
+                if not primary_boards
+                or row.external_id in {str(b["id"]) for b in primary_boards}
+            ] or board_rows
+            best = await _auto_pick_board(session, candidates)
+            if best is not None:
+                selected_external_id = best.external_id
+        config["default_board_id"] = selected_external_id or config.get("default_board_id")
         for board_row in board_rows:
-            board_row.is_selected = board_row.external_id == selected_external_id
-        if config.get("default_board_id"):
+            board_row.is_selected = bool(selected_external_id) and (
+                board_row.external_id == selected_external_id
+            )
+        # Derive default_column_ids from the selected board's mapped columns so
+        # inbound (config) and outbound (column.mapped_status) stay consistent.
+        selected_row = next((row for row in board_rows if row.is_selected), None)
+        if selected_row is not None:
+            sel_columns = list(
+                await session.scalars(
+                    select(m.YouGileColumnModel).where(
+                        m.YouGileColumnModel.board_id == selected_row.id
+                    )
+                )
+            )
+            col_ids = {
+                col.mapped_status: col.external_id
+                for col in sel_columns
+                if col.mapped_status
+            }
+            if col_ids:
+                config["default_column_ids"] = col_ids
+        elif config.get("default_board_id"):
             _ensure_default_columns(
                 config,
                 await yc.list_columns(board_id=config["default_board_id"]),
@@ -186,6 +213,26 @@ async def discover_yougile_workspace(
         await repo.prune_logs()
         await session.commit()
         return {"ok": True, "stats": stats, "primary_project_id": primary_id}
+
+
+async def _auto_pick_board(session, board_rows: list) -> Any | None:
+    """Pick the best board to mirror: prefer the one whose columns cover the
+    core statuses (todo/in_progress/done); tiebreak by number of columns."""
+    best = None
+    best_score = -1
+    for row in board_rows:
+        columns = list(
+            await session.scalars(
+                select(m.YouGileColumnModel).where(m.YouGileColumnModel.board_id == row.id)
+            )
+        )
+        mapped = {c.mapped_status for c in columns if c.mapped_status}
+        core = len({"todo", "in_progress", "done"} & mapped)
+        score = core * 100 + len(mapped) * 10 + len(columns)
+        if score > best_score:
+            best_score = score
+            best = row
+    return best
 
 
 def _api_key(team: m.TeamModel, cipher) -> str:
