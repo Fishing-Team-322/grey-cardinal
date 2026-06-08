@@ -40,6 +40,27 @@ class AssignTaskRequest(BaseModel):
     user_id: UUID | None = None
 
 
+_DEFAULT_KANBAN_COLUMNS = [
+    {"status": "todo", "label": "К выполнению", "color": "#3a7afe", "visible": True},
+    {"status": "in_progress", "label": "В работе", "color": "#f1c40f", "visible": True},
+    {"status": "review", "label": "На проверке", "color": "#a06bff", "visible": True},
+    {"status": "blocked", "label": "Заблокировано", "color": "#ff003c", "visible": False},
+    {"status": "done", "label": "Готово", "color": "#2ecc71", "visible": True},
+    {"status": "cancelled", "label": "Отменено", "color": "#6a6a73", "visible": False},
+]
+
+
+class KanbanColumn(BaseModel):
+    status: str
+    label: str
+    color: str = "#6a6a73"
+    visible: bool = True
+
+
+class KanbanConfigRequest(BaseModel):
+    columns: list[KanbanColumn]
+
+
 class DeadlineRequest(BaseModel):
     deadline: datetime | None = None
 
@@ -372,6 +393,51 @@ async def add_comment(
     await session.commit()
     await session.refresh(comment)
     return _comment_payload(comment)
+
+
+@router.get("/api/teams/{team_id}/kanban-config")
+async def get_kanban_config(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _team_access(team_id, current_user, session)
+    team = await session.get(m.TeamModel, team_id)
+    columns = (team.board_config or {}).get("kanban_columns") if team else None
+    return {"columns": columns or _DEFAULT_KANBAN_COLUMNS}
+
+
+@router.put("/api/teams/{team_id}/kanban-config")
+async def put_kanban_config(
+    team_id: UUID,
+    body: KanbanConfigRequest,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    seen: set[str] = set()
+    cleaned: list[dict[str, Any]] = []
+    for col in body.columns:
+        if col.status not in DB_TASK_STATUSES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid status {col.status}")
+        if col.status in seen:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Duplicate status {col.status}")
+        seen.add(col.status)
+        cleaned.append({
+            "status": col.status,
+            "label": col.label.strip()[:40] or col.status,
+            "color": col.color[:9],
+            "visible": bool(col.visible),
+        })
+    if not any(c["visible"] for c in cleaned):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "At least one column must be visible")
+    team = await session.get(m.TeamModel, team_id)
+    config = dict(team.board_config or {})
+    config["kanban_columns"] = cleaned
+    team.board_config = config
+    await session.commit()
+    return {"columns": cleaned}
 
 
 @router.get("/api/teams/{team_id}/ai-inbox")

@@ -235,6 +235,12 @@ export const api = {
     get(teamId, view) {
       return request("GET", `/api/teams/${teamId}/grey-board`, { query: { view } });
     },
+    kanbanConfig(teamId) {
+      return request("GET", `/api/teams/${teamId}/kanban-config`);
+    },
+    saveKanbanConfig(teamId, columns) {
+      return request("PUT", `/api/teams/${teamId}/kanban-config`, { body: { columns } });
+    },
   },
   aiInbox: {
     list(teamId) {

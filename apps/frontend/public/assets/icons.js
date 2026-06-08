@@ -53,8 +53,8 @@
         : "";
     sidebar.innerHTML = `
       <div class="sidebar-brand">${window.gcBrand(28)}<button class="sidebar-close" type="button" aria-label="Закрыть меню">${window.gcIcon("close")}</button></div>
-      <a class="role-chip" href="/app/settings">
-        <span class="av" style="background:#C2152E">${initials}</span>
+      <a class="role-chip" href="/app/me">
+        <span class="av" style="${user.photo_data_url ? `background-image:url('${user.photo_data_url}');background-size:cover;background-position:center` : "background:#C2152E"}">${user.photo_data_url ? "" : initials}</span>
         <span class="meta grow"><b>${escapeHtml(user.display_name || user.login)}</b><span>${roleLabel(role)}</span></span>
         ${window.gcIcon("cog")}
       </a>
@@ -62,6 +62,10 @@
         ${item("/app/companies", "company", "Компании", "/app/companies", ["director"])}
         ${item("/app/teams/:id", "team", "Команда", firstTeam(user), ["director", "manager"])}
         ${item("/app/employee", "user", "Моя панель", "/app/employee", ["employee"])}
+      </div>
+      <div class="nav-group"><div class="nav-label">Аккаунт</div>
+        ${item("/app/me", "user", "Профиль", "/app/me", ["director", "manager", "employee"])}
+        ${item("/app/settings", "cog", "Настройки", "/app/settings", ["director", "manager", "employee"])}
       </div>
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
         ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
