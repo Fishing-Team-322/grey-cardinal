@@ -24,7 +24,7 @@
     <rect x="5.5" y="5.5" width="21" height="21" rx="5" transform="rotate(45 16 16)" stroke="#C2152E" stroke-width="2"/>
     <path d="M16 9 L23 16 L16 23 Z" fill="#C2152E"/><circle cx="13" cy="16" r="2" fill="#ECECEE"/>
   </svg>`;
-  window.gcBrand = (size = 28) => `<a class="brand" href="/">
+  window.gcBrand = (size = 28, href = "/") => `<a class="brand" href="${href}">
     <span class="brand-mark">${window.gcMark(size)}</span>
     <span class="brand-name"><b>Grey</b> <span>Cardinal</span></span>
   </a>`;
@@ -52,7 +52,7 @@
         ? `<a class="nav-item" data-route="${pattern}" href="${href}">${window.gcIcon(icon)}<span>${label}</span></a>`
         : "";
     sidebar.innerHTML = `
-      <div class="sidebar-brand">${window.gcBrand(28)}<button class="sidebar-close" type="button" aria-label="Закрыть меню">${window.gcIcon("close")}</button></div>
+      <div class="sidebar-brand">${window.gcBrand(28, "/app")}<button class="sidebar-close" type="button" aria-label="Закрыть меню">${window.gcIcon("close")}</button></div>
       <a class="role-chip" href="/app/me">
         <span class="av" style="${user.photo_data_url ? `background-image:url('${user.photo_data_url}');background-size:cover;background-position:center` : "background:#C2152E"}">${user.photo_data_url ? "" : initials}</span>
         <span class="meta grow"><b>${escapeHtml(user.display_name || user.login)}</b><span>${roleLabel(role)}</span></span>

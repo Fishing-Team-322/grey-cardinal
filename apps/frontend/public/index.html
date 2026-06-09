@@ -134,8 +134,10 @@
     <a href="#game">Геймификация</a>
   </nav>
   <div class="grow"></div>
-  <a class="btn btn-sm btn-ghost" href="/login.html">Войти</a>
-  <a class="btn btn-sm btn-primary" href="/register.html">Начать бесплатно</a>
+  <div id="lp-auth-cta">
+    <a class="btn btn-sm btn-ghost" href="/login.html">Войти</a>
+    <a class="btn btn-sm btn-primary" href="/register.html">Начать бесплатно</a>
+  </div>
 </header>
 
 <!-- ============ HERO ============ -->
@@ -467,6 +469,14 @@
   document.getElementById('brand').innerHTML = gcBrand(28);
   document.getElementById('brand-foot').innerHTML = gcBrand(26);
   gcTabs();
+
+  // If the visitor already has a live session, reflect it: swap the
+  // "Войти / Начать бесплатно" buttons for a single "Открыть кабинет" link.
+  fetch('/api/auth/me', { credentials: 'include' }).then((r) => {
+    if (!r.ok) return;
+    const cta = document.getElementById('lp-auth-cta');
+    if (cta) cta.innerHTML = '<a class="btn btn-sm btn-primary" href="/app">Открыть кабинет →</a>';
+  }).catch(() => {});
 
   // hero pipeline animation
   const N = 8, DUR = 1750;
