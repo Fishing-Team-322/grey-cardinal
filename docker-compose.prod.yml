@@ -170,6 +170,14 @@ services:
       TELEMOST_RECORDER_PARTICIPANT_NAME: ${TELEMOST_RECORDER_PARTICIPANT_NAME:-Grey Cardinal — запись}
       TELEMOST_RECORDER_SEGMENT_SECONDS: ${TELEMOST_RECORDER_SEGMENT_SECONDS:-15}
       TELEMOST_RECORDER_MAX_SESSION_MINUTES: ${TELEMOST_RECORDER_MAX_SESSION_MINUTES:-180}
+      # Yandex account the recorder authenticates as (joins as a named org
+      # member). Values come from .env.production via env_file — do NOT set them
+      # here, since an `environment:` entry would override the env_file with an
+      # empty interpolated default.
+      TELEMOST_RECORDER_USER_DATA_DIR: /data/profile
+      TELEMOST_RECORDER_SCREENSHOT_DIR: /data/screenshots
+    volumes:
+      - telemost_recorder_data:/data
     depends_on:
       brain-api:
         condition: service_healthy
@@ -214,3 +222,4 @@ volumes:
   ollama_data:
   caddy_data:
   caddy_config:
+  telemost_recorder_data:

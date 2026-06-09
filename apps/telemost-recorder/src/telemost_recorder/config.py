@@ -17,6 +17,12 @@ class Settings:
     segment_seconds: int
     max_session_minutes: int
     join_timeout_seconds: int
+    # Yandex account the recorder authenticates as so it joins meetings as a
+    # real, named org participant (required for reliable admission/recording).
+    yandex_login: str
+    yandex_password: str
+    user_data_dir: str
+    screenshot_dir: str
 
 
 def get_settings() -> Settings:
@@ -35,4 +41,8 @@ def get_settings() -> Settings:
         segment_seconds=int(os.getenv("TELEMOST_RECORDER_SEGMENT_SECONDS", "15")),
         max_session_minutes=int(os.getenv("TELEMOST_RECORDER_MAX_SESSION_MINUTES", "180")),
         join_timeout_seconds=int(os.getenv("TELEMOST_RECORDER_JOIN_TIMEOUT_SECONDS", "60")),
+        yandex_login=os.getenv("TELEMOST_RECORDER_YANDEX_LOGIN", ""),
+        yandex_password=os.getenv("TELEMOST_RECORDER_YANDEX_PASSWORD", ""),
+        user_data_dir=os.getenv("TELEMOST_RECORDER_USER_DATA_DIR", "/data/profile"),
+        screenshot_dir=os.getenv("TELEMOST_RECORDER_SCREENSHOT_DIR", "/data/screenshots"),
     )
