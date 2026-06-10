@@ -1104,3 +1104,74 @@ def _deadline_within(card: dict[str, Any], now: datetime, start: int, end: int) 
         return False
     days = (deadline.date() - now.date()).days
     return start <= days <= end
+
+
+# --- Bucket B: team pet + wellbeing (emotional portrait) -------------------
+
+
+@router.get("/api/teams/{team_id}/pet")
+async def team_pet_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Командный питомец + разбор настроения (любой участник команды)."""
+    from brain_api.application.use_cases.team_pet import pet_payload
+
+    await _team_access(team_id, current_user, session)
+    payload = await pet_payload(session, team_id)
+    await session.commit()
+    return payload
+
+
+@router.get("/api/teams/{team_id}/wellbeing")
+async def team_wellbeing(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Агрегаты эмоций + загрузка + предлагаемые интервенции (только manager)."""
+    from brain_api.application.use_cases.agentic_wellbeing import (
+        _member_loads,
+        detect_interventions,
+    )
+    from brain_api.application.use_cases.team_pet import mood_inputs
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    now = datetime.now(UTC)
+    loads = await _member_loads(session, team_id, now=now)
+    inputs = await mood_inputs(session, team_id, now=now)
+    interventions = await detect_interventions(session, team_id, now=now)
+    return {
+        "team_id": str(team_id),
+        "mood_inputs": {
+            "emotion_valence": inputs.emotion_valence,
+            "emotion_stress": inputs.emotion_stress,
+            "task_health": inputs.task_health,
+            "overdue_pressure": inputs.overdue_pressure,
+            "activity": inputs.activity,
+        },
+        "members": [
+            {
+                "user_id": str(load.user_id),
+                "display_name": load.display_name,
+                "active_count": load.active_count,
+                "overdue_count": load.overdue_count,
+                "stress": load.stress,
+                "at_risk": load.at_risk,
+            }
+            for load in loads
+        ],
+        "interventions": [
+            {
+                "kind": iv.kind,
+                "at_risk": iv.at_risk.display_name,
+                "candidate": iv.candidate.display_name if iv.candidate else None,
+                "task_public_id": iv.task_public_id,
+                "task_title": iv.task_title,
+                "reason": iv.reason,
+            }
+            for iv in interventions
+        ],
+    }

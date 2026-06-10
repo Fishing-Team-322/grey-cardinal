@@ -37,8 +37,19 @@ SEMANTIC_SYSTEM_PROMPT = (
     "Верни только JSON без markdown.\n"
     "\n"
     "Возможные kind:\n"
-    "task_candidate, meeting_candidate, daily_report, absence_notice, "
-    "status_update, question, noise, unknown.\n"
+    "task_candidate, task_reassignment, task_cancellation, meeting_candidate, "
+    "daily_report, absence_notice, status_update, question, noise, unknown.\n"
+    "\n"
+    "task_reassignment — переброс СУЩЕСТВУЮЩЕЙ задачи на другого исполнителя: "
+    "«Задачу по X будет делать Кирилл», «Я буду делать задачу по X», "
+    "«переназначь GC-17 на Аню», «пусть Аня этим займётся». Заполни reassignment: "
+    "{task_reference (как названа задача: 'GC-17' или 'по автоматизации API'), "
+    "new_assignee_reference (имя/username нового исполнителя; если автор берёт на себя — "
+    "его собственное имя), new_assignee_reference_type}. Это НЕ создание новой задачи.\n"
+    "task_cancellation — отмена/закрытие существующей задачи как ненужной: "
+    "«эта задача по X неактуальна», «GC-17 неактуальна», «отмени задачу по X», "
+    "«закрой как ненужную». Заполни cancellation: {task_reference}. Это НЕ status_update "
+    "(сделано) и НЕ создание задачи.\n"
     "\n"
     "Отделяй рабочее поручение с проверяемым результатом от шутки, ругани, "
     "болтовни, подтверждения, благодарности и неопределённой фразы.\n"
@@ -77,10 +88,18 @@ SEMANTIC_SYSTEM_PROMPT = (
     '  "daily_report": {"summary": str|null, "detected_status": str|null} | null,\n'
     '  "absence": {"reason": str|null, "starts_at": "ISO8601"|null, '
     '"ends_at": "ISO8601"|null} | null,\n'
+    '  "reassignment": {"task_reference": str|null, "new_assignee_reference": str|null, '
+    '"new_assignee_reference_type": "name|username|pronoun|none"} | null,\n'
+    '  "cancellation": {"task_reference": str|null} | null,\n'
+    '  "affect": {"valence": -1.0..1.0, "stress": 0.0..1.0, '
+    '"dominant_emotion": str|null},\n'
     '  "reason": "короткое объяснение"\n'
     "}\n"
     "Заполняй только тот вложенный объект, который соответствует kind; "
-    "остальные ставь null."
+    "остальные ставь null.\n"
+    "affect заполняй ВСЕГДА — это эмоциональная окраска сообщения: valence "
+    "(−1 негатив … +1 позитив), stress (0 спокойно … 1 сильный стресс/раздражение), "
+    "dominant_emotion (радость/спокойствие/усталость/раздражение/тревога и т.п.)."
 )
 
 
@@ -93,11 +112,14 @@ def build_semantic_prompt(
     interaction_mode: str = "AUTO_BACKGROUND",
     reply_to_text: str | None = None,
     reply_to_sender_display_name: str | None = None,
+    recent_messages: list[dict] | None = None,
 ) -> str:
     """Единый промпт semantic-классификатора (используется и в проде, и в eval).
 
     Контекст содержит team_timezone/now/sender_display_name/team_members, как
     требует ТЗ, чтобы модель верно интерпретировала даты и исполнителей.
+    ``recent_messages`` — недавняя переписка чата (скользящее окно) для разрешения
+    местоимений («сделай это», «эта задача») и ссылок на задачи без явного GC-N.
     """
     context = {
         "team_timezone": timezone,
@@ -112,10 +134,19 @@ def build_semantic_prompt(
         if reply_to_text or reply_to_sender_display_name
         else None,
     }
+    if recent_messages:
+        context["conversation"] = recent_messages
+    suffix = (
+        "Используй conversation как контекст для разрешения местоимений и ссылок "
+        "на задачи, но классифицируй ИМЕННО последнее сообщение ниже.\n\n"
+        if recent_messages
+        else ""
+    )
     return (
         f"{SEMANTIC_SYSTEM_PROMPT}\n\n"
         "Контекст (JSON):\n"
         f"{json.dumps(context, ensure_ascii=False)}\n\n"
+        f"{suffix}"
         "Сообщение для классификации:\n"
         f"{message_text}"
     )

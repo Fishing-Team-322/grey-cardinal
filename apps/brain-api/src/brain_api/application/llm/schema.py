@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SemanticKind = Literal[
     "task_candidate",
+    "task_reassignment",
+    "task_cancellation",
     "meeting_candidate",
     "daily_report",
     "absence_notice",
@@ -58,6 +60,27 @@ class AbsencePayload(BaseModel):
     ends_at: str | None = None
 
 
+class ReassignmentPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    task_reference: str | None = None
+    new_assignee_reference: str | None = None
+    new_assignee_reference_type: Literal["name", "username", "pronoun", "none"] = "none"
+
+
+class CancellationPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    task_reference: str | None = None
+
+
+class AffectPayload(BaseModel):
+    """Эмоциональная окраска сообщения (для эмоционального портрета отдела)."""
+
+    model_config = ConfigDict(extra="ignore")
+    valence: float = Field(default=0.0, ge=-1.0, le=1.0)  # негатив..позитив
+    stress: float = Field(default=0.0, ge=0.0, le=1.0)
+    dominant_emotion: str | None = None
+
+
 class SemanticParseResult(BaseModel):
     """Строго валидируемый результат semantic parsing."""
 
@@ -77,6 +100,9 @@ class SemanticParseResult(BaseModel):
     meeting: MeetingPayload | None = None
     daily_report: DailyReportPayload | None = None
     absence: AbsencePayload | None = None
+    reassignment: ReassignmentPayload | None = None
+    cancellation: CancellationPayload | None = None
+    affect: AffectPayload | None = None
     reason: str = ""
 
     def to_contract_dict(self) -> dict:
@@ -93,6 +119,9 @@ class SemanticParseResult(BaseModel):
             "meeting": self.meeting.model_dump() if self.meeting else None,
             "daily_report": self.daily_report.model_dump() if self.daily_report else None,
             "absence": self.absence.model_dump() if self.absence else None,
+            "reassignment": self.reassignment.model_dump() if self.reassignment else None,
+            "cancellation": self.cancellation.model_dump() if self.cancellation else None,
+            "affect": self.affect.model_dump() if self.affect else None,
             "reason": self.reason,
         }
 
@@ -119,6 +148,9 @@ def semantic_json_schema() -> dict:
                 "meeting": {"type": ["object", "null"]},
                 "daily_report": {"type": ["object", "null"]},
                 "absence": {"type": ["object", "null"]},
+                "reassignment": {"type": ["object", "null"]},
+                "cancellation": {"type": ["object", "null"]},
+                "affect": {"type": ["object", "null"]},
                 "reason": {"type": "string"},
             },
             "required": [

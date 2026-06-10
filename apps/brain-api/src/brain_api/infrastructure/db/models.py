@@ -600,6 +600,92 @@ class AIInboxItemModel(TimestampMixin, Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
 
 
+class PendingChatActionModel(TimestampMixin, Base):
+    """Отложенное действие над существующей задачей из чата (переброс / отмена).
+
+    В отличие от ConfirmationModel (создание задачи из proposal), здесь мутация
+    уже существующей TaskModel: смена исполнителя или отмена. Подтверждать может
+    только руководитель/директор; в автономном режиме применяется без подтверждения.
+    """
+
+    __tablename__ = "pending_chat_actions"
+    __table_args__ = (
+        Index("ix_pending_chat_action_status", "team_id", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # 'reassign' | 'cancel'
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    target_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="pending"
+    )  # pending | confirmed | rejected | expired
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("chat_messages.id"), nullable=True
+    )
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    decided_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EmotionSignalModel(Base):
+    """Производный эмоциональный сигнал из одного источника (сырьё не храним).
+
+    Записывается только при включённом opt-in отдела
+    (``team.board_config.emotion_analysis``). См. docs/design/emotional-portrait.md.
+    """
+
+    __tablename__ = "emotion_signals"
+    __table_args__ = (
+        Index("ix_emotion_signal_team_ts", "team_id", "created_at"),
+        Index("ix_emotion_signal_user_ts", "user_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # source ∈ chat_text | behavior | call_audio | call_video
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    valence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")  # -1..1
+    arousal: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")  # 0..1
+    stress: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")  # 0..1
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    source_ref: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TeamPetModel(TimestampMixin, Base):
+    """Один питомец на команду — живой аватар настроения отдела.
+
+    См. docs/design/gamification-tamagotchi.md.
+    """
+
+    __tablename__ = "team_pets"
+    __table_args__ = (UniqueConstraint("team_id", name="uq_team_pet_team"),)
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False, server_default="Кардиналыч")
+    species: Mapped[str] = mapped_column(Text, nullable=False, server_default="fox")
+    mood: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.6")  # 0..1
+    energy: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.7")  # 0..1
+    level: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    xp: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    last_fed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_decay_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class YouGileBoardModel(Base):
     __tablename__ = "yougile_boards"
     __table_args__ = (

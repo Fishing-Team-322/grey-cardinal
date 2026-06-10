@@ -52,6 +52,22 @@
   .act.on { background: var(--red); color: #fff; border-color: var(--red); }
   .hidden { display: none; }
   .loader { text-align: center; padding: 50px; color: var(--muted); }
+  /* Pet widget */
+  .pet-wrap { text-align: center; padding: 8px 0 4px; }
+  .pet-emoji { font-size: 92px; line-height: 1; display: inline-block;
+    animation: bob 2.6s ease-in-out infinite; filter: drop-shadow(0 6px 18px rgba(255,0,60,.25)); }
+  @keyframes bob { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-10px) } }
+  .pet-name { font-size: 19px; font-weight: 700; margin-top: 6px; }
+  .pet-lvl { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .pet-phrase { margin: 12px 0; color: var(--txt); font-size: 14.5px; }
+  .bar { margin: 9px 0; }
+  .bar .lab { display: flex; justify-content: space-between; font-size: 12px;
+    color: var(--muted); margin-bottom: 4px; }
+  .bar .track { height: 9px; border-radius: 6px; background: #232329; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 6px; transition: width .6s ease; }
+  .fill.mood { background: linear-gradient(90deg, #ff003c, #f1c40f, #2ecc71); }
+  .fill.energy { background: linear-gradient(90deg, #4a90d9, #2ecc71); }
+  .pet-note { color: var(--muted); font-size: 11.5px; margin-top: 14px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -64,11 +80,13 @@
   <div class="tabs">
     <div class="tab active" data-tab="tasks" id="tab-tasks">Задачи</div>
     <div class="tab" data-tab="meetings" id="tab-meetings">Созвоны</div>
+    <div class="tab" data-tab="pet" id="tab-pet">Питомец</div>
   </div>
 
   <div id="loader" class="loader">Загружаю…</div>
   <div id="view-tasks"></div>
   <div id="view-meetings" class="hidden"></div>
+  <div id="view-pet" class="hidden"></div>
 
 <script>
 const tg = window.Telegram?.WebApp;
@@ -126,6 +144,31 @@ function renderMeetings(meetings) {
     </div>`).join("");
 }
 
+function renderPet(pet) {
+  if (!pet) return `<div class="empty">Питомец появится, когда вы в команде 🐾</div>`;
+  const mood = Math.round((pet.mood ?? 0) * 100);
+  const energy = Math.round((pet.energy ?? 0) * 100);
+  const b = pet.breakdown || {};
+  const emoNote = b.emotion_available
+    ? "Настроение учитывает эмоции команды и состояние задач."
+    : "Эмоциональный анализ выключен — настроение по задачам. Включить может руководитель.";
+  return `
+    <div class="card pet-wrap">
+      <div class="pet-emoji">${esc(pet.emoji || "🦊")}</div>
+      <div class="pet-name">${esc(pet.name || "Питомец")}</div>
+      <div class="pet-lvl">Уровень ${pet.level ?? 1} · XP ${pet.xp ?? 0}</div>
+      <div class="pet-phrase">${esc(pet.phrase || "")}</div>
+      <div class="bar"><div class="lab"><span>Настроение</span><span>${mood}%</span></div>
+        <div class="track"><div class="fill mood" style="width:${mood}%"></div></div></div>
+      <div class="bar"><div class="lab"><span>Энергия</span><span>${energy}%</span></div>
+        <div class="track"><div class="fill energy" style="width:${energy}%"></div></div></div>
+      <div class="pet-note">
+        Здоровье задач: ${Math.round((b.task_health ?? 0)*100)}% ·
+        Просрочки: ${Math.round((b.overdue_pressure ?? 0)*100)}%<br>${esc(emoNote)}
+      </div>
+    </div>`;
+}
+
 async function post(url, body) {
   const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({init_data: tg?.initData || "", ...body})});
@@ -155,6 +198,7 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   $("view-tasks").classList.toggle("hidden", name !== "tasks");
   $("view-meetings").classList.toggle("hidden", name !== "meetings");
+  $("view-pet").classList.toggle("hidden", name !== "pet");
 }
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => switchTab(t.dataset.tab));
 
@@ -181,6 +225,7 @@ async function load() {
     }
     $("view-tasks").innerHTML = renderTasks(data.tasks || []);
     $("view-meetings").innerHTML = renderMeetings(data.meetings || []);
+    $("view-pet").innerHTML = renderPet(data.pet);
   } catch (e) {
     $("loader").textContent = "Не удалось загрузить данные. Откройте приложение из бота.";
   }

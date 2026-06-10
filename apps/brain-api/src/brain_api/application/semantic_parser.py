@@ -35,6 +35,8 @@ metrics_logger = logging.getLogger("brain_api.llm.metrics")
 
 SEMANTIC_KINDS = {
     "task_candidate",
+    "task_reassignment",
+    "task_cancellation",
     "meeting_candidate",
     "daily_report",
     "absence_notice",
@@ -57,6 +59,7 @@ class SemanticMessageInput:
     interaction_mode: str = "AUTO_BACKGROUND"
     reply_to_text: str | None = None
     reply_to_sender_display_name: str | None = None
+    recent_messages: list[dict] = field(default_factory=list)
 
 
 class SemanticParseFailed(RuntimeError):
@@ -92,6 +95,9 @@ class SemanticMessageParser:
                 "meeting": None,
                 "daily_report": None,
                 "absence": None,
+                "reassignment": None,
+                "cancellation": None,
+                "affect": None,
                 "reason": "prefilter",
             }
 
@@ -145,6 +151,9 @@ class SemanticMessageParser:
             "meeting": None,
             "daily_report": None,
             "absence": None,
+            "reassignment": None,
+            "cancellation": None,
+            "affect": None,
             "reason": "primary and fallback providers failed",
         }
 
@@ -218,6 +227,7 @@ class SemanticMessageParser:
             interaction_mode=payload.interaction_mode,
             reply_to_text=payload.reply_to_text,
             reply_to_sender_display_name=payload.reply_to_sender_display_name,
+            recent_messages=payload.recent_messages,
         )
 
     def _log_metrics(

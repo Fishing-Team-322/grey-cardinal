@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -116,6 +116,8 @@ CB_MENU_SETTINGS = "menu:settings"
 CB_MENU_DIGEST = "menu:digest"
 CB_MENU_LEADERBOARD = "menu:leaderboard"
 CB_MENU_REPORTS = "menu:reports"
+CB_MENU_PET = "menu:pet"
+CB_MENU_CARE = "menu:care"
 CB_SETUP_JIRA = "setup:jira"
 CB_SETUP_YOUGILE = "setup:yougile"
 CB_MEETING_START = "meeting:start"
@@ -155,6 +157,7 @@ def _main_menu_kb(is_group: bool = False) -> dict:
         return _kb(
             [("📋 Задачи команды", CB_TASK_LIST), ("🎙 Встречи", CB_MENU_MEETINGS)],
             [("🏆 Лидерборд", CB_MENU_LEADERBOARD), ("📊 Дайджест", CB_MENU_DIGEST)],
+            [("🐾 Питомец", CB_MENU_PET), ("💛 Забота о команде", CB_MENU_CARE)],
             [("📈 Отчёты по сотрудникам", CB_MENU_REPORTS)],
             [("⚙️ Настройки", CB_MENU_SETTINGS)],
         )
@@ -635,6 +638,10 @@ async def ingest_callback(
     if data.startswith("taskcmd:"):
         return await _handle_taskcmd_callback(container, event)
 
+    # ── Переброс / отмена задачи: подтверждение менеджером/директором ──────
+    if data.startswith("chatact:"):
+        return await _handle_chatact_callback(container, event)
+
     # ── Telemost: выбор провайдера для созвона ────────────────────────────
     if data.startswith("tmcall:"):
         return await _handle_telemost_callback(container, event)
@@ -699,6 +706,14 @@ async def ingest_callback(
         async with container.session_factory() as session:
             text = await team_leaderboard_text_for_chat(session, chat_id)
         return _edit_with_kb(chat_id, msg_id, cq_id, text, _back_kb())
+
+    if data == CB_MENU_PET:
+        result = await _pet_actions_for_chat(container, chat_id)
+        return _answer_and_add(cq_id, result)
+
+    if data == CB_MENU_CARE:
+        result = await _wellbeing_actions_for_chat(container, chat_id)
+        return _answer_and_add(cq_id, result)
 
     if data == CB_MENU_REPORTS:
         async with container.session_factory() as session:
@@ -1031,6 +1046,8 @@ async def _try_v2_semantic_message(
             )
         )
 
+        recent_messages = await _recent_chat_window(session, chat.id, before_message=message)
+
         try:
             parsed = await container.semantic_parser.parse(
                 SemanticMessageInput(
@@ -1046,6 +1063,7 @@ async def _try_v2_semantic_message(
                     reply_to_sender_display_name=(
                         reply_sender.display_name if reply_sender else None
                     ),
+                    recent_messages=recent_messages,
                 )
             )
         except Exception as exc:
@@ -1063,6 +1081,38 @@ async def _try_v2_semantic_message(
 
         kind = parsed["kind"]
         confidence = float(parsed["confidence"])
+        autonomous_mode = bool((team.board_config or {}).get("autonomous_mode"))
+        _override_text = semantic_text or event.text
+
+        # ── Эмоциональный сигнал (только при включённом opt-in отдела) ─────────
+        await _maybe_record_affect(session, team, sender, message, parsed, _override_text)
+
+        # ── Deterministic guards (перебивают LLM-классификацию малых моделей) ──
+        # Высокоточные regex с guard на создание задачи — запускаем для ЛЮБОГО
+        # kind (включая noise/question), но не трогаем явные встречи/отчёты/
+        # отсутствия. Порядок: отмена → переброс (оба мутируют существующую задачу).
+        if kind not in {"meeting_candidate", "daily_report", "absence_notice"}:
+            if _detect_cancellation_heuristic(_override_text) and kind != "task_cancellation":
+                kind = "task_cancellation"
+                parsed = {**parsed, "kind": kind}
+            elif _detect_reassignment_heuristic(_override_text) and kind not in {
+                "task_reassignment",
+                "task_cancellation",
+            }:
+                kind = "task_reassignment"
+                parsed = {**parsed, "kind": kind}
+
+        if kind == "task_cancellation":
+            return await _route_v2_cancellation(
+                session, container, team, sender, message, parsed, event,
+                recent_messages, autonomous=autonomous_mode,
+            )
+
+        if kind == "task_reassignment":
+            return await _route_v2_reassignment(
+                session, container, team, sender, message, parsed, event,
+                recent_messages, interaction_mode, autonomous=autonomous_mode,
+            )
 
         # ── Heuristic override: LLM often misclassifies "X сделал задачу Y"
         # as task_candidate instead of status_update.
@@ -1845,6 +1895,60 @@ def _detect_status_update_heuristic(text: str) -> str | None:
     return None
 
 
+# ── Детерминистические детекторы переброса и отмены задачи ─────────────────────
+
+_REASSIGN_HEURISTIC_RE = re.compile(
+    r"(?:будеш?т?\s+делать|буду\s+(?:делать|заниматься)|будет\s+заниматься|"
+    r"переназнач\w*|перекин\w+\s+задач|пусть\s+[\wа-яё@]+\s+(?:делает|займ[её]тся|"
+    r"возьм[её]т)|назначь?\s+[\wа-яё@]+\s+на\s+задач|переда[йть]\s+задач|"
+    r"возьм[её]т\s+на\s+себя|я\s+возьму\s+задач)",
+    re.IGNORECASE,
+)
+_CANCEL_HEURISTIC_RE = re.compile(
+    r"(?:неактуальн\w*|не\s+актуальн\w*|отмен[аиить]\w*\s+задач|отмени\s+|"
+    r"задач\w*\s+отмен\w*|больше\s+не\s+(?:нужн|нужен|надо|актуальн)|"
+    r"не\s+нужно\s+делать|закрой\s+как\s+ненужн\w*|снять\s+задач|убери\s+задач)",
+    re.IGNORECASE,
+)
+
+
+def _detect_reassignment_heuristic(text: str) -> bool:
+    """True, если текст похож на переброс существующей задачи на исполнителя."""
+    if not text or _TASK_CREATE_GUARD_RE.search(text):
+        return False
+    if _CANCEL_HEURISTIC_RE.search(text):
+        return False
+    return bool(_REASSIGN_HEURISTIC_RE.search(text))
+
+
+def _detect_cancellation_heuristic(text: str) -> bool:
+    """True, если текст похож на отмену существующей задачи как неактуальной."""
+    if not text or _TASK_CREATE_GUARD_RE.search(text):
+        return False
+    return bool(_CANCEL_HEURISTIC_RE.search(text))
+
+
+_SELF_ASSIGN_RE = re.compile(
+    r"\b(?:я\s+(?:буду|возьму|беру)|буду\s+(?:делать|заниматься)|"
+    r"возьму\s+на\s+себя|беру\s+на\s+себя|сам\s+сделаю|сам\s+займусь)\b",
+    re.IGNORECASE,
+)
+_SELF_PRONOUNS = frozenset({"я", "мне", "сам", "сама", "себя", "меня"})
+
+
+def _is_self_assignment(reassignment_payload: dict, text: str) -> bool:
+    """True, если автор берёт задачу на себя («Я буду делать …»)."""
+    ref = (reassignment_payload or {}).get("new_assignee_reference") or ""
+    ref_norm = ref.strip().lower().replace("ё", "е")
+    if ref_norm in _SELF_PRONOUNS:
+        return True
+    ref_type = (reassignment_payload or {}).get("new_assignee_reference_type")
+    if ref_type == "pronoun" and ref_norm in _SELF_PRONOUNS:
+        return True
+    # Если исполнитель не назван явно, но текст явно от первого лица.
+    return bool(not ref_norm and _SELF_ASSIGN_RE.search(text or ""))
+
+
 _STATUS_STOP_WORDS = frozenset({
     "что", "это", "задачу", "задача", "задание", "я", "он", "она", "мы", "вы", "они",
     "уже", "сделал", "сделала", "сделан", "сделана", "готово", "готов", "выполнил",
@@ -1854,8 +1958,12 @@ _STATUS_STOP_WORDS = frozenset({
 })
 
 
-async def _find_task_by_keywords(session, team_id, text: str):
-    """Найти активную задачу по ключевым словам из сообщения (без GC-N)."""
+async def _find_task_by_keywords(session, team_id, text: str, *, min_score: float = 0.3):
+    """Найти активную задачу по ключевым словам из сообщения (без GC-N).
+
+    ``min_score`` повышается для деструктивных действий (отмена), чтобы не
+    отменить случайную задачу по слабому совпадению.
+    """
     tokens = {
         w for w in text.lower().replace("ё", "е").split()
         if len(w) >= 4 and w not in _STATUS_STOP_WORDS
@@ -1880,10 +1988,537 @@ async def _find_task_by_keywords(session, team_id, text: str):
             if any(mt[:5] == tt[:5] or mt in tt or tt in mt for tt in t_tokens)
         )
         score = matches / max(len(tokens), len(t_tokens))
-        if score > best_score and score >= 0.3:
+        if score > best_score and score >= min_score:
             best_score = score
             best_task = t
     return best_task
+
+
+# ── Эмоциональный сигнал из чата (фича B: эмоциональный портрет) ──────────────
+
+
+async def _maybe_record_affect(session, team, sender, message, parsed, text: str) -> None:
+    """Записать эмоциональный сигнал из сообщения, если включён opt-in отдела.
+
+    Источник affect — LLM (parsed['affect']) или лексический fallback. Сырьё не
+    храним, только производные (valence/stress). См. emotional-portrait.md.
+    """
+    from brain_api.application.team_mood import heuristic_affect
+    from brain_api.application.use_cases.team_pet import record_emotion_signal
+    from brain_api.application.use_cases.team_settings import emotion_analysis_enabled
+
+    if not emotion_analysis_enabled(team, "chat_text"):
+        return
+    affect = parsed.get("affect") if isinstance(parsed, dict) else None
+    valence: float | None = None
+    stress = 0.0
+    confidence = 0.5
+    if affect:
+        valence = float(affect.get("valence") or 0.0)
+        stress = float(affect.get("stress") or 0.0)
+        confidence = 0.7
+    else:
+        guess = heuristic_affect(text)
+        if guess is not None:
+            valence, stress = guess
+            confidence = 0.35
+    if valence is None:
+        return
+    try:
+        await record_emotion_signal(
+            session,
+            team_id=team.id,
+            user_id=sender.id,
+            source="chat_text",
+            valence=valence,
+            stress=stress,
+            confidence=confidence,
+            source_ref={"message_id": str(message.id)},
+        )
+    except Exception:
+        logger.exception("Failed to record emotion signal for team %s", team.id)
+
+
+# ── Контекст чата, резолв задачи, права, переброс/отмена ───────────────────────
+
+_GC_REF_RE = re.compile(r"(?:#)?GC-\d+", re.IGNORECASE)
+
+
+async def _recent_chat_window(
+    session, chat_db_id, *, before_message, limit: int = 8, minutes: int = 30
+) -> list[dict]:
+    """Скользящее окно последних сообщений чата для контекста LLM.
+
+    Возвращает до ``limit`` сообщений за последние ``minutes`` минут (без текущего),
+    от старых к новым. Текст в логи не попадает (privacy).
+    """
+    since = datetime.now(UTC) - timedelta(minutes=minutes)
+    rows = (
+        await session.execute(
+            select(m.ChatMessageModel, m.UserModel.display_name)
+            .outerjoin(m.UserModel, m.UserModel.id == m.ChatMessageModel.sender_id)
+            .where(
+                m.ChatMessageModel.chat_id == chat_db_id,
+                m.ChatMessageModel.id != before_message.id,
+                m.ChatMessageModel.created_at >= since,
+            )
+            .order_by(m.ChatMessageModel.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    window = [
+        {
+            "sender": display_name or "неизвестный",
+            "text": (msg.text or "")[:400],
+        }
+        for msg, display_name in reversed(rows)
+        if (msg.text or "").strip()
+    ]
+    return window
+
+
+async def _resolve_task_from_message(
+    session,
+    team_id,
+    message,
+    text: str,
+    recent_messages: list[dict] | None = None,
+    *,
+    keyword_min_score: float = 0.3,
+):
+    """Найти задачу, к которой относится сообщение (переброс/отмена/статус).
+
+    Порядок: явный GC-N → reply на сообщение-источник задачи → ключевые слова →
+    GC-N из недавней переписки (скользящее окно).
+    """
+    # 1) Явный GC-N в тексте.
+    public_match = _GC_REF_RE.search(text or "")
+    if public_match:
+        task = await session.scalar(
+            select(m.TaskModel).where(
+                m.TaskModel.team_id == team_id,
+                func.lower(m.TaskModel.public_id) == public_match.group(0).lstrip("#").lower(),
+            )
+        )
+        if task is not None:
+            return task
+
+    # 2) Reply на сообщение, из которого создавали задачу.
+    if message.reply_to_message_id is not None:
+        replied = await session.scalar(
+            select(m.ChatMessageModel).where(
+                m.ChatMessageModel.chat_id == message.chat_id,
+                m.ChatMessageModel.telegram_message_id == message.reply_to_message_id,
+            )
+        )
+        if replied is not None:
+            task = await session.scalar(
+                select(m.TaskModel).where(
+                    m.TaskModel.team_id == team_id,
+                    m.TaskModel.source_message_id == replied.id,
+                )
+            )
+            if task is None:
+                proposal = await session.scalar(
+                    select(m.TaskProposalModel).where(
+                        m.TaskProposalModel.team_id == team_id,
+                        m.TaskProposalModel.source_message_id == replied.id,
+                    )
+                )
+                if proposal is not None:
+                    task = await session.scalar(
+                        select(m.TaskModel).where(
+                            m.TaskModel.created_from_proposal_id == proposal.id
+                        )
+                    )
+            if task is not None:
+                return task
+
+    # 3) Ключевые слова.
+    task = await _find_task_by_keywords(session, team_id, text, min_score=keyword_min_score)
+    if task is not None:
+        return task
+
+    # 4) GC-N из недавней переписки (контекст «эта задача»).
+    for entry in reversed(recent_messages or []):
+        ref = _GC_REF_RE.search(entry.get("text") or "")
+        if ref:
+            task = await session.scalar(
+                select(m.TaskModel).where(
+                    m.TaskModel.team_id == team_id,
+                    func.lower(m.TaskModel.public_id) == ref.group(0).lstrip("#").lower(),
+                )
+            )
+            if task is not None:
+                return task
+    return None
+
+
+async def _actor_can_manage(session, team_id, telegram_user_id: int | None) -> bool:
+    """True, если пользователь — руководитель команды или директор компании."""
+    if telegram_user_id is None:
+        return False
+    user = await session.scalar(
+        select(m.UserModel).where(m.UserModel.telegram_user_id == telegram_user_id)
+    )
+    if user is None:
+        return False
+    is_manager = await session.scalar(
+        select(m.TeamMemberModel.id).where(
+            m.TeamMemberModel.team_id == team_id,
+            m.TeamMemberModel.user_id == user.id,
+            m.TeamMemberModel.role == "manager",
+        )
+    )
+    if is_manager is not None:
+        return True
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        return False
+    is_director = await session.scalar(
+        select(m.CompanyAdminModel.id).where(
+            m.CompanyAdminModel.company_id == team.company_id,
+            m.CompanyAdminModel.user_id == user.id,
+            m.CompanyAdminModel.role == "director",
+        )
+    )
+    return is_director is not None
+
+
+async def _apply_reassignment(session, container, task, new_user) -> None:
+    """Сменить исполнителя задачи + синхронизировать доску (некритично)."""
+    task.assignee_id = new_user.id
+    task.assignee_text = new_user.display_name
+    task.last_status_update_at = datetime.now(UTC)
+    task_id_cached = task.id
+    await session.commit()
+    try:
+        await container.board_mirror.sync_task_fields(task_id_cached)
+    except Exception:
+        logger.exception("Board assignee sync failed for task %s", task_id_cached)
+
+
+async def _apply_cancellation(session, container, task) -> None:
+    """Перевести задачу в cancelled + синхронизировать доску (некритично)."""
+    task.status = TaskStatus.cancelled.value
+    task.last_status_update_at = datetime.now(UTC)
+    task_id_cached = task.id
+    await session.commit()
+    try:
+        await TaskStatusService(container.board_mirror).update_status(
+            task_id_cached,
+            TaskStatus.cancelled,
+            action="chat_task_cancellation",
+        )
+    except Exception:
+        logger.exception("Board cancel sync failed for task %s", task_id_cached)
+
+
+async def _route_v2_reassignment(
+    session, container, team, sender, message, parsed, event,
+    recent_messages, interaction_mode, *, autonomous: bool = False,
+):
+    """Переброс задачи на другого исполнителя из чата (фича 1)."""
+    payload = parsed.get("reassignment") or {}
+    ref_text = payload.get("task_reference") or event.text
+    task = await _resolve_task_from_message(
+        session, team.id, message, ref_text, recent_messages
+    )
+    if task is None:
+        # Попробовать по полному тексту (вдруг ссылка на задачу не выделена LLM).
+        task = await _resolve_task_from_message(
+            session, team.id, message, event.text, recent_messages
+        )
+    if task is None:
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind="low_confidence",
+                status="pending",
+                reason="reassignment_without_task_context",
+                raw_text=event.text,
+                semantic_payload=parsed,
+                confidence=float(parsed.get("confidence") or 0.0),
+            )
+        )
+        await session.commit()
+        return ActionsResponse(actions=[])
+
+    task_public_id = task.public_id
+    task_title = task.title
+
+    # Самоназначение: «Я буду делать задачу …» → исполнитель = автор сообщения.
+    if _is_self_assignment(payload, event.text):
+        new_user = sender
+        resolution = None
+    else:
+        resolver = IdentityResolver(session)
+        resolution = await resolver.resolve_assignee(
+            team.id,
+            payload.get("new_assignee_reference"),
+            event.entities,
+            event.text,
+            None,
+            interaction_mode,
+        )
+        new_user = (
+            await session.get(m.UserModel, resolution.user_id)
+            if resolution.user_id is not None
+            else None
+        )
+
+    if new_user is None and (resolution is None or resolution.status != "resolved"):
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind="needs_assignee",
+                status="pending",
+                reason="reassignment_assignee_unresolved",
+                raw_text=event.text,
+                semantic_payload=parsed,
+                identity_payload=resolution.payload(),
+                confidence=float(parsed.get("confidence") or 0.0),
+            )
+        )
+        await session.commit()
+        name = payload.get("new_assignee_reference") or "нового исполнителя"
+        return _text(
+            event.chat.id,
+            f"Не нашёл «{name}» в команде, чтобы перебросить {task_public_id}. "
+            "Уточните, на кого назначить.",
+        )
+
+    new_user_name = new_user.display_name
+    new_user_tg = new_user.telegram_user_id
+
+    if autonomous:
+        await _apply_reassignment(session, container, task, new_user)
+        actions: list = [
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=f"🔄 {task_public_id} «{task_title}» переброшена на {new_user_name}.",
+            )
+        ]
+        if new_user_tg is not None:
+            actions.append(
+                SendMessageAction(
+                    chat_id=new_user_tg,
+                    text=f"На вас переназначена задача {task_public_id}\n\n{task_title}",
+                )
+            )
+        return ActionsResponse(actions=actions)
+
+    # Режим с подтверждением: только руководитель/директор подтверждает.
+    pending = m.PendingChatActionModel(
+        team_id=team.id,
+        kind="reassign",
+        task_id=task.id,
+        target_user_id=new_user.id,
+        requested_by_user_id=sender.id,
+        status="pending",
+        telegram_chat_id=event.chat.id,
+        source_message_id=message.id,
+        payload={"task_public_id": task_public_id, "new_assignee_name": new_user_name},
+    )
+    session.add(pending)
+    await session.commit()
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=(
+                    f"🔄 Перекинуть задачу {task_public_id} «{task_title}» "
+                    f"на {new_user_name}?\n\n"
+                    "Подтвердить может руководитель или директор."
+                ),
+                reply_markup=_kb(
+                    [
+                        ("✅ Перебросить", f"chatact:confirm:{pending.id}"),
+                        ("❌ Нет", f"chatact:reject:{pending.id}"),
+                    ]
+                ),
+            )
+        ]
+    )
+
+
+async def _route_v2_cancellation(
+    session, container, team, sender, message, parsed, event,
+    recent_messages, *, autonomous: bool = False,
+):
+    """Отмена задачи из чата как неактуальной (фича 2)."""
+    payload = parsed.get("cancellation") or {}
+    ref_text = payload.get("task_reference") or event.text
+    # Деструктивно: для совпадения по ключевым словам требуем более высокий порог.
+    task = await _resolve_task_from_message(
+        session, team.id, message, ref_text, recent_messages, keyword_min_score=0.45
+    )
+    if task is None and ref_text != event.text:
+        task = await _resolve_task_from_message(
+            session, team.id, message, event.text, recent_messages, keyword_min_score=0.45
+        )
+    if task is None:
+        session.add(
+            m.AIInboxItemModel(
+                team_id=team.id,
+                source_message_id=message.id,
+                kind="low_confidence",
+                status="pending",
+                reason="cancellation_without_task_context",
+                raw_text=event.text,
+                semantic_payload=parsed,
+                confidence=float(parsed.get("confidence") or 0.0),
+            )
+        )
+        await session.commit()
+        return ActionsResponse(actions=[])
+
+    task_public_id = task.public_id
+    task_title = task.title
+
+    if task.status in {TaskStatus.done.value, TaskStatus.cancelled.value}:
+        await session.commit()
+        return _text(event.chat.id, f"{task_public_id} уже закрыта.")
+
+    if autonomous:
+        await _apply_cancellation(session, container, task)
+        return _text(
+            event.chat.id, f"🚫 {task_public_id} «{task_title}» отменена как неактуальная."
+        )
+
+    pending = m.PendingChatActionModel(
+        team_id=team.id,
+        kind="cancel",
+        task_id=task.id,
+        requested_by_user_id=sender.id,
+        status="pending",
+        telegram_chat_id=event.chat.id,
+        source_message_id=message.id,
+        payload={"task_public_id": task_public_id},
+    )
+    session.add(pending)
+    await session.commit()
+    return ActionsResponse(
+        actions=[
+            SendMessageAction(
+                chat_id=event.chat.id,
+                text=(
+                    f"🚫 Отменить задачу {task_public_id} «{task_title}» как неактуальную?\n\n"
+                    "Подтвердить может руководитель или директор."
+                ),
+                reply_markup=_kb(
+                    [
+                        ("✅ Отменить", f"chatact:confirm:{pending.id}"),
+                        ("❌ Нет", f"chatact:reject:{pending.id}"),
+                    ]
+                ),
+            )
+        ]
+    )
+
+
+async def _handle_chatact_callback(
+    container: Container, event: TelegramCallbackEvent
+) -> ActionsResponse:
+    """Подтверждение/отклонение переброса или отмены задачи (только менеджер/директор)."""
+    parts = event.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    cq_id = event.callback_query_id
+    chat_id = event.message.chat_id
+    msg_id = event.message.message_id
+    try:
+        pending_id = UUID(parts[2])
+    except (IndexError, ValueError):
+        return _answer(cq_id, "Действие не найдено")
+
+    async with container.session_factory() as session:
+        pending = await session.get(m.PendingChatActionModel, pending_id)
+        if pending is None:
+            return _answer(cq_id, "Действие не найдено")
+        if pending.status != "pending":
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text="Уже обработано"),
+                ]
+            )
+        if not await _actor_can_manage(session, pending.team_id, event.from_user.id):
+            return _answer(cq_id, "Только руководитель или директор может подтвердить")
+
+        actor = await session.scalar(
+            select(m.UserModel).where(m.UserModel.telegram_user_id == event.from_user.id)
+        )
+        task_public_id = (pending.payload or {}).get("task_public_id", "")
+
+        if action == "reject":
+            pending.status = "rejected"
+            pending.decided_by_user_id = actor.id if actor else None
+            pending.decided_at = datetime.now(UTC)
+            await session.commit()
+            return ActionsResponse(
+                actions=[
+                    AnswerCallbackAction(callback_query_id=cq_id, text="Отклонено"),
+                    EditMessageAction(
+                        chat_id=chat_id, message_id=msg_id,
+                        text=f"❌ Изменение по {task_public_id} отклонено.",
+                    ),
+                ]
+            )
+        if action != "confirm":
+            return _answer(cq_id, "Неизвестное действие")
+
+        task = await session.get(m.TaskModel, pending.task_id)
+        if task is None:
+            pending.status = "rejected"
+            await session.commit()
+            return _answer(cq_id, "Задача не найдена")
+
+        pending.status = "confirmed"
+        pending.decided_by_user_id = actor.id if actor else None
+        pending.decided_at = datetime.now(UTC)
+
+        if pending.kind == "reassign":
+            new_user = (
+                await session.get(m.UserModel, pending.target_user_id)
+                if pending.target_user_id
+                else None
+            )
+            if new_user is None:
+                await session.commit()
+                return _answer(cq_id, "Новый исполнитель не найден")
+            new_user_name = new_user.display_name
+            new_user_tg = new_user.telegram_user_id
+            task_title = task.title
+            await _apply_reassignment(session, container, task, new_user)
+            actions = [
+                AnswerCallbackAction(callback_query_id=cq_id, text="Переброшено"),
+                EditMessageAction(
+                    chat_id=chat_id, message_id=msg_id,
+                    text=f"🔄 {task_public_id} «{task_title}» переброшена на {new_user_name}.",
+                ),
+            ]
+            if new_user_tg is not None:
+                actions.append(
+                    SendMessageAction(
+                        chat_id=new_user_tg,
+                        text=f"На вас переназначена задача {task_public_id}\n\n{task_title}",
+                    )
+                )
+            return ActionsResponse(actions=actions)
+
+        # cancel
+        task_title = task.title
+        await _apply_cancellation(session, container, task)
+        return ActionsResponse(
+            actions=[
+                AnswerCallbackAction(callback_query_id=cq_id, text="Отменено"),
+                EditMessageAction(
+                    chat_id=chat_id, message_id=msg_id,
+                    text=f"🚫 {task_public_id} «{task_title}» отменена как неактуальная.",
+                ),
+            ]
+        )
 
 
 async def _match_v2_assignee(session, team_id, assignee_text):
@@ -1920,6 +2555,121 @@ async def _find_v2_duplicate(session, team_id, title, assignee_id):
         if same_assignee and overlap >= 0.72:
             return task
     return None
+
+
+async def _pet_actions_for_chat(container: Container, chat_id: int) -> ActionsResponse:
+    """Показать командного питомца (Bucket B)."""
+    from brain_api.application.use_cases.team_pet import pet_payload
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Питомец появится, когда чат привязан к команде.")
+        payload = await pet_payload(session, team.id)
+        await session.commit()
+    b = payload["breakdown"]
+    mood_pct = int(payload["mood"] * 100)
+    energy_pct = int(payload["energy"] * 100)
+    emo = (
+        "вкл" if b["emotion_available"] else "выкл (по задачам)"
+    )
+    text = (
+        f"{payload['emoji']} <b>{payload['name']}</b> — питомец команды\n"
+        f"Уровень {payload['level']} · XP {payload['xp']}\n\n"
+        f"Настроение: {mood_pct}%\n"
+        f"Энергия: {energy_pct}%\n"
+        f"{payload['phrase']}\n\n"
+        f"<i>Эмоц. анализ: {emo}. Здоровье задач: {int(b['task_health']*100)}%, "
+        f"просрочки: {int(b['overdue_pressure']*100)}%.</i>"
+    )
+    return _html(chat_id, text)
+
+
+async def _wellbeing_actions_for_chat(
+    container: Container, chat_id: int
+) -> ActionsResponse:
+    """Агентный контур: предложить переброс задач с перегруженных сотрудников."""
+    from brain_api.application.use_cases.agentic_wellbeing import detect_interventions
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Сначала привяжите чат к команде.")
+        autonomous = bool((team.board_config or {}).get("autonomous_mode"))
+        interventions = await detect_interventions(session, team.id)
+        if not interventions:
+            await session.commit()
+            return _text(chat_id, "🤍 Команда в порядке — перегруза и выгорания не вижу.")
+
+        actions: list = []
+        for iv in interventions:
+            if iv.kind == "reassign_overload" and iv.candidate is not None:
+                if autonomous:
+                    task = await session.get(m.TaskModel, iv.task_id)
+                    new_user = await session.get(m.UserModel, iv.candidate.user_id)
+                    if task is not None and new_user is not None:
+                        await _apply_reassignment(session, container, task, new_user)
+                        actions.append(
+                            SendMessageAction(
+                                chat_id=chat_id,
+                                text=(
+                                    f"🤝 {iv.at_risk.display_name} перегружен(а) "
+                                    f"({iv.reason}) — перекинул {iv.task_public_id} "
+                                    f"на {iv.candidate.display_name}."
+                                ),
+                            )
+                        )
+                else:
+                    pending = m.PendingChatActionModel(
+                        team_id=team.id,
+                        kind="reassign",
+                        task_id=iv.task_id,
+                        target_user_id=iv.candidate.user_id,
+                        status="pending",
+                        telegram_chat_id=chat_id,
+                        payload={
+                            "task_public_id": iv.task_public_id,
+                            "new_assignee_name": iv.candidate.display_name,
+                            "origin": "wellbeing",
+                        },
+                    )
+                    session.add(pending)
+                    await session.flush()
+                    actions.append(
+                        SendMessageAction(
+                            chat_id=chat_id,
+                            text=(
+                                f"🤝 {iv.at_risk.display_name} перегружен(а) "
+                                f"({iv.reason}) 😟\n"
+                                f"Перекинуть {iv.task_public_id} «{iv.task_title}» "
+                                f"на {iv.candidate.display_name}?\n\n"
+                                "Подтвердит руководитель или директор."
+                            ),
+                            reply_markup=_kb(
+                                [
+                                    ("✅ Перебросить", f"chatact:confirm:{pending.id}"),
+                                    ("❌ Нет", f"chatact:reject:{pending.id}"),
+                                ]
+                            ),
+                        )
+                    )
+            else:  # suggest_pause
+                actions.append(
+                    SendMessageAction(
+                        chat_id=chat_id,
+                        text=(
+                            f"💛 {iv.at_risk.display_name}: {iv.reason}. "
+                            "Возможно, стоит сделать паузу или разгрузить — "
+                            "перебросить новые задачи пока не на кого."
+                        ),
+                    )
+                )
+        await session.commit()
+        return ActionsResponse(actions=actions)
 
 
 def _parse_dt(value, timezone: str = "UTC"):
@@ -2062,6 +2812,12 @@ async def ingest_command(
     if command in {"leaderboard", "rating", "top"}:
         async with container.session_factory() as session:
             return _text(chat_id, await team_leaderboard_text_for_chat(session, chat_id))
+
+    if command in {"pet", "tamagotchi", "mascot"}:
+        return await _pet_actions_for_chat(container, chat_id)
+
+    if command in {"care", "wellbeing", "wellness"}:
+        return await _wellbeing_actions_for_chat(container, chat_id)
 
     if command in {"report", "reports"}:
         async with container.session_factory() as session:
