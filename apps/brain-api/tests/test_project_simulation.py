@@ -132,3 +132,78 @@ def test_render_simulation_text():
     res = simulate(items, caps, current_mood=0.6, horizon_weeks=4)
     text = ps.render_simulation_text(res, project_name="Тест")
     assert "Расчёт" in text and "Бюджет" in text and "Настроение" in text
+
+
+# ── Multi-scenario planner ────────────────────────────────────────────────────
+
+
+async def _seed_team_with_history(session):
+    director = m.UserModel(id=uuid4(), display_name="Dir")
+    anya = m.UserModel(id=uuid4(), display_name="Аня")
+    petya = m.UserModel(id=uuid4(), display_name="Петя")
+    session.add_all([director, anya, petya])
+    await session.flush()
+    company = m.CompanyModel(id=uuid4(), name="A", timezone="UTC", created_by=director.id)
+    session.add(company)
+    await session.flush()
+    team = m.TeamModel(
+        id=uuid4(), company_id=company.id, name="Dev", timezone="UTC", board_provider="mock",
+    )
+    session.add(team)
+    await session.flush()
+    session.add_all([
+        m.TeamMemberModel(team_id=team.id, user_id=anya.id, role="employee"),
+        m.TeamMemberModel(team_id=team.id, user_id=petya.id, role="employee"),
+    ])
+    # История: Аня закрывала backend-задачи, Петя — frontend.
+    seq = 0
+    for title in ("сделать API оплаты", "интеграция с сервером", "endpoint задач"):
+        seq += 1
+        session.add(m.TaskModel(
+            id=uuid4(), seq=seq, public_id=f"GC-{seq}", team_id=team.id, title=title,
+            status="done", priority="medium", source="telegram_chat", assignee_id=anya.id,
+        ))
+    for title in ("вёрстка страницы", "интерфейс кабинета"):
+        seq += 1
+        session.add(m.TaskModel(
+            id=uuid4(), seq=seq, public_id=f"GC-{seq}", team_id=team.id, title=title,
+            status="done", priority="medium", source="telegram_chat", assignee_id=petya.id,
+        ))
+    await session.commit()
+    return team.id, anya.id
+
+
+async def test_skill_matrix_from_history(session_factory):
+    async with session_factory() as session:
+        team_id, anya_id = await _seed_team_with_history(session)
+        matrix = await ps.member_skill_matrix(session, team_id)
+    assert anya_id in matrix
+    assert matrix[anya_id].get("backend", 0) > 0  # Аня — backend по истории
+
+
+async def test_plan_project_scenarios(session_factory):
+    async with session_factory() as session:
+        team_id, _ = await _seed_team_with_history(session)
+        # Большой проект → текущего штаба не хватит → появятся сценарии.
+        plan = await ps.plan_project(
+            session, team_id,
+            "огромная интеграция оплаты, ML модель рекомендаций, мобильное приложение",
+            horizon_weeks=2, now=NOW,
+        )
+    assert "current" in plan["scenarios"]
+    assert plan["recommended"] in plan["scenarios"]
+    assert isinstance(plan["can_use_current_team"], bool)
+    # Скилл-матрица отражает роли из истории.
+    assert "Аня" in plan["skill_matrix"]
+
+
+async def test_render_plan_text(session_factory):
+    async with session_factory() as session:
+        team_id, _ = await _seed_team_with_history(session)
+        plan = await ps.plan_project(
+            session, team_id, "ML модель, мобильное приложение, интеграция оплаты",
+            horizon_weeks=2, now=NOW,
+        )
+    text = ps.render_plan_text(plan, project_name="Большой проект")
+    assert "План проекта" in text and "Текущий штаб" in text
+    assert "Хватит текущего штаба" in text

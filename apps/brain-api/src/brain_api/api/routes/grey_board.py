@@ -1170,15 +1170,15 @@ async def project_simulation(
     container: Container = Depends(get_container),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Расчёт нового проекта на текущую команду: бюджет, срок, прогноз настроения."""
-    from brain_api.application.use_cases.project_simulation import simulate_project
+    """Планирование проекта: сценарии (текущий штаб / +найм / +срок), бюджет, настроение."""
+    from brain_api.application.use_cases.project_simulation import plan_project
 
     ctx = await build_tenant_context(current_user.id, session)
     require_team_role(ctx, team_id, "manager")
     if not body.description.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty description")
     provider_factory = getattr(container, "llm_provider_factory", None)
-    result = await simulate_project(
+    plan = await plan_project(
         session,
         team_id,
         body.description,
@@ -1186,7 +1186,7 @@ async def project_simulation(
         provider_factory=provider_factory,
     )
     await session.commit()
-    return result.to_dict()
+    return plan
 
 
 @router.get("/api/teams/{team_id}/burnout-forecast")

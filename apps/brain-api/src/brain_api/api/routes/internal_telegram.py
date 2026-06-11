@@ -2598,6 +2598,44 @@ async def _pet_actions_for_chat(container: Container, chat_id: int) -> ActionsRe
     return _html(chat_id, text)
 
 
+async def _copilot_actions_for_chat(
+    container: Container, chat_id: int, actor_telegram_id: int
+) -> ActionsResponse:
+    """Manager Copilot: ТОП-3 действия руководителю в личку (killer-feature B)."""
+    from brain_api.application.use_cases.manager_copilot import copilot_for_manager
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Сначала привяжите чат к команде.")
+        if not await _actor_can_manage(session, team.id, actor_telegram_id):
+            return _text(chat_id, "Копилот доступен только руководителю или директору.")
+        text = await copilot_for_manager(session, team.id)
+        await session.commit()
+    # Бриф — в личку руководителю.
+    return ActionsResponse(
+        actions=[SendMessageAction(chat_id=actor_telegram_id, text=text, parse_mode="HTML")]
+    )
+
+
+async def _standup_actions_for_chat(container: Container, chat_id: int) -> ActionsResponse:
+    """Стендап без стендапа (killer-feature B)."""
+    from brain_api.application.use_cases.auto_standup import build_standup, render_standup
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Сначала привяжите чат к команде.")
+        standup = await build_standup(session, team.id)
+        team_name = team.name
+        await session.commit()
+    return _html(chat_id, render_standup(standup, team_name=team_name))
+
+
 async def _pulse_actions_for_chat(container: Container, chat_id: int) -> ActionsResponse:
     """Недельный Team Pulse (killer-feature B)."""
     from brain_api.application.use_cases.team_pulse import gather_metrics, render_pulse
@@ -2635,11 +2673,8 @@ async def _forecast_actions_for_chat(container: Container, chat_id: int) -> Acti
 async def _project_estimate_for_chat(
     container: Container, chat_id: int, description: str
 ) -> ActionsResponse:
-    """Симуляция нового проекта на текущую команду (killer-feature B)."""
-    from brain_api.application.use_cases.project_simulation import (
-        render_simulation_text,
-        simulate_project,
-    )
+    """Планирование нового проекта на текущую команду (killer-feature B)."""
+    from brain_api.application.use_cases.project_simulation import plan_project, render_plan_text
 
     async with container.session_factory() as session:
         team = await session.scalar(
@@ -2648,11 +2683,11 @@ async def _project_estimate_for_chat(
         if team is None:
             return _text(chat_id, "Сначала привяжите чат к команде, чтобы считать проект.")
         provider_factory = getattr(container, "llm_provider_factory", None)
-        result = await simulate_project(
+        plan = await plan_project(
             session, team.id, description, provider_factory=provider_factory
         )
         await session.commit()
-    return _html(chat_id, render_simulation_text(result, project_name=description[:40]))
+    return _html(chat_id, render_plan_text(plan, project_name=description[:40]))
 
 
 async def _wellbeing_actions_for_chat(
@@ -2916,6 +2951,12 @@ async def ingest_command(
 
     if command in {"pulse", "weekly", "report_week"}:
         return await _pulse_actions_for_chat(container, chat_id)
+
+    if command in {"standup", "daily", "sync"}:
+        return await _standup_actions_for_chat(container, chat_id)
+
+    if command in {"copilot", "brief", "today"}:
+        return await _copilot_actions_for_chat(container, chat_id, event.sender.id)
 
     if command in {"estimate", "project", "calc"}:
         description = " ".join(event.args).strip()

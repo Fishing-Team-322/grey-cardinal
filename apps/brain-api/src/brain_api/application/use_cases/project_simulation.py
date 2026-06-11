@@ -219,6 +219,7 @@ async def current_capacity(
             .where(m.TeamMemberModel.team_id == team_id)
         )
     ).all()
+    skills = await member_skill_matrix(session, team_id)
     since = now - timedelta(days=7)
     caps: list[MemberCapacity] = []
     for user, _membership_role in members:
@@ -242,7 +243,7 @@ async def current_capacity(
             )
             or 0.0
         )
-        role = _infer_member_role(user)
+        role = _best_role(skills.get(user.id, {}), _infer_member_role(user))
         # Эффективная ёмкость падает от текущей загрузки и стресса.
         load_factor = max(0.4, 1.0 - min(0.6, active * 0.1))
         stress_factor = max(0.4, 1.0 - 0.5 * stress)
@@ -269,6 +270,43 @@ def _infer_member_role(user: m.UserModel) -> str:
         if any(k in text for k in kws):
             return role
     return "fullstack"
+
+
+async def member_skill_matrix(
+    session: AsyncSession, team_id: UUID
+) -> dict[UUID, dict[str, float]]:
+    """Сила сотрудника по ролям из истории закрытых задач (0..1 fit по ролям).
+
+    Квалификация выводится из реальных результатов: какие задачи человек уже
+    закрывал. Это «по квалификации сотрудников» из ТЗ.
+    """
+    rows = (
+        await session.execute(
+            select(m.TaskModel.assignee_id, m.TaskModel.title).where(
+                m.TaskModel.team_id == team_id,
+                m.TaskModel.status == "done",
+                m.TaskModel.assignee_id.is_not(None),
+            )
+        )
+    ).all()
+    counts: dict[UUID, dict[str, int]] = {}
+    totals: dict[UUID, int] = {}
+    for assignee_id, title in rows:
+        role = _detect_role(title or "")
+        counts.setdefault(assignee_id, {}).setdefault(role, 0)
+        counts[assignee_id][role] += 1
+        totals[assignee_id] = totals.get(assignee_id, 0) + 1
+    matrix: dict[UUID, dict[str, float]] = {}
+    for uid, role_counts in counts.items():
+        total = max(1, totals.get(uid, 0))
+        matrix[uid] = {role: round(n / total, 2) for role, n in role_counts.items()}
+    return matrix
+
+
+def _best_role(skills: dict[str, float], fallback: str) -> str:
+    if not skills:
+        return fallback
+    return max(skills.items(), key=lambda kv: kv[1])[0]
 
 
 # ── Симуляция ─────────────────────────────────────────────────────────────────
@@ -433,6 +471,120 @@ VERDICT_LABEL = {
     "tight": "⚠️ На грани",
     "hire_needed": "🛑 Нужно усиление",
 }
+
+
+def _bottleneck_role(result: SimulationResult) -> str | None:
+    """Роль-узкое место: либо отсутствующая, либо с наибольшим объёмом."""
+    if result.missing_roles:
+        return result.missing_roles[0]
+    if not result.hours_by_role:
+        return None
+    return max(result.hours_by_role.items(), key=lambda kv: kv[1])[0]
+
+
+def _synthetic_hire(role: str) -> MemberCapacity:
+    return MemberCapacity(
+        user_id=None, display_name=f"новый {role}", role=role,
+        active_count=0, stress=0.0, weekly_capacity_hours=BASE_WEEKLY_HOURS,
+    )
+
+
+async def plan_project(
+    session: AsyncSession,
+    team_id: UUID,
+    description: str,
+    *,
+    horizon_weeks: int = 4,
+    provider_factory: object | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Кардинальный планировщик: сравнивает сценарии (текущий штаб / +найм / +время).
+
+    Отвечает на «возможно ли использовать нынешний штаб» прямым сравнением.
+    """
+    now = now or datetime.now(UTC)
+    work_items = await decompose_project(
+        description, provider_factory=provider_factory, team_id=team_id
+    )
+    capacities, current_mood = await current_capacity(session, team_id, now=now)
+
+    base = simulate(work_items, capacities, current_mood, horizon_weeks=max(1, horizon_weeks))
+    scenarios: dict[str, SimulationResult] = {"current": base}
+
+    if base.verdict != "fits":
+        role = _bottleneck_role(base)
+        if role:
+            with_hire = simulate(
+                work_items, [*capacities, _synthetic_hire(role)], current_mood,
+                horizon_weeks=max(1, horizon_weeks),
+            )
+            scenarios["with_hire"] = with_hire
+        with_time = simulate(
+            work_items, capacities, current_mood,
+            horizon_weeks=max(2, int(horizon_weeks * 1.5)),
+        )
+        scenarios["with_more_time"] = with_time
+
+    # Рекомендованный сценарий: первый, который «fits», иначе current.
+    recommended = "current"
+    for key in ("current", "with_more_time", "with_hire"):
+        sc = scenarios.get(key)
+        if sc is not None and sc.verdict == "fits":
+            recommended = key
+            break
+    else:
+        if base.verdict != "fits" and "with_hire" in scenarios:
+            recommended = "with_hire"
+
+    return {
+        "team_id": str(team_id),
+        "can_use_current_team": base.verdict in ("fits", "tight"),
+        "recommended": recommended,
+        "scenarios": {k: v.to_dict() for k, v in scenarios.items()},
+        "skill_matrix": {
+            c.display_name: c.role for c in capacities
+        },
+    }
+
+
+_SCENARIO_LABEL = {
+    "current": "Текущий штаб",
+    "with_hire": "С наймом",
+    "with_more_time": "С запасом по сроку",
+}
+
+
+def render_plan_text(plan: dict[str, Any], *, project_name: str = "проект") -> str:
+    """Рендер сравнения сценариев для чата (HTML)."""
+    scenarios = plan["scenarios"]
+    base = scenarios["current"]
+    can = "✅ да" if plan["can_use_current_team"] else "🛑 нет"
+    lines = [
+        f"🗺 <b>План проекта: {project_name}</b>",
+        f"Хватит текущего штаба: {can}",
+        "",
+    ]
+    for key, label in _SCENARIO_LABEL.items():
+        sc = scenarios.get(key)
+        if not sc:
+            continue
+        mark = "⭐ " if key == plan["recommended"] else ""
+        lines.append(
+            f"{mark}<b>{label}</b>: {VERDICT_LABEL.get(sc['verdict'], sc['verdict'])} · "
+            f"{sc['total_hours']:.0f}ч · {sc['budget_min']:,}–{sc['budget_max']:,}₽ · "
+            f"~{sc['duration_weeks_p50']}нед · настроение "
+            f"{int(sc['current_mood']*100)}%→{int(sc['projected_mood']*100)}%".replace(",", " ")
+        )
+    if base["missing_roles"]:
+        lines.append(f"\nНе хватает ролей: {', '.join(base['missing_roles'])}")
+    if base["risks"]:
+        lines.append("\n<b>Риски:</b>")
+        lines += [f"• {r}" for r in base["risks"][:3]]
+    rec = scenarios[plan["recommended"]]
+    if rec["recommendations"]:
+        lines.append("\n<b>Рекомендация:</b>")
+        lines += [f"• {r}" for r in rec["recommendations"][:2]]
+    return "\n".join(lines)
 
 
 def render_simulation_text(result: SimulationResult, *, project_name: str = "проект") -> str:
