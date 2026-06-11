@@ -2005,9 +2005,16 @@ async def _maybe_record_affect(session, team, sender, message, parsed, text: str
     """
     from brain_api.application.team_mood import heuristic_affect
     from brain_api.application.use_cases.team_pet import record_emotion_signal
+    from brain_api.application.use_cases.team_pet_service import (
+        chat_analysis_allowed,
+        on_chat_affect,
+    )
     from brain_api.application.use_cases.team_settings import emotion_analysis_enabled
 
     if not emotion_analysis_enabled(team, "chat_text"):
+        return
+    # Privacy команды (новая таблица) может явно выключить анализ чата.
+    if not await chat_analysis_allowed(session, team.id):
         return
     affect = parsed.get("affect") if isinstance(parsed, dict) else None
     valence: float | None = None
@@ -2034,6 +2041,10 @@ async def _maybe_record_affect(session, team, sender, message, parsed, text: str
             stress=stress,
             confidence=confidence,
             source_ref={"message_id": str(message.id)},
+        )
+        # Throttled событие питомца из тона коммуникации (если питомец создан).
+        await on_chat_affect(
+            session, team.id, valence=valence, stress=stress, source_id=message.id
         )
     except Exception:
         logger.exception("Failed to record emotion signal for team %s", team.id)

@@ -355,4 +355,39 @@ export const api = {
       return request("GET", "/api/deploy/status");
     },
   },
+  teamPet: {
+    get(teamId) {
+      return request("GET", `/api/teams/${teamId}/pet`);
+    },
+    create(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/pet`, { body });
+    },
+    rename(teamId, name) {
+      return request("PATCH", `/api/teams/${teamId}/pet`, { body: { name } });
+    },
+    events(teamId, query = {}) {
+      return request("GET", `/api/teams/${teamId}/pet/events`, { query });
+    },
+    inventory(teamId) {
+      return request("GET", `/api/teams/${teamId}/pet/inventory`);
+    },
+    equip(teamId, itemId) {
+      return request("POST", `/api/teams/${teamId}/pet/equip`, { body: { item_id: itemId } });
+    },
+    wellbeing(teamId) {
+      return request("GET", `/api/teams/${teamId}/wellbeing`);
+    },
+    privacyGet(teamId) {
+      return request("GET", `/api/teams/${teamId}/pet/privacy`);
+    },
+    privacySave(teamId, body) {
+      return request("PUT", `/api/teams/${teamId}/pet/privacy`, { body });
+    },
+    battleCurrent() {
+      return request("GET", "/api/team-battles/current");
+    },
+    battleLeaderboard(teamId) {
+      return request("GET", "/api/team-battles/current/leaderboard", { query: { team_id: teamId } });
+    },
+  },
 };

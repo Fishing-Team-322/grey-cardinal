@@ -21,6 +21,7 @@ import leaderboard from "./views/leaderboard.js";
 import settings from "./views/settings.js";
 import deploy from "./views/deploy.js";
 import board from "./views/board.js";
+import pet from "./views/pet.js";
 import aiInbox from "./views/ai-inbox.js";
 import onboarding from "./views/onboarding.js";
 import { teamMapView, setupView, profileView } from "./views/agentic.js";
@@ -96,6 +97,7 @@ async function boot() {
   Router.register("/app/teams", "/partials/teams.html", teams, guardFor("director", "manager"));
   Router.register("/app/teams/:id", "/partials/manager.html", manager, guardFor("director", "manager"));
   Router.register("/app/teams/:teamId/board", "/partials/board.html", board);
+  Router.register("/app/teams/:teamId/pet", "/partials/pet.html", pet);
   Router.register("/app/teams/:teamId/ai-inbox", "/partials/ai-inbox.html", aiInbox, guardFor("director", "manager"));
   Router.register("/app/teams/:teamId/yougile", "/partials/yougile.html", yougile, guardFor("director", "manager"));
   Router.register("/app/manager", "/partials/manager.html", manager, guardFor("manager"));

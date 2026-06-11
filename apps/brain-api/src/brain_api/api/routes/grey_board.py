@@ -1115,11 +1115,17 @@ async def team_pet_view(
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Командный питомец + разбор настроения (любой участник команды)."""
-    from brain_api.application.use_cases.team_pet import pet_payload
+    """Командный питомец: расширенный payload (любой участник команды).
+
+    Если питомца ещё нет — 404, чтобы frontend показал create/empty state.
+    Сохраняет legacy-поля верхнего уровня для бота/mini-app.
+    """
+    from brain_api.application.use_cases import team_pet_service as svc
 
     await _team_access(team_id, current_user, session)
-    payload = await pet_payload(session, team_id)
+    if not await svc.pet_exists(session, team_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pet not found")
+    payload = await svc.build_pet_payload(session, team_id)
     await session.commit()
     return payload
 
@@ -1130,48 +1136,19 @@ async def team_wellbeing(
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Агрегаты эмоций + загрузка + предлагаемые интервенции (только manager)."""
-    from brain_api.application.use_cases.agentic_wellbeing import (
-        _member_loads,
-        detect_interventions,
-    )
-    from brain_api.application.use_cases.team_pet import mood_inputs
+    """Агрегаты wellbeing команды (любой участник видит агрегаты, без shame).
 
+    Индивидуальные сигналы добавляются только manager/director и только если
+    privacy.manager_individual_signals=true и team_aggregates_only=false.
+    """
+    from brain_api.application.use_cases import team_pet_service as svc
+
+    await _team_access(team_id, current_user, session)
     ctx = await build_tenant_context(current_user.id, session)
-    require_team_role(ctx, team_id, "manager")
-    now = datetime.now(UTC)
-    loads = await _member_loads(session, team_id, now=now)
-    inputs = await mood_inputs(session, team_id, now=now)
-    interventions = await detect_interventions(session, team_id, now=now)
-    return {
-        "team_id": str(team_id),
-        "mood_inputs": {
-            "emotion_valence": inputs.emotion_valence,
-            "emotion_stress": inputs.emotion_stress,
-            "task_health": inputs.task_health,
-            "overdue_pressure": inputs.overdue_pressure,
-            "activity": inputs.activity,
-        },
-        "members": [
-            {
-                "user_id": str(load.user_id),
-                "display_name": load.display_name,
-                "active_count": load.active_count,
-                "overdue_count": load.overdue_count,
-                "stress": load.stress,
-                "at_risk": load.at_risk,
-            }
-            for load in loads
-        ],
-        "interventions": [
-            {
-                "kind": iv.kind,
-                "at_risk": iv.at_risk.display_name,
-                "candidate": iv.candidate.display_name if iv.candidate else None,
-                "task_public_id": iv.task_public_id,
-                "task_title": iv.task_title,
-                "reason": iv.reason,
-            }
-            for iv in interventions
-        ],
-    }
+    team = await session.get(m.TeamModel, team_id)
+    is_manager = ctx.team_roles.get(team_id) == "manager" or (
+        team is not None and ctx.company_roles.get(team.company_id) == "director"
+    )
+    payload = await svc.wellbeing_payload(session, team_id, include_individual=is_manager)
+    await session.commit()
+    return payload

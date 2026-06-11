@@ -132,12 +132,14 @@ async def grant_team_xp(
     total.level = level_for_points(total.points_total)
     await session.flush()
 
-    # «Покормить» командного питомца за позитивные действия (Bucket B).
+    # «Покормить» командного питомца + событие фида за позитивные действия (Bucket B).
     if kind in _PET_FEEDING_KINDS:
         try:
-            from brain_api.application.use_cases.team_pet import feed_pet
+            from brain_api.application.use_cases.team_pet_service import feed_pet_event
 
-            await feed_pet(session, team_id, energy_gain=0.1, xp_gain=max(1, points // 2))
+            await feed_pet_event(
+                session, team_id, kind=kind, points=points, task_id=task_id
+            )
         except Exception:  # питомец некритичен для XP
             pass
     return True

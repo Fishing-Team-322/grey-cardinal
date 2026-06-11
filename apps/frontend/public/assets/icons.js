@@ -14,6 +14,7 @@
     inbox: '<path d="M4 4h16l2 10h-5a5 5 0 0 1-10 0H2zM8 4l-2 10M16 4l2 10"/>',
     map: '<path d="M12 3v6M6 13h12M6 13v6M18 13v6M4 19h4M10 9h4M16 19h4"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    pet: '<path d="M12 10c-3 0-5 2.4-5 5 0 2 1.4 3 3 3 1 0 1.4-.5 2-.5s1 .5 2 .5c1.6 0 3-1 3-3 0-2.6-2-5-5-5z"/><circle cx="6.5" cy="8.5" r="1.6"/><circle cx="17.5" cy="8.5" r="1.6"/><circle cx="9" cy="5.5" r="1.6"/><circle cx="15" cy="5.5" r="1.6"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
     board: '<path d="M3 3h7v18H3zM14 3h7v10h-7zM14 17h7v4h-7z"/>',
     inbox: '<path d="M4 4h16v13H4zM4 13h4l2 3h4l2-3h4M8 21h8"/>',
@@ -70,6 +71,7 @@
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
         ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
         ${item("/app/teams/:teamId/ai-inbox", "inbox", "Входящие AI", firstInbox(user), ["director", "manager"])}
+        ${item("/app/teams/:teamId/pet", "pet", "Командный питомец", firstPet(user), ["director", "manager", "employee"])}
         ${item("/app/meetings", "meet", "Созвоны", "/app/meetings", ["director", "manager", "employee"])}
         ${item("/app/leaderboard", "trophy", "Лидерборд", "/app/leaderboard", ["director", "manager", "employee"])}
       </div>
@@ -89,6 +91,9 @@
   }
   function firstInbox(user) {
     return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/ai-inbox` : "/app/teams";
+  }
+  function firstPet(user) {
+    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/pet` : "/app/teams";
   }
   function firstCompanyMap(user) {
     return user.companies?.[0] ? `/app/companies/${user.companies[0].id}/map` : "/app/companies";

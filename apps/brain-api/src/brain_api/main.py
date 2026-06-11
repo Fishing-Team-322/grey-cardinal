@@ -22,6 +22,7 @@ from brain_api.api.routes import (
     meetings,
     share,
     tasks,
+    team_pet,
     tgapp,
     v2_tenants,
     websocket,
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(meetings.router)
     app.include_router(share.router)
     app.include_router(tasks.router)
+    app.include_router(team_pet.router)
     app.include_router(tgapp.router)
     app.include_router(v2_tenants.router)
     app.include_router(websocket.router)
