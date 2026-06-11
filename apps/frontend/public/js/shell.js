@@ -1,4 +1,4 @@
-import { Router } from "./router.js?v=20260608-2";
+import { Router } from "./router.js?v=20260611-7";
 import { getCurrentUser, guardFor, homeForUser, roleForUser } from "./auth.js";
 import { appStore } from "./store.js";
 import { wsConnect, wsOn } from "./ws.js";

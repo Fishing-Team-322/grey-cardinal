@@ -1173,7 +1173,9 @@ def _task_summary(task: m.TaskModel) -> dict[str, Any]:
         "deadline": _as_utc(task.deadline).isoformat() if task.deadline else None,
         "deadline_timezone": task.deadline_timezone,
         "source_type": task.source_type or task.source,
+        "created_at": _as_utc(task.created_at).isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "completed_at": _as_utc(task.completed_at).isoformat() if task.completed_at else None,
     }
 
 

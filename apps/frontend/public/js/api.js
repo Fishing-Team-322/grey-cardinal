@@ -275,8 +275,8 @@ export const api = {
     me() {
       return request("GET", "/api/users/me/profile");
     },
-    profile(userId) {
-      return request("GET", `/api/users/me/profile`, { query: { user_id: userId } });
+    profile(userId, teamId = null) {
+      return request("GET", `/api/users/me/profile`, { query: { user_id: userId, team_id: teamId } });
     },
     team(teamId) {
       return request("GET", `/api/teams/${teamId}/people`);

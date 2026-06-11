@@ -217,20 +217,30 @@ export async function peopleView(root, params) {
   root.querySelector("#agentic-content").innerHTML = `<div class="grid g3">${data.items.map(personCard).join("")}</div>`;
 }
 
-export async function profileView(root, params) {
-  injectProfileStyles();
+export async function profileView(root, params, query = {}) {
   const mine = location.pathname === "/app/me";
-  setHeader(root, mine ? "Мой профиль" : "Профиль сотрудника", "Прогресс, достижения, активность.");
+  const teamId = query.team || null;
+  const team = window.gcCurrentUser.teams?.find((item) => String(item.id) === String(teamId));
+  const actions = team
+    ? `<a class="btn btn-ghost" href="/app/teams/${team.id}">Назад к команде</a>`
+    : "";
+  setHeader(
+    root,
+    mine ? "Мой профиль" : "Профиль сотрудника",
+    mine ? "Личный прогресс, активность и текущая работа." : `История работы${team ? ` в команде «${team.name}»` : ""}.`,
+    actions,
+  );
   const container = root.querySelector("#agentic-content");
   async function render() {
     let data;
     try {
-      data = mine ? await api.people.me() : await api.people.profile(params.userId);
+      data = mine ? await api.people.me() : await api.people.profile(params.userId, teamId);
     } catch (e) {
       container.innerHTML = `<div class="note warn">${escapeHtml(e.message || "Не удалось загрузить профиль")}</div>`;
       return;
     }
     container.innerHTML = profileHtml(data, mine);
+    bindProfileFilters(container);
     if (mine) bindProfileEdit(container, data, render);
   }
   await render();
@@ -253,61 +263,197 @@ function avatarBlock(user, big) {
 function profileHtml(data, mine) {
   const u = data.user || {};
   const s = data.stats || {};
-  const pct = Math.min(100, Math.round((s.level_xp / (s.next_level_xp || 100)) * 100));
+  const levelProgress = Math.min(100, Math.round((s.level_xp / (s.next_level_xp || 100)) * 100));
   const role = ROLE_RU[u.role] || u.role || "—";
-  const earned = data.achievements.filter((a) => a.earned).length;
+  const achievements = data.achievements || [];
+  const earned = achievements.filter((achievement) => achievement.earned).length;
+  const tasks = data.tasks || [];
+  const openTasks = tasks.filter((task) => !["done", "cancelled", "rejected"].includes(task.status));
+  const completedTasks = tasks
+    .filter((task) => task.completed_at)
+    .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at));
   return `
   <div class="gc-profile">
-    <div class="card prof-hero">
+    <section class="card prof-hero">
       <div class="prof-hero-row">
         <div class="prof-ava-wrap">
           ${avatarBlock(u, true)}
-          ${mine ? `<label class="ava-edit" title="Загрузить фото">📷<input type="file" id="ava-input" accept="image/*" hidden></label>` : ""}
+          ${mine ? `<label class="ava-edit" title="Загрузить фото">Фото<input type="file" id="ava-input" accept="image/*" hidden></label>` : ""}
         </div>
         <div class="prof-id">
           <div class="prof-name-row">
             <h2 id="prof-name">${escapeHtml(u.display_name || "—")}</h2>
-            <span class="lvl-badge" title="Уровень">LVL ${s.level || 1}</span>
+            <span class="lvl-badge" title="Уровень">Уровень ${s.level || 1}</span>
             <span class="role-badge">${escapeHtml(role)}</span>
-            ${u.telegram_linked ? `<span class="tg-badge">📱 ${escapeHtml(u.telegram_username ? "@" + u.telegram_username : "Telegram")}</span>` : ""}
+            ${u.telegram_linked ? `<span class="tg-badge">${escapeHtml(u.telegram_username ? "@" + u.telegram_username : "Telegram")}</span>` : ""}
           </div>
           <p class="prof-bio" id="prof-bio">${escapeHtml(u.bio || (mine ? "Добавьте пару слов о себе…" : ""))}</p>
-          <div class="lvl-bar"><div class="lvl-fill" style="width:${pct}%"></div><span class="lvl-txt">${s.level_xp || 0} / ${s.next_level_xp || 100} XP до ${(s.level || 1) + 1} ур.</span></div>
+          <p class="profile-digest">${escapeHtml(data.digest || "Данных для персональной сводки пока нет.")}</p>
+          <div class="lvl-bar"><div class="lvl-fill" style="width:${levelProgress}%"></div><span class="lvl-txt">${s.level_xp || 0} / ${s.next_level_xp || 100} XP до ${(s.level || 1) + 1} уровня</span></div>
         </div>
       </div>
-      ${mine ? `<div class="prof-edit-actions"><button class="btn btn-sm btn-ghost" id="edit-profile">✏️ Редактировать</button></div>` : ""}
-    </div>
+      ${mine ? `<div class="prof-edit-actions"><button class="btn btn-sm btn-ghost" id="edit-profile">Редактировать</button></div>` : ""}
+    </section>
 
     <div class="prof-stats">
-      ${statCard("🔥", "Серия", (s.streak || 0) + " дн.")}
-      ${statCard("⭐", "Всего XP", s.xp || 0)}
-      ${statCard("📋", "Открытых", s.open_tasks || 0)}
-      ${statCard("⏰", "Просрочено", s.overdue || 0)}
-      ${statCard("✅", "За неделю", s.closed_week || 0)}
-      ${statCard("🏆", "Закрыто всего", s.closed_total || 0)}
+      ${profileStat("Серия", `${s.streak || 0} дн.`, "Дни с закрытиями подряд")}
+      ${profileStat("Закрыто", s.closed_total || 0, "За всё время")}
+      ${profileStat("За неделю", s.closed_week || 0, "Последние 7 дней")}
+      ${profileStat("Открыто", s.open_tasks || 0, s.overdue ? `${s.overdue} просрочено` : "Без просрочек")}
     </div>
 
-    <div class="card card-pad">
-      <div class="card-title">Достижения <span class="dim">${earned}/${data.achievements.length}</span></div>
-      <div class="ach-grid">
-        ${data.achievements.map((a) => `<div class="ach-card ${a.earned ? "earned" : "locked"}" title="${escapeHtml(a.desc || "")}">
-          <div class="ach-ico">${a.earned ? (a.icon || "✓") : "🔒"}</div>
-          <div class="ach-meta"><div class="ach-name">${escapeHtml(a.name)}</div><div class="ach-desc">${escapeHtml(a.desc || "")}</div></div>
-        </div>`).join("")}
-      </div>
-    </div>
+    <div class="profile-layout">
+      <main class="profile-main">
+        <article class="card card-pad">
+          <div class="card-head">
+            <div><div class="eyebrow muted">Последние 12 недель</div><div class="card-title mt-6">Активность закрытий</div></div>
+            <span class="card-sub">${completedTasks.length} завершено</span>
+          </div>
+          ${contributionHeatmap(completedTasks)}
+        </article>
 
-    <div class="card card-pad">
-      <div class="card-title">Задачи</div>
-      <table class="tbl mt-12"><tbody>
-        ${(data.tasks || []).slice(0, 30).map((t) => `<tr><td class="mono">${escapeHtml(t.public_id)}</td><td>${escapeHtml(t.title)}</td><td><span class="pill">${escapeHtml(t.status)}</span></td><td>${t.deadline ? formatDate(t.deadline) : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="dim">Задач нет</td></tr>'}
-      </tbody></table>
+        <article class="card card-pad">
+          <div class="card-head">
+            <div><div class="eyebrow muted">История</div><div class="card-title mt-6">Лента активности</div></div>
+            <span class="card-sub">по датам закрытия</span>
+          </div>
+          ${activityTimeline(completedTasks)}
+        </article>
+
+        <article class="card card-pad">
+          <div class="card-head">
+            <div class="card-title">Все задачи</div>
+            <div class="profile-task-filters" aria-label="Фильтр задач">
+              <button class="active" data-profile-filter="all">Все</button>
+              <button data-profile-filter="open">Открытые</button>
+              <button data-profile-filter="done">Закрытые</button>
+            </div>
+          </div>
+          <div class="profile-task-table">
+            ${tasks.slice(0, 30).map(profileTaskRow).join("") || '<div class="empty-inline">Задач пока нет.</div>'}
+          </div>
+        </article>
+      </main>
+
+      <aside class="profile-side">
+        <article class="card card-pad">
+          <div class="card-head"><div class="card-title">Текущая работа</div><span class="pill ${s.overdue ? "warn" : "idle"}">${openTasks.length}</span></div>
+          <div class="profile-open-list">
+            ${openTasks.slice(0, 6).map((task) => `<div>
+              <span class="task-key">${escapeHtml(task.public_id)}</span>
+              <b>${escapeHtml(task.title)}</b>
+              <small>${task.deadline ? `Срок: ${formatDate(task.deadline)}` : "Без дедлайна"}</small>
+            </div>`).join("") || '<div class="empty-inline">Активных задач нет.</div>'}
+          </div>
+        </article>
+
+        <article class="card card-pad">
+          <div class="card-head"><div class="card-title">Достижения</div><span class="card-sub">${earned}/${achievements.length}</span></div>
+          <div class="profile-achievements">
+            ${achievements.map((achievement) => `<div class="${achievement.earned ? "earned" : "locked"}">
+              <span>${achievement.earned ? "✓" : "·"}</span>
+              <div><b>${escapeHtml(achievement.name)}</b><small>${escapeHtml(achievement.desc || "")}</small></div>
+            </div>`).join("")}
+          </div>
+        </article>
+      </aside>
     </div>
   </div>`;
 }
 
-function statCard(icon, label, value) {
-  return `<div class="card prof-stat"><div class="ps-ico">${icon}</div><div class="ps-val">${escapeHtml(String(value))}</div><div class="ps-lbl">${escapeHtml(label)}</div></div>`;
+function profileStat(label, value, hint) {
+  return `<div class="card prof-stat"><div class="ps-lbl">${escapeHtml(label)}</div><div class="ps-val">${escapeHtml(String(value))}</div><div class="ps-hint">${escapeHtml(hint)}</div></div>`;
+}
+
+function contributionHeatmap(completedTasks) {
+  const byDay = new Map();
+  completedTasks.forEach((task) => {
+    const key = dateKey(task.completed_at);
+    byDay.set(key, (byDay.get(key) || 0) + 1);
+  });
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(today.getDate() - 83);
+  const cells = Array.from({ length: 84 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const count = byDay.get(dateKey(date)) || 0;
+    const level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : 3;
+    const title = `${date.toLocaleDateString("ru-RU")}: ${count} закрыто`;
+    return `<i class="level-${level}" title="${escapeHtml(title)}"></i>`;
+  }).join("");
+  return `<div class="contribution-shell">
+    <div class="contribution-days"><span>Пн</span><span>Ср</span><span>Пт</span></div>
+    <div class="contribution-grid">${cells}</div>
+    <div class="contribution-legend"><span>Меньше</span><i></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><span>Больше</span></div>
+  </div>`;
+}
+
+function activityTimeline(tasks) {
+  if (!tasks.length) return '<div class="empty-inline">Закрытых задач пока нет.</div>';
+  const groups = new Map();
+  tasks.slice(0, 12).forEach((task) => {
+    const key = new Date(task.completed_at).toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(task);
+  });
+  return `<div class="activity-timeline">${[...groups.entries()].map(([date, items]) => `
+    <section>
+      <time>${escapeHtml(date)}</time>
+      <div>${items.map((task) => `
+        <article>
+          <span class="activity-marker"></span>
+          <div><p>Закрыл задачу <b>${escapeHtml(task.public_id)}</b></p><h4>${escapeHtml(task.title)}</h4></div>
+          <small>${new Date(task.completed_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</small>
+        </article>`).join("")}</div>
+    </section>`).join("")}</div>`;
+}
+
+function profileTaskRow(task) {
+  const done = ["done", "cancelled", "rejected"].includes(task.status);
+  return `<div class="profile-task-row" data-task-state="${done ? "done" : "open"}">
+    <span class="task-key">${escapeHtml(task.public_id)}</span>
+    <div><b>${escapeHtml(task.title)}</b><small>${task.completed_at ? `Закрыто ${formatDate(task.completed_at)}` : task.deadline ? `Срок ${formatDate(task.deadline)}` : "Без дедлайна"}</small></div>
+    <span class="pill ${task.status === "done" ? "ok" : task.status === "blocked" ? "warn" : "idle"}">${escapeHtml(profileStatusLabel(task.status))}</span>
+  </div>`;
+}
+
+function bindProfileFilters(container) {
+  const buttons = container.querySelectorAll("[data-profile-filter]");
+  const rows = container.querySelectorAll("[data-task-state]");
+  buttons.forEach((button) => {
+    button.onclick = () => {
+      buttons.forEach((item) => item.classList.toggle("active", item === button));
+      rows.forEach((row) => {
+        row.hidden = button.dataset.profileFilter !== "all"
+          && row.dataset.taskState !== button.dataset.profileFilter;
+      });
+    };
+  });
+}
+
+function profileStatusLabel(status) {
+  return {
+    proposed: "предложено",
+    confirmed: "подтверждено",
+    todo: "к работе",
+    in_progress: "в работе",
+    blocked: "заблокировано",
+    review: "на проверке",
+    done: "готово",
+    cancelled: "отменено",
+    rejected: "отклонено",
+  }[status] || status;
+}
+
+function dateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function bindProfileEdit(container, data, rerender) {
@@ -383,45 +529,6 @@ function resizeImage(file, max) {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function injectProfileStyles() {
-  if (document.getElementById("gc-profile-styles")) return;
-  const st = document.createElement("style");
-  st.id = "gc-profile-styles";
-  st.textContent = `
-  .gc-profile{display:flex;flex-direction:column;gap:16px}
-  .prof-hero{padding:20px;position:relative}
-  .prof-hero-row{display:flex;gap:18px;align-items:center}
-  .prof-ava-wrap{position:relative;flex-shrink:0}
-  .gc-avatar{border-radius:50%;background-size:cover;background-position:center;background-color:#2a2a33;display:flex;align-items:center;justify-content:center;font-weight:800;color:#ddd}
-  .gc-avatar.avatar-xl{width:96px;height:96px;font-size:34px}
-  .gc-avatar.avatar-sm{width:34px;height:34px;font-size:13px}
-  .ava-edit{position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;background:#ff003c;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;border:2px solid #141418}
-  .prof-name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .prof-name-row h2{margin:0;font-size:24px}
-  .lvl-badge{background:linear-gradient(135deg,#ff003c,#ff7a00);color:#fff;font-weight:800;font-size:11px;padding:3px 9px;border-radius:20px}
-  .role-badge{background:#22222a;border:1px solid #33333d;color:#cfcfd6;font-size:12px;padding:3px 9px;border-radius:20px}
-  .tg-badge{background:#142a3a;border:1px solid #1d4a66;color:#7fc8ff;font-size:12px;padding:3px 9px;border-radius:20px}
-  .prof-bio{color:#9a9aa3;margin:8px 0 12px}
-  .lvl-bar{position:relative;height:20px;background:#1a1a1f;border:1px solid #2a2a33;border-radius:20px;overflow:hidden;max-width:420px}
-  .lvl-fill{height:100%;background:linear-gradient(90deg,#ff003c,#ff7a00)}
-  .lvl-txt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
-  .prof-edit-actions{position:absolute;top:16px;right:16px}
-  .prof-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
-  @media(max-width:760px){.prof-stats{grid-template-columns:repeat(3,1fr)}}
-  .prof-stat{padding:14px;text-align:center}
-  .ps-ico{font-size:20px}.ps-val{font-size:22px;font-weight:800;margin:4px 0}.ps-lbl{color:#8a8a93;font-size:12px}
-  .ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px}
-  .ach-card{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid #26262e;border-radius:12px;background:#16161a}
-  .ach-card.locked{opacity:.45;filter:grayscale(1)}
-  .ach-card.earned{border-color:#3a2a18;background:linear-gradient(135deg,#1a1410,#16161a)}
-  .ach-ico{font-size:26px;flex-shrink:0}
-  .ach-name{font-weight:700}.ach-desc{font-size:12px;color:#8a8a93}
-  .fld{display:flex;flex-direction:column;gap:5px;margin-top:10px;font-size:13px;color:#9a9aa3}
-  .fld input,.fld textarea{padding:8px 10px;border-radius:9px;border:1px solid #2a2a33;background:#1a1a1f;color:#ececf0;font:inherit}
-  `;
-  document.head.appendChild(st);
 }
 
 export async function telegramTopicsView(root, params) {
