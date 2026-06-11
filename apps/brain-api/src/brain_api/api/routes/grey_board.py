@@ -1104,3 +1104,178 @@ def _deadline_within(card: dict[str, Any], now: datetime, start: int, end: int) 
         return False
     days = (deadline.date() - now.date()).days
     return start <= days <= end
+
+
+# --- Bucket B: team pet + wellbeing (emotional portrait) -------------------
+
+
+@router.get("/api/teams/{team_id}/pet")
+async def team_pet_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Командный питомец: расширенный payload (любой участник команды).
+
+    Если питомца ещё нет — 404, чтобы frontend показал create/empty state.
+    Сохраняет legacy-поля верхнего уровня для бота/mini-app.
+    """
+    from brain_api.application.use_cases import team_pet_service as svc
+
+    await _team_access(team_id, current_user, session)
+    if not await svc.pet_exists(session, team_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pet not found")
+    payload = await svc.build_pet_payload(session, team_id)
+    await session.commit()
+    return payload
+
+
+@router.get("/api/teams/{team_id}/wellbeing")
+async def team_wellbeing(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Агрегаты wellbeing команды (любой участник видит агрегаты, без shame).
+
+    Индивидуальные сигналы добавляются только manager/director и только если
+    privacy.manager_individual_signals=true и team_aggregates_only=false.
+    """
+    from brain_api.application.use_cases import team_pet_service as svc
+
+    await _team_access(team_id, current_user, session)
+    ctx = await build_tenant_context(current_user.id, session)
+    team = await session.get(m.TeamModel, team_id)
+    is_manager = ctx.team_roles.get(team_id) == "manager" or (
+        team is not None and ctx.company_roles.get(team.company_id) == "director"
+    )
+    payload = await svc.wellbeing_payload(session, team_id, include_individual=is_manager)
+    await session.commit()
+    return payload
+
+
+# --- Bucket B killer-feature: project-on-team simulation -------------------
+
+
+class ProjectSimulationRequest(BaseModel):
+    description: str
+    horizon_weeks: int = 4
+
+
+@router.post("/api/teams/{team_id}/project-simulation")
+async def project_simulation(
+    team_id: UUID,
+    body: ProjectSimulationRequest,
+    current_user: CurrentUser,
+    container: Container = Depends(get_container),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Планирование проекта: сценарии (текущий штаб / +найм / +срок), бюджет, настроение."""
+    from brain_api.application.use_cases.project_simulation import plan_project
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    if not body.description.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty description")
+    provider_factory = getattr(container, "llm_provider_factory", None)
+    plan = await plan_project(
+        session,
+        team_id,
+        body.description,
+        horizon_weeks=body.horizon_weeks,
+        provider_factory=provider_factory,
+    )
+    await session.commit()
+    return plan
+
+
+@router.get("/api/teams/{team_id}/burnout-forecast")
+async def burnout_forecast_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Предиктивный радар выгорания (только manager/director)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.burnout_forecast import (
+        forecast_team,
+        team_burnout_summary,
+    )
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    forecasts = await forecast_team(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "summary": team_burnout_summary(forecasts),
+        "members": [
+            {**asdict(f), "user_id": str(f.user_id)} for f in forecasts
+        ],
+    }
+
+
+@router.get("/api/teams/{team_id}/pulse")
+async def team_pulse_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Недельный Team Pulse (только manager/director)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.team_pulse import gather_metrics, render_pulse
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    team = await session.get(m.TeamModel, team_id)
+    metrics = await gather_metrics(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "metrics": asdict(metrics),
+        "narrative": render_pulse(metrics, team_name=team.name if team else "команда"),
+    }
+
+
+@router.get("/api/teams/{team_id}/standup")
+async def team_standup_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Стендап без стендапа (любой участник команды)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.auto_standup import build_standup, render_standup
+
+    team = await _team_access(team_id, current_user, session)
+    standup = await build_standup(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "members": [asdict(ms) for ms in standup.members],
+        "total_blocked": standup.total_blocked,
+        "needs_help": standup.needs_help,
+        "narrative": render_standup(standup, team_name=team.name),
+    }
+
+
+@router.get("/api/teams/{team_id}/copilot")
+async def team_copilot_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Manager Copilot: ТОП-3 действия (только manager/director)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.manager_copilot import build_actions, render_copilot
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    team = await session.get(m.TeamModel, team_id)
+    actions = await build_actions(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "actions": [asdict(a) for a in actions],
+        "narrative": render_copilot(actions, team_name=team.name if team else "команда"),
+    }

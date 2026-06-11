@@ -201,6 +201,13 @@ async def overview(
                     }
                 )
 
+        pet = None
+        if team_ids:
+            from brain_api.application.use_cases.team_pet_service import build_pet_payload
+
+            pet = await build_pet_payload(session, team_ids[0])
+            await session.commit()
+
         return {
             "linked": True,
             "telegram_user": tg_profile,
@@ -208,6 +215,7 @@ async def overview(
             "teams": [{"id": str(tid), "name": name} for tid, name, _ in teams],
             "tasks": tasks,
             "meetings": meetings,
+            "pet": pet,
         }
 
 

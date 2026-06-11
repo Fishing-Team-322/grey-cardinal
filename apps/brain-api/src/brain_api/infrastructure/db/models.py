@@ -600,6 +600,240 @@ class AIInboxItemModel(TimestampMixin, Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
 
 
+class PendingChatActionModel(TimestampMixin, Base):
+    """Отложенное действие над существующей задачей из чата (переброс / отмена).
+
+    В отличие от ConfirmationModel (создание задачи из proposal), здесь мутация
+    уже существующей TaskModel: смена исполнителя или отмена. Подтверждать может
+    только руководитель/директор; в автономном режиме применяется без подтверждения.
+    """
+
+    __tablename__ = "pending_chat_actions"
+    __table_args__ = (
+        Index("ix_pending_chat_action_status", "team_id", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # 'reassign' | 'cancel'
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    target_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="pending"
+    )  # pending | confirmed | rejected | expired
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("chat_messages.id"), nullable=True
+    )
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    decided_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EmotionSignalModel(Base):
+    """Производный эмоциональный сигнал из одного источника (сырьё не храним).
+
+    Записывается только при включённом opt-in отдела
+    (``team.board_config.emotion_analysis``). См. docs/design/emotional-portrait.md.
+    """
+
+    __tablename__ = "emotion_signals"
+    __table_args__ = (
+        Index("ix_emotion_signal_team_ts", "team_id", "created_at"),
+        Index("ix_emotion_signal_user_ts", "user_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # source ∈ chat_text | behavior | call_audio | call_video
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    valence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")  # -1..1
+    arousal: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")  # 0..1
+    stress: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")  # 0..1
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    source_ref: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TeamPetModel(TimestampMixin, Base):
+    """Один питомец на команду — живой аватар настроения отдела.
+
+    См. docs/design/gamification-tamagotchi.md.
+    """
+
+    __tablename__ = "team_pets"
+    __table_args__ = (UniqueConstraint("team_id", name="uq_team_pet_team"),)
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False, server_default="Кардиналыч")
+    species: Mapped[str] = mapped_column(Text, nullable=False, server_default="fox")
+    mood: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.6")  # 0..1
+    energy: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.7")  # 0..1
+    level: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    xp: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    last_fed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_decay_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Team Power scores (0..100, кроме power_score 0..10000). См. team_pet_scoring.
+    power_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    productivity_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    harmony_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    communication_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    wellbeing_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    stability_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    tension_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    # Внешний вид (надетые предметы по категориям).
+    current_skin: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_background: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_aura: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_emotion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_accessories: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    last_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TeamPetEventModel(Base):
+    """Событие питомца: объясняет, почему изменились XP/метрики (event feed)."""
+
+    __tablename__ = "team_pet_events"
+    __table_args__ = (
+        Index("ix_team_pet_event_team_ts", "team_id", "created_at"),
+        Index("ix_team_pet_event_pet_ts", "pet_id", "created_at"),
+        Index("ix_team_pet_event_type_ts", "event_type", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    pet_id: Mapped[UUID] = mapped_column(ForeignKey("team_pets.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    # source_type ∈ task | chat_message | wellbeing | battle | manual | system
+    source_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    points_delta: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # metric ∈ xp | harmony | communication | wellbeing | energy | stability | mood
+    metric: Mapped[str] = mapped_column(Text, nullable=False, server_default="xp")
+    reason: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TeamPetInventoryModel(Base):
+    """Предмет инвентаря питомца команды (locked/owned/equipped)."""
+
+    __tablename__ = "team_pet_inventory"
+    __table_args__ = (
+        UniqueConstraint("team_id", "item_id", name="uq_team_pet_inventory_item"),
+        Index("ix_team_pet_inventory_team", "team_id", "item_type"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # item_type ∈ hat | glasses | scarf | armor | bg | aura | emotion | badge | effect
+    item_type: Mapped[str] = mapped_column(Text, nullable=False)
+    rarity: Mapped[str] = mapped_column(Text, nullable=False, server_default="common")
+    # status ∈ locked | owned | equipped
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="locked")
+    unlocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    equipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    unlock_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TeamPetPrivacyModel(Base):
+    """Privacy-настройки анализа команды. Calls/camera выключены по умолчанию."""
+
+    __tablename__ = "team_pet_privacy_settings"
+    __table_args__ = (UniqueConstraint("team_id", name="uq_team_pet_privacy_team"),)
+
+    id: Mapped[UUID] = _uuid_pk()
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    analyze_tasks: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+    analyze_chat: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    analyze_calls: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    analyze_camera: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    team_aggregates_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="1"
+    )
+    manager_individual_signals: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="0"
+    )
+    retention_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default="30")
+    # visible_to ∈ managers | team | admins
+    visible_to: Mapped[str] = mapped_column(Text, nullable=False, server_default="managers")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TeamBattleModel(Base):
+    """Месячный батл команд (дружеское соревнование питомцев)."""
+
+    __tablename__ = "team_battles"
+    __table_args__ = (UniqueConstraint("period", name="uq_team_battle_period"),)
+
+    id: Mapped[UUID] = _uuid_pk()
+    period: Mapped[str] = mapped_column(Text, nullable=False)  # YYYY-MM
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    reward_item_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    winner_team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TeamBattleScoreModel(Base):
+    """Снимок силы команды в рамках конкретного батла."""
+
+    __tablename__ = "team_battle_scores"
+    __table_args__ = (
+        UniqueConstraint("battle_id", "team_id", name="uq_team_battle_score_team"),
+        Index("ix_team_battle_score_power", "battle_id", "power_score"),
+        Index("ix_team_battle_score_team", "team_id", "battle_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    battle_id: Mapped[UUID] = mapped_column(ForeignKey("team_battles.id"), nullable=False)
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    pet_id: Mapped[UUID | None] = mapped_column(ForeignKey("team_pets.id"), nullable=True)
+    power_score: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    streak: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    rewards: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class YouGileBoardModel(Base):
     __tablename__ = "yougile_boards"
     __table_args__ = (
