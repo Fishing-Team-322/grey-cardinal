@@ -203,9 +203,9 @@ async def overview(
 
         pet = None
         if team_ids:
-            from brain_api.application.use_cases.team_pet import pet_payload
+            from brain_api.application.use_cases.team_pet_service import build_pet_payload
 
-            pet = await pet_payload(session, team_ids[0])
+            pet = await build_pet_payload(session, team_ids[0])
             await session.commit()
 
         return {

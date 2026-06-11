@@ -246,6 +246,15 @@ async def handle_settings_callback(session, data: str, event) -> ActionsResponse
             }
         else:
             cfg[EMOTION_ANALYSIS_SETTING] = {"enabled": False, "sources": {}}
+        # Единый источник правды: синхронизируем privacy-строку питомца.
+        try:
+            from brain_api.application.use_cases.team_pet_service import update_privacy
+
+            await update_privacy(
+                session, team.id, {"analyze_chat": now_enabled}, can_enable_sensitive=True
+            )
+        except Exception:  # privacy-таблица некритична для тумблера
+            pass
     elif data == CB_SET_CARDINAL_MENTION:
         cfg[CARDINAL_MENTION_SETTING] = not require_cardinal_mention(team)
     elif data == CB_SET_AUTONOMOUS:

@@ -166,43 +166,10 @@ async def feed_pet(
     return pet
 
 
-async def pet_payload(
-    session: AsyncSession, team_id: UUID, *, now: datetime | None = None
-) -> dict[str, Any]:
-    """Готовый payload для mini-app / веб-кабинета / бота."""
-    now = now or datetime.now(UTC)
-    pet = await recompute_pet(session, team_id, now=now)
-    inputs = await mood_inputs(session, team_id, now=now)
-    state = tm.pet_state(pet.mood, pet.energy)
-    return {
-        "team_id": str(team_id),
-        "name": pet.name,
-        "species": pet.species,
-        "mood": pet.mood,
-        "energy": pet.energy,
-        "level": pet.level,
-        "xp": pet.xp,
-        "state": state,
-        "emoji": tm.state_emoji(state),
-        "phrase": tm.state_phrase(state),
-        "breakdown": {
-            "emotion_valence": inputs.emotion_valence,
-            "emotion_stress": inputs.emotion_stress,
-            "task_health": inputs.task_health,
-            "overdue_pressure": inputs.overdue_pressure,
-            "activity": inputs.activity,
-            "emotion_available": inputs.emotion_valence is not None,
-        },
-        "updated_at": now.isoformat(),
-    }
-
-
-def render_pet_line(payload: dict[str, Any]) -> str:
-    """Однострочный рендер питомца для чата/дайджеста."""
-    return (
-        f"{payload['emoji']} {payload['name']} (ур. {payload['level']}) — "
-        f"{payload['phrase']}"
-    )
+# Полный payload питомца собирает team_pet_service.build_pet_payload (единый
+# источник правды для бота, mini-app и веб-кабинета). Здесь — только базовые
+# кирпичи (recompute_pet / mood_inputs / feed_pet / record_emotion_signal),
+# которые этот сервис переиспользует.
 
 
 def _as_utc(value: datetime) -> datetime:

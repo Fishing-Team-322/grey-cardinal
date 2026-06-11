@@ -1152,3 +1152,86 @@ async def team_wellbeing(
     payload = await svc.wellbeing_payload(session, team_id, include_individual=is_manager)
     await session.commit()
     return payload
+
+
+# --- Bucket B killer-feature: project-on-team simulation -------------------
+
+
+class ProjectSimulationRequest(BaseModel):
+    description: str
+    horizon_weeks: int = 4
+
+
+@router.post("/api/teams/{team_id}/project-simulation")
+async def project_simulation(
+    team_id: UUID,
+    body: ProjectSimulationRequest,
+    current_user: CurrentUser,
+    container: Container = Depends(get_container),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Расчёт нового проекта на текущую команду: бюджет, срок, прогноз настроения."""
+    from brain_api.application.use_cases.project_simulation import simulate_project
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    if not body.description.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty description")
+    provider_factory = getattr(container, "llm_provider_factory", None)
+    result = await simulate_project(
+        session,
+        team_id,
+        body.description,
+        horizon_weeks=body.horizon_weeks,
+        provider_factory=provider_factory,
+    )
+    await session.commit()
+    return result.to_dict()
+
+
+@router.get("/api/teams/{team_id}/burnout-forecast")
+async def burnout_forecast_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Предиктивный радар выгорания (только manager/director)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.burnout_forecast import (
+        forecast_team,
+        team_burnout_summary,
+    )
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    forecasts = await forecast_team(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "summary": team_burnout_summary(forecasts),
+        "members": [
+            {**asdict(f), "user_id": str(f.user_id)} for f in forecasts
+        ],
+    }
+
+
+@router.get("/api/teams/{team_id}/pulse")
+async def team_pulse_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Недельный Team Pulse (только manager/director)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.team_pulse import gather_metrics, render_pulse
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    team = await session.get(m.TeamModel, team_id)
+    metrics = await gather_metrics(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "metrics": asdict(metrics),
+        "narrative": render_pulse(metrics, team_name=team.name if team else "команда"),
+    }

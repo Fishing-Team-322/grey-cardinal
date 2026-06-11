@@ -2569,8 +2569,8 @@ async def _find_v2_duplicate(session, team_id, title, assignee_id):
 
 
 async def _pet_actions_for_chat(container: Container, chat_id: int) -> ActionsResponse:
-    """Показать командного питомца (Bucket B)."""
-    from brain_api.application.use_cases.team_pet import pet_payload
+    """Показать командного питомца (Bucket B). Единый источник — build_pet_payload."""
+    from brain_api.application.use_cases.team_pet_service import build_pet_payload
 
     async with container.session_factory() as session:
         team = await session.scalar(
@@ -2578,7 +2578,7 @@ async def _pet_actions_for_chat(container: Container, chat_id: int) -> ActionsRe
         )
         if team is None:
             return _text(chat_id, "Питомец появится, когда чат привязан к команде.")
-        payload = await pet_payload(session, team.id)
+        payload = await build_pet_payload(session, team.id)
         await session.commit()
     b = payload["breakdown"]
     mood_pct = int(payload["mood"] * 100)
@@ -2598,11 +2598,72 @@ async def _pet_actions_for_chat(container: Container, chat_id: int) -> ActionsRe
     return _html(chat_id, text)
 
 
+async def _pulse_actions_for_chat(container: Container, chat_id: int) -> ActionsResponse:
+    """Недельный Team Pulse (killer-feature B)."""
+    from brain_api.application.use_cases.team_pulse import gather_metrics, render_pulse
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Сначала привяжите чат к команде.")
+        metrics = await gather_metrics(session, team.id)
+        team_name = team.name
+        await session.commit()
+    return _html(chat_id, render_pulse(metrics, team_name=team_name))
+
+
+async def _forecast_actions_for_chat(container: Container, chat_id: int) -> ActionsResponse:
+    """Предиктивный радар выгорания (killer-feature B)."""
+    from brain_api.application.use_cases.burnout_forecast import (
+        forecast_team,
+        render_forecast_text,
+    )
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Сначала привяжите чат к команде.")
+        forecasts = await forecast_team(session, team.id)
+        await session.commit()
+    return _html(chat_id, render_forecast_text(forecasts))
+
+
+async def _project_estimate_for_chat(
+    container: Container, chat_id: int, description: str
+) -> ActionsResponse:
+    """Симуляция нового проекта на текущую команду (killer-feature B)."""
+    from brain_api.application.use_cases.project_simulation import (
+        render_simulation_text,
+        simulate_project,
+    )
+
+    async with container.session_factory() as session:
+        team = await session.scalar(
+            select(m.TeamModel).where(m.TeamModel.tg_chat_id == chat_id)
+        )
+        if team is None:
+            return _text(chat_id, "Сначала привяжите чат к команде, чтобы считать проект.")
+        provider_factory = getattr(container, "llm_provider_factory", None)
+        result = await simulate_project(
+            session, team.id, description, provider_factory=provider_factory
+        )
+        await session.commit()
+    return _html(chat_id, render_simulation_text(result, project_name=description[:40]))
+
+
 async def _wellbeing_actions_for_chat(
     container: Container, chat_id: int
 ) -> ActionsResponse:
-    """Агентный контур: предложить переброс задач с перегруженных сотрудников."""
+    """Агентный контур: прогноз выгорания + переброс задач с перегруженных."""
     from brain_api.application.use_cases.agentic_wellbeing import detect_interventions
+    from brain_api.application.use_cases.burnout_forecast import (
+        forecast_team,
+        team_burnout_summary,
+    )
 
     async with container.session_factory() as session:
         team = await session.scalar(
@@ -2611,12 +2672,32 @@ async def _wellbeing_actions_for_chat(
         if team is None:
             return _text(chat_id, "Сначала привяжите чат к команде.")
         autonomous = bool((team.board_config or {}).get("autonomous_mode"))
+        forecasts = await forecast_team(session, team.id)
+        summary = team_burnout_summary(forecasts)
         interventions = await detect_interventions(session, team.id)
-        if not interventions:
-            await session.commit()
-            return _text(chat_id, "🤍 Команда в порядке — перегруза и выгорания не вижу.")
 
         actions: list = []
+        # Проактивное предупреждение: кто-то на траектории к выгоранию.
+        if summary["top"]:
+            top = forecasts[0]
+            eta = f" (порог ~{top.eta_days} дн)" if top.eta_days else ""
+            actions.append(
+                SendMessageAction(
+                    chat_id=chat_id,
+                    text=(
+                        f"🧭 Прогноз: <b>{top.display_name}</b> — риск выгорания "
+                        f"{int(top.risk*100)}%, стресс {top.trend}{eta}. "
+                        "Стоит разгрузить заранее."
+                    ),
+                    parse_mode="HTML",
+                )
+            )
+        if not interventions:
+            await session.commit()
+            if actions:
+                return ActionsResponse(actions=actions)
+            return _text(chat_id, "🤍 Команда в порядке — перегруза и выгорания не вижу.")
+
         for iv in interventions:
             if iv.kind == "reassign_overload" and iv.candidate is not None:
                 if autonomous:
@@ -2829,6 +2910,22 @@ async def ingest_command(
 
     if command in {"care", "wellbeing", "wellness"}:
         return await _wellbeing_actions_for_chat(container, chat_id)
+
+    if command in {"forecast", "burnout", "radar"}:
+        return await _forecast_actions_for_chat(container, chat_id)
+
+    if command in {"pulse", "weekly", "report_week"}:
+        return await _pulse_actions_for_chat(container, chat_id)
+
+    if command in {"estimate", "project", "calc"}:
+        description = " ".join(event.args).strip()
+        if not description:
+            return _text(
+                chat_id,
+                "Опиши проект: /estimate интеграция оплаты, личный кабинет, "
+                "мобильное приложение",
+            )
+        return await _project_estimate_for_chat(container, chat_id, description)
 
     if command in {"report", "reports"}:
         async with container.session_factory() as session:

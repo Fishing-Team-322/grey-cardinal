@@ -128,7 +128,9 @@ async def test_pet_payload_sad_when_team_struggling(session_factory):
             )
         )
         await session.commit()
-        payload = await tp.pet_payload(session, team.id, now=NOW)
+        from brain_api.application.use_cases.team_pet_service import build_pet_payload
+
+        payload = await build_pet_payload(session, team.id, now=NOW)
         await session.commit()
     assert payload["state"] in {"sad", "tired"}
     assert payload["mood"] < 0.4
@@ -158,12 +160,6 @@ async def test_recompute_applies_decay(session_factory):
         recomputed = await tp.recompute_pet(session, team.id, now=NOW)
         await session.commit()
     assert recomputed.energy < 1.0  # энергия упала за 2 дня
-
-
-def test_render_pet_line():
-    payload = {"emoji": "😢", "name": "Кардиналыч", "level": 3, "phrase": "грустит"}
-    line = tp.render_pet_line(payload)
-    assert "Кардиналыч" in line and "ур. 3" in line
 
 
 _TG_SEQ = [8000]

@@ -117,7 +117,11 @@ async def test_wellbeing_actions_confirmation_mode(session_factory):
     container = FakeContainer(session_factory)
     resp = await it._wellbeing_actions_for_chat(container, TG_CHAT_ID)
     assert resp.actions
-    kb = resp.actions[0].reply_markup["inline_keyboard"]
+    # /care теперь может предварять предложение прогнозом выгорания — ищем
+    # действие с кнопкой подтверждения, не привязываясь к позиции.
+    kb_actions = [a for a in resp.actions if getattr(a, "reply_markup", None)]
+    assert kb_actions, "ожидали действие с inline-кнопками"
+    kb = kb_actions[0].reply_markup["inline_keyboard"]
     assert kb[0][0]["callback_data"].startswith("chatact:confirm:")
     async with session_factory() as session:
         pending = await session.scalar(select(m.PendingChatActionModel))

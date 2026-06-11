@@ -61,10 +61,16 @@ async def ensure_privacy(session: AsyncSession, team_id: UUID) -> m.TeamPetPriva
     )
     if row is None:
         # Унаследовать opt-in анализа чата из team.board_config, если он есть.
+        # board_config["emotion_analysis"] — это словарь {"enabled": bool, ...},
+        # поэтому читаем именно .enabled (bool(dict) всегда True — это был баг).
         analyze_chat = DEFAULT_PRIVACY["analyze_chat"]
         team = await session.get(m.TeamModel, team_id)
         if team is not None and isinstance(team.board_config, dict):
-            analyze_chat = bool(team.board_config.get("emotion_analysis", analyze_chat))
+            emo = team.board_config.get("emotion_analysis")
+            if isinstance(emo, dict):
+                analyze_chat = bool(emo.get("enabled", analyze_chat))
+            elif emo is not None:
+                analyze_chat = bool(emo)
         row = m.TeamPetPrivacyModel(team_id=team_id, analyze_chat=analyze_chat)
         session.add(row)
         await session.flush()
@@ -113,8 +119,28 @@ async def update_privacy(
     else:
         row.analyze_calls = False
         row.analyze_camera = False
+    # Зеркалим analyze_chat в team.board_config.emotion_analysis, чтобы остался
+    # ОДИН источник правды между SPA-privacy и тумблером бота /settings.
+    if "analyze_chat" in data:
+        await _mirror_chat_optin_to_board_config(session, team_id, row.analyze_chat)
     await session.flush()
     return row
+
+
+async def _mirror_chat_optin_to_board_config(
+    session: AsyncSession, team_id: UUID, enabled: bool
+) -> None:
+    team = await session.get(m.TeamModel, team_id)
+    if team is None:
+        return
+    cfg = dict(team.board_config or {})
+    emo = dict(cfg.get("emotion_analysis") or {})
+    emo["enabled"] = bool(enabled)
+    sources = dict(emo.get("sources") or {})
+    sources["chat_text"] = bool(enabled)
+    emo["sources"] = sources
+    cfg["emotion_analysis"] = emo
+    team.board_config = cfg
 
 
 async def cleanup_old_signals(session: AsyncSession, team_id: UUID, *, now: datetime) -> int:
