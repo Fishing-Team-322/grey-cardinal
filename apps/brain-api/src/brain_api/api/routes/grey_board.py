@@ -1235,3 +1235,47 @@ async def team_pulse_view(
         "metrics": asdict(metrics),
         "narrative": render_pulse(metrics, team_name=team.name if team else "команда"),
     }
+
+
+@router.get("/api/teams/{team_id}/standup")
+async def team_standup_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Стендап без стендапа (любой участник команды)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.auto_standup import build_standup, render_standup
+
+    team = await _team_access(team_id, current_user, session)
+    standup = await build_standup(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "members": [asdict(ms) for ms in standup.members],
+        "total_blocked": standup.total_blocked,
+        "needs_help": standup.needs_help,
+        "narrative": render_standup(standup, team_name=team.name),
+    }
+
+
+@router.get("/api/teams/{team_id}/copilot")
+async def team_copilot_view(
+    team_id: UUID,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Manager Copilot: ТОП-3 действия (только manager/director)."""
+    from dataclasses import asdict
+
+    from brain_api.application.use_cases.manager_copilot import build_actions, render_copilot
+
+    ctx = await build_tenant_context(current_user.id, session)
+    require_team_role(ctx, team_id, "manager")
+    team = await session.get(m.TeamModel, team_id)
+    actions = await build_actions(session, team_id)
+    return {
+        "team_id": str(team_id),
+        "actions": [asdict(a) for a in actions],
+        "narrative": render_copilot(actions, team_name=team.name if team else "команда"),
+    }

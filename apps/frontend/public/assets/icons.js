@@ -18,6 +18,7 @@
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
     board: '<path d="M3 3h7v18H3zM14 3h7v10h-7zM14 17h7v4h-7z"/>',
     inbox: '<path d="M4 4h16v13H4zM4 13h4l2 3h4l2-3h4M8 21h8"/>',
+    insights: '<path d="M3 3v18h18M7 14l3-4 3 3 5-7"/><circle cx="7" cy="14" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="18" cy="6" r="1"/>',
   };
   window.gcIcon = (name, width = 1.7) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${icons[name] || ""}</svg>`;
@@ -71,6 +72,7 @@
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
         ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
         ${item("/app/teams/:teamId/ai-inbox", "inbox", "Входящие AI", firstInbox(user), ["director", "manager"])}
+        ${item("/app/teams/:teamId/insights", "insights", "AI-аналитика", firstInsights(user), ["director", "manager"])}
         ${item("/app/teams/:teamId/pet", "pet", "Командный питомец", firstPet(user), ["director", "manager", "employee"])}
         ${item("/app/meetings", "meet", "Созвоны", "/app/meetings", ["director", "manager", "employee"])}
         ${item("/app/leaderboard", "trophy", "Лидерборд", "/app/leaderboard", ["director", "manager", "employee"])}
@@ -94,6 +96,9 @@
   }
   function firstPet(user) {
     return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/pet` : "/app/teams";
+  }
+  function firstInsights(user) {
+    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/insights` : "/app/teams";
   }
   function firstCompanyMap(user) {
     return user.companies?.[0] ? `/app/companies/${user.companies[0].id}/map` : "/app/companies";

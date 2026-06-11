@@ -390,4 +390,21 @@ export const api = {
       return request("GET", "/api/team-battles/current/leaderboard", { query: { team_id: teamId } });
     },
   },
+  insights: {
+    pulse(teamId) {
+      return request("GET", `/api/teams/${teamId}/pulse`);
+    },
+    burnout(teamId) {
+      return request("GET", `/api/teams/${teamId}/burnout-forecast`);
+    },
+    plan(teamId, body) {
+      return request("POST", `/api/teams/${teamId}/project-simulation`, { body });
+    },
+    standup(teamId) {
+      return request("GET", `/api/teams/${teamId}/standup`);
+    },
+    copilot(teamId) {
+      return request("GET", `/api/teams/${teamId}/copilot`);
+    },
+  },
 };
