@@ -131,6 +131,182 @@
   const map = { fox, capybara, dragon, owl };
   window.gcPet = (type, size) => (map[type] || fox)(size || 160);
 
+  /* ──────────────────────────────────────────────────────────────────────
+     APPEARANCE LAYER — реально надетые предметы поверх питомца.
+     gcPetScene(type, size, appearance) -> markup питомца со всей косметикой.
+     appearance = { accessories:{hat,glasses,scarf,armor,badge,effect},
+                    aura, background, emotion, skin }
+     Всё рисуется в системе координат 220×220 (как базовый питомец).
+  ────────────────────────────────────────────────────────────────────── */
+
+  const RARITY_COL = { common: "#cbd5e1", rare: "#38bdf8", epic: "#a78bfa", legendary: "#f5b642" };
+  const ITEM_RARITY = {
+    focus_beanie: "common", sprint_crown: "epic", strategist_top_hat: "rare", champion_helmet: "legendary",
+    analyst_glasses: "common", vr_visor: "rare", neon_lenses: "epic", seer_eyes: "legendary",
+    team_scarf: "common", cape_scarf: "rare", harmony_silk: "epic", aurora_cape: "legendary",
+    light_armor: "common", sprinter_plate: "rare", no_overdue_armor: "epic", leader_aegis: "legendary",
+    calm_aura: "common", focus_flow: "rare", warm_support: "epic", rainbow_aura: "legendary",
+    focused: "common", joyful: "common", battle_ready: "rare", zen: "epic",
+    first_blocker: "common", team_player: "rare", deadline_master: "epic", season_legend: "legendary",
+    xp_sparks: "rare", comet_trail: "epic", star_vortex: "legendary", hologram: "epic",
+  };
+  // Якоря лица/тела по видам (координаты 220×220). hatY = линия лба (низ убора).
+  const ANCHOR = {
+    fox: { hatY: 58, eyeY: 88, neckY: 128, chestY: 150 },
+    capybara: { hatY: 62, eyeY: 92, neckY: 138, chestY: 150 },
+    dragon: { hatY: 56, eyeY: 86, neckY: 126, chestY: 150 },
+    owl: { hatY: 58, eyeY: 92, neckY: 132, chestY: 150 },
+  };
+  const rar = (id) => RARITY_COL[ITEM_RARITY[id] || "common"];
+  const darken = (hex, k = 0.55) => {
+    const n = parseInt(hex.slice(1), 16);
+    const r = Math.round(((n >> 16) & 255) * k), g = Math.round(((n >> 8) & 255) * k), b = Math.round((n & 255) * k);
+    return `rgb(${r},${g},${b})`;
+  };
+
+  // ---- HATS (centered cx=110, brim baseline = by) ----
+  const HATS = {
+    focus_beanie(by, c) {
+      const d = darken(c, 0.7);
+      return `<g class="acc-bob"><path d="M80 ${by} C80 ${by - 30} 94 ${by - 36} 110 ${by - 36} C126 ${by - 36} 140 ${by - 30} 140 ${by} Z" fill="${c}"/>
+        <rect x="76" y="${by - 7}" width="68" height="13" rx="6.5" fill="${d}"/>
+        <circle cx="110" cy="${by - 39}" r="6" fill="${d}"/></g>`;
+    },
+    strategist_top_hat(by, c) {
+      const base = "#1f2430";
+      return `<g class="acc-bob"><ellipse cx="110" cy="${by}" rx="42" ry="8" fill="#11151c"/>
+        <rect x="84" y="${by - 36}" width="52" height="36" rx="4" fill="${base}"/>
+        <rect x="84" y="${by - 12}" width="52" height="10" fill="${c}"/>
+        <ellipse cx="110" cy="${by - 36}" rx="26" ry="6" fill="#2b3240"/></g>`;
+    },
+    sprint_crown(by, c) {
+      return `<g class="acc-bob"><path d="M82 ${by} L86 ${by - 24} L98 ${by - 10} L110 ${by - 28} L122 ${by - 10} L134 ${by - 24} L138 ${by} Z" fill="${c}" stroke="${darken(c, 0.7)}" stroke-width="1.5" stroke-linejoin="round"/>
+        <rect x="82" y="${by - 4}" width="56" height="8" rx="3" fill="${darken(c, 0.82)}"/>
+        <circle cx="110" cy="${by - 25}" r="4" fill="#ff6b9d"/><circle cx="86" cy="${by - 22}" r="2.6" fill="#7dd3fc"/><circle cx="134" cy="${by - 22}" r="2.6" fill="#7dd3fc"/></g>`;
+    },
+    champion_helmet(by, c) {
+      const d = darken(c, 0.62);
+      return `<g class="acc-bob"><path d="M78 ${by} C78 ${by - 34} 94 ${by - 42} 110 ${by - 42} C126 ${by - 42} 142 ${by - 34} 142 ${by} Z" fill="${c}"/>
+        <path d="M78 ${by} C78 ${by - 34} 94 ${by - 42} 110 ${by - 42}" fill="none" stroke="${d}" stroke-width="3"/>
+        <rect x="106" y="${by - 56}" width="8" height="16" rx="3" fill="${d}"/><path d="M110 ${by - 56} q13 -2 16 9 q-11 -4 -16 2 Z" fill="#ff6b6b"/>
+        <rect x="76" y="${by - 6}" width="68" height="9" rx="4.5" fill="${d}"/></g>`;
+    },
+  };
+  const hatDefault = (by, c) => HATS.focus_beanie(by, c);
+
+  // ---- GLASSES (eyes at x=92 & x=128, y=ey) ----
+  const GLASSES = {
+    analyst_glasses(ey, c) {
+      return `<g><circle cx="92" cy="${ey}" r="13" fill="rgba(180,220,255,0.16)" stroke="#26303f" stroke-width="3"/>
+        <circle cx="128" cy="${ey}" r="13" fill="rgba(180,220,255,0.16)" stroke="#26303f" stroke-width="3"/>
+        <path d="M105 ${ey}h10" stroke="#26303f" stroke-width="3"/><path d="M79 ${ey - 4}l-6-3M141 ${ey - 4}l6-3" stroke="#26303f" stroke-width="3" stroke-linecap="round"/></g>`;
+    },
+    vr_visor(ey, c) {
+      return `<g><rect x="72" y="${ey - 13}" width="76" height="26" rx="13" fill="#0b1220" stroke="${c}" stroke-width="2.5"/>
+        <rect x="79" y="${ey - 7}" width="62" height="14" rx="7" fill="url(#visorGrad)"/>
+        <path d="M86 ${ey}h12M122 ${ey}h12" stroke="${c}" stroke-width="2" opacity=".7"/></g>`;
+    },
+    neon_lenses(ey, c) {
+      return `<g filter="url(#neonGlow)"><rect x="80" y="${ey - 11}" width="26" height="22" rx="8" fill="rgba(167,139,250,0.18)" stroke="${c}" stroke-width="2.5"/>
+        <rect x="114" y="${ey - 11}" width="26" height="22" rx="8" fill="rgba(167,139,250,0.18)" stroke="${c}" stroke-width="2.5"/>
+        <path d="M106 ${ey}h8" stroke="${c}" stroke-width="2.5"/></g>`;
+    },
+    seer_eyes(ey, c) {
+      return `<g filter="url(#neonGlow)"><circle cx="92" cy="${ey}" r="14" fill="none" stroke="${c}" stroke-width="2.5"/>
+        <circle cx="128" cy="${ey}" r="14" fill="none" stroke="${c}" stroke-width="2.5"/>
+        <circle cx="92" cy="${ey}" r="5" fill="${c}" opacity=".55"/><circle cx="128" cy="${ey}" r="5" fill="${c}" opacity=".55"/>
+        <path d="M106 ${ey}h8" stroke="${c}" stroke-width="2"/></g>`;
+    },
+  };
+  const glassesDefault = GLASSES.analyst_glasses;
+
+  // ---- SCARVES (neck baseline = ny) ----
+  function scarf(ny, c) {
+    const d = darken(c, 0.72);
+    return `<g class="acc-bob"><path d="M82 ${ny} q28 16 56 0 l-3 13 q-25 12 -50 0 Z" fill="${c}"/>
+      <path d="M124 ${ny + 8} q10 6 9 26 l-13 -2 q-4 -16 -8 -22 Z" fill="${d}"/></g>`;
+  }
+
+  // ---- ARMOR (chest baseline = cy) ----
+  function armor(cy, c) {
+    const d = darken(c, 0.66);
+    return `<g><path d="M88 ${cy} q22 -10 44 0 q4 18 -22 26 q-26 -8 -22 -26 Z" fill="${c}" stroke="${d}" stroke-width="2"/>
+      <path d="M110 ${cy - 4}v26" stroke="${d}" stroke-width="2"/><circle cx="110" cy="${cy + 4}" r="3.5" fill="${d}"/></g>`;
+  }
+
+  // ---- BADGE (small medallion, chest-left) ----
+  function badge(cy, c) {
+    return `<g><circle cx="86" cy="${cy + 6}" r="10" fill="${c}" stroke="${darken(c, 0.65)}" stroke-width="1.5"/>
+      <path d="M86 ${cy + 1}l1.6 3.3 3.6.5-2.6 2.5.6 3.6-3.2-1.7-3.2 1.7.6-3.6-2.6-2.5 3.6-.5Z" fill="#fff" opacity=".92"/></g>`;
+  }
+
+  // ---- EFFECTS (ambient particles, full frame) ----
+  const EFFECTS = {
+    xp_sparks() {
+      return `<g class="acc-spark">${[[40, 60], [176, 70], [54, 150], [168, 140], [110, 30]].map(([x, y], i) =>
+        `<path d="M${x} ${y - 6}l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6Z" fill="#f5b642" opacity=".9" style="animation-delay:${i * 0.4}s"/>`).join("")}</g>`;
+    },
+    comet_trail() {
+      return `<g class="acc-orbit" style="transform-origin:110px 110px"><circle cx="186" cy="64" r="5" fill="#a78bfa"/>
+        <path d="M186 64 L168 52" stroke="#a78bfa" stroke-width="5" stroke-linecap="round" opacity=".5"/></g>`;
+    },
+    star_vortex() {
+      return `<g class="acc-spin" style="transform-origin:110px 110px">${[0, 72, 144, 216, 288].map((a) => {
+        const x = 110 + 86 * Math.cos(a * Math.PI / 180), y = 110 + 86 * Math.sin(a * Math.PI / 180);
+        return `<path d="M${x} ${y - 5}l1.4 3.6 3.6.4-2.6 2.4.6 3.6-3-1.6-3 1.6.6-3.6-2.6-2.4 3.6-.4Z" fill="#f5b642"/>`;
+      }).join("")}</g>`;
+    },
+    hologram() {
+      return `<g class="acc-spark"><circle cx="110" cy="110" r="92" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 6" opacity=".5"/>
+        <circle cx="110" cy="110" r="78" fill="none" stroke="#22d3ee" stroke-width="1" stroke-dasharray="2 8" opacity=".4"/></g>`;
+    },
+  };
+
+  // ---- EMOTION (face overlay, eyes at 92/128, y=ey) ----
+  const EMOTIONS = {
+    joyful(ey) {
+      return `<g><ellipse cx="80" cy="${ey + 14}" rx="7" ry="4" fill="#fb7185" opacity=".55"/><ellipse cx="140" cy="${ey + 14}" rx="7" ry="4" fill="#fb7185" opacity=".55"/>
+        <path d="M100 ${ey + 22} q10 9 20 0" stroke="#26303f" stroke-width="2.5" fill="none" stroke-linecap="round"/></g>`;
+    },
+    battle_ready(ey) {
+      return `<g><path d="M82 ${ey - 14} l16 5" stroke="#26303f" stroke-width="3" stroke-linecap="round"/><path d="M138 ${ey - 14} l-16 5" stroke="#26303f" stroke-width="3" stroke-linecap="round"/></g>`;
+    },
+    zen(ey) {
+      return `<g class="acc-spark"><text x="150" y="${ey - 18}" font-size="13" fill="#a78bfa" opacity=".8">z</text><text x="160" y="${ey - 28}" font-size="9" fill="#a78bfa" opacity=".6">z</text></g>`;
+    },
+    focused() { return ""; },
+  };
+
+  const SCENE_DEFS = `<defs>
+    <linearGradient id="visorGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>`;
+
+  function accessoryOverlay(type, size, appearance) {
+    const a = appearance || {};
+    const acc = a.accessories || {};
+    const an = ANCHOR[type] || ANCHOR.fox;
+    let layers = "";
+    // effects behind, then body, scarf, armor, hat, glasses, emotion, badge on top
+    if (acc.effect) layers += (EFFECTS[acc.effect] || EFFECTS.xp_sparks)();
+    if (acc.scarf) layers += scarf(an.neckY, rar(acc.scarf));
+    if (acc.armor) layers += armor(an.chestY, rar(acc.armor));
+    if (acc.hat) layers += (HATS[acc.hat] || hatDefault)(an.hatY, rar(acc.hat));
+    if (acc.glasses) layers += (GLASSES[acc.glasses] || glassesDefault)(an.eyeY, rar(acc.glasses));
+    if (a.emotion && EMOTIONS[a.emotion]) layers += EMOTIONS[a.emotion](an.eyeY);
+    if (acc.badge) layers += badge(an.chestY, rar(acc.badge));
+    if (!layers) return "";
+    return `<svg viewBox="0 0 220 220" width="${size}" height="${size}" class="pet-acc" fill="none" xmlns="http://www.w3.org/2000/svg"
+      style="position:absolute;inset:0;pointer-events:none">${SCENE_DEFS}${layers}</svg>`;
+  }
+
+  window.gcPetScene = (type, size, appearance) => {
+    const s = size || 160;
+    const overlay = accessoryOverlay(type, s, appearance);
+    if (!overlay) return window.gcPet(type, s);
+    return `<div class="pet-scene" style="position:relative;width:${s}px;height:${s}px;display:inline-block;line-height:0">${window.gcPet(type, s)}${overlay}</div>`;
+  };
+
   window.PET_TYPES = [
     { id: 'fox',      name: 'Лисёнок-стратег',  trait: 'Умный · собранный · планирует',  desc: 'Команды, которые хорошо планируют, держат дедлайны и закрывают задачи в срок.', accent: '#FB923C' },
     { id: 'capybara', name: 'Капибара гармонии', trait: 'Спокойная · поддерживающая',      desc: 'Команды с тёплой коммуникацией, низким напряжением и высокой взаимопомощью.',   accent: '#34D399' },
@@ -141,4 +317,5 @@
 
 // ES-module exports для SPA-view страницы питомца. gcPet/PET_TYPES также в window.
 export const gcPet = window.gcPet;
+export const gcPetScene = window.gcPetScene;
 export const PET_TYPES = window.PET_TYPES;

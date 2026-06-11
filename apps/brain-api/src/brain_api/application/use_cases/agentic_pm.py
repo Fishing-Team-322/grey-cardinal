@@ -904,9 +904,115 @@ async def company_map_payload(session: AsyncSession, company_id: UUID) -> dict[s
                 "status": severity,
             }
         )
+    project_rows = (
+        await session.execute(
+            select(m.CompanyProjectModel, m.ProjectTeamModel, m.TeamModel)
+            .join(
+                m.ProjectTeamModel,
+                m.ProjectTeamModel.project_id == m.CompanyProjectModel.id,
+            )
+            .join(m.TeamModel, m.TeamModel.id == m.ProjectTeamModel.team_id)
+            .where(
+                m.CompanyProjectModel.company_id == company_id,
+                m.CompanyProjectModel.status.in_(("active", "paused")),
+                m.ProjectTeamModel.participation_status == "active",
+            )
+            .order_by(m.CompanyProjectModel.name, m.TeamModel.name)
+        )
+    ).all()
+    projects_by_id: dict[UUID, dict[str, Any]] = {}
+    for project, link, team in project_rows:
+        item = projects_by_id.setdefault(
+            project.id,
+            {
+                "id": str(project.id),
+                "code": project.code,
+                "name": project.name,
+                "status": project.status,
+                "deadline": project.deadline,
+                "sync_status": project.sync_status,
+                "teams": [],
+            },
+        )
+        item["teams"].append(
+            {"id": str(team.id), "name": team.name, "role": link.role}
+        )
+    project_items = list(projects_by_id.values())
+    for item in project_items:
+        total, done, blocked = (
+            await session.execute(
+                select(
+                    func.count(m.TaskModel.id),
+                    func.count(m.TaskModel.id).filter(m.TaskModel.status == "done"),
+                    func.count(m.TaskModel.id).filter(m.TaskModel.status == "blocked"),
+                ).where(m.TaskModel.company_project_id == UUID(item["id"]))
+            )
+        ).one()
+        item["tasks"] = int(total or 0)
+        item["done"] = int(done or 0)
+        item["blocked"] = int(blocked or 0)
+        item["progress"] = round((item["done"] / item["tasks"]) * 100) if item["tasks"] else 0
+
+    edge_map: dict[tuple[str, str], dict[str, Any]] = {}
+    for project in project_items:
+        team_ids = sorted(team["id"] for team in project["teams"])
+        for index, source_id in enumerate(team_ids):
+            for target_id in team_ids[index + 1 :]:
+                edge = edge_map.setdefault(
+                    (source_id, target_id),
+                    {
+                        "source_team_id": source_id,
+                        "target_team_id": target_id,
+                        "projects": 0,
+                        "completed_tasks": 0,
+                        "collaboration_points": 0,
+                    },
+                )
+                edge["projects"] += 1
+    event_rows = await session.execute(
+        select(
+            m.CollaborationEventModel.source_team_id,
+            m.CollaborationEventModel.target_team_id,
+            func.count(m.CollaborationEventModel.id),
+            func.coalesce(func.sum(m.CollaborationEventModel.points), 0),
+        )
+        .where(
+            m.CollaborationEventModel.company_id == company_id,
+            m.CollaborationEventModel.source_team_id.is_not(None),
+            m.CollaborationEventModel.target_team_id.is_not(None),
+        )
+        .group_by(
+            m.CollaborationEventModel.source_team_id,
+            m.CollaborationEventModel.target_team_id,
+        )
+    )
+    for source_id, target_id, completed, points in event_rows.all():
+        key = tuple(sorted((str(source_id), str(target_id))))
+        edge = edge_map.setdefault(
+            key,
+            {
+                "source_team_id": key[0],
+                "target_team_id": key[1],
+                "projects": 0,
+                "completed_tasks": 0,
+                "collaboration_points": 0,
+            },
+        )
+        edge["completed_tasks"] += int(completed or 0)
+        edge["collaboration_points"] += int(points or 0)
+
     return {
         "company": {"id": str(company.id), "name": company.name, "timezone": company.timezone} if company else None,
         "teams": team_items,
+        "projects": project_items,
+        "edges": list(edge_map.values()),
+        "stats": {
+            "active_projects": len(project_items),
+            "collaboration_links": len(edge_map),
+            "participating_teams": len(
+                {team["id"] for project in project_items for team in project["teams"]}
+            ),
+        },
     }
 
 
@@ -917,13 +1023,29 @@ async def employee_profile_payload(
     team_id: UUID | None = None,
 ) -> dict[str, Any]:
     user = await session.get(m.UserModel, user_id)
+    assigned_task_ids = select(m.TaskAssigneeModel.task_id).where(
+        m.TaskAssigneeModel.user_id == user_id
+    )
     statement = (
         select(m.TaskModel)
-        .where(m.TaskModel.assignee_id == user_id)
+        .where(
+            or_(
+                m.TaskModel.assignee_id == user_id,
+                m.TaskModel.id.in_(assigned_task_ids),
+            )
+        )
         .order_by(m.TaskModel.deadline.is_(None), m.TaskModel.deadline, m.TaskModel.seq.desc())
     )
     if team_id:
-        statement = statement.where(m.TaskModel.team_id == team_id)
+        shared_task_ids = select(m.TaskTeamModel.task_id).where(
+            m.TaskTeamModel.team_id == team_id
+        )
+        statement = statement.where(
+            or_(
+                m.TaskModel.team_id == team_id,
+                m.TaskModel.id.in_(shared_task_ids),
+            )
+        )
     tasks = list((await session.execute(statement)).scalars().all())
     now = datetime.now(UTC)
     closed_week = [task for task in tasks if task.completed_at and _as_utc(task.completed_at) >= now - timedelta(days=7)]
@@ -944,6 +1066,15 @@ async def employee_profile_payload(
     all_completed = [t for t in tasks if t.completed_at]
     total_closed = len(all_completed)
     streak = _completion_streak(all_completed, now)
+    collaboration_count = int(
+        await session.scalar(
+            select(func.count(m.CollaborationEventModel.id)).where(
+                m.CollaborationEventModel.actor_user_id == user_id,
+                m.CollaborationEventModel.kind == "cross_team_task_completed",
+            )
+        )
+        or 0
+    )
     achievements = [
         {"name": "Первая кровь", "desc": "Закрыта первая задача", "icon": "🩸", "earned": total_closed >= 1},
         {"name": "Продуктивная неделя", "desc": "5 задач за неделю", "icon": "🔥", "earned": len(closed_week) >= 5},
@@ -952,6 +1083,18 @@ async def employee_profile_payload(
         {"name": "Серия 3 дня", "desc": "3 дня подряд с закрытой задачей", "icon": "⚡", "earned": streak >= 3},
         {"name": "Ветеран", "desc": "Закрыто 25 задач", "icon": "🏆", "earned": total_closed >= 25},
         {"name": "5 уровень", "desc": "Достигнут 5 уровень", "icon": "🌟", "earned": level >= 5},
+        {
+            "name": "Связующее звено",
+            "desc": "Закрыть межкомандную задачу",
+            "icon": "CX",
+            "earned": collaboration_count >= 1,
+        },
+        {
+            "name": "Синергия",
+            "desc": "Закрыть 10 межкомандных задач",
+            "icon": "10",
+            "earned": collaboration_count >= 10,
+        },
     ]
     return {
         "user": {
@@ -972,6 +1115,7 @@ async def employee_profile_payload(
             "closed_week": len(closed_week),
             "closed_total": total_closed,
             "streak": streak,
+            "cross_team_completed": collaboration_count,
             "xp": total_xp,
             "level": level,
             "level_xp": total_xp % LEVEL_XP,
@@ -983,9 +1127,37 @@ async def employee_profile_payload(
             "delegate_to_user_id": str(absence.delegate_to_user_id) if absence and absence.delegate_to_user_id else None,
         },
         "digest": _personal_digest(tasks, overdue),
-        "tasks": [_task_summary(task) for task in tasks],
+        "tasks": [await _profile_task_summary(session, task) for task in tasks],
         "achievements": achievements,
     }
+
+
+async def _profile_task_summary(
+    session: AsyncSession,
+    task: m.TaskModel,
+) -> dict[str, Any]:
+    result = _task_summary(task)
+    project = (
+        await session.get(m.CompanyProjectModel, task.company_project_id)
+        if task.company_project_id
+        else None
+    )
+    result["project"] = (
+        {"id": str(project.id), "code": project.code, "name": project.name}
+        if project
+        else None
+    )
+    result["teams"] = [
+        {"id": str(team.id), "name": team.name, "role": row.role}
+        for row, team in (
+            await session.execute(
+                select(m.TaskTeamModel, m.TeamModel)
+                .join(m.TeamModel, m.TeamModel.id == m.TaskTeamModel.team_id)
+                .where(m.TaskTeamModel.task_id == task.id)
+            )
+        ).all()
+    ]
+    return result
 
 
 def _completion_streak(completed_tasks: list, now: datetime) -> int:

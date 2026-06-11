@@ -189,6 +189,7 @@ class Task:
     source: TaskSource
     team_id: UUID | None = None
     project_id: UUID | None = None
+    company_project_id: UUID | None = None
     description: str | None = None
     assignee_id: UUID | None = None
     assignee_text: str | None = None

@@ -244,8 +244,10 @@ export const api = {
     },
   },
   greyBoard: {
-    get(teamId, view) {
-      return request("GET", `/api/teams/${teamId}/grey-board`, { query: { view } });
+    get(teamId, view, projectId = null) {
+      return request("GET", `/api/teams/${teamId}/grey-board`, {
+        query: { view, project_id: projectId },
+      });
     },
     kanbanConfig(teamId) {
       return request("GET", `/api/teams/${teamId}/kanban-config`);
@@ -255,6 +257,43 @@ export const api = {
     },
     createTask(teamId, body) {
       return request("POST", `/api/teams/${teamId}/task-command/confirm`, { body });
+    },
+  },
+  projects: {
+    list(status = null) {
+      return request("GET", "/api/projects", { query: { status } });
+    },
+    company(companyId) {
+      return request("GET", `/api/companies/${companyId}/projects`);
+    },
+    team(teamId) {
+      return request("GET", `/api/teams/${teamId}/projects`);
+    },
+    get(projectId) {
+      return request("GET", `/api/projects/${projectId}`);
+    },
+    preview(companyId, body) {
+      return request("POST", `/api/companies/${companyId}/project-drafts/preview`, { body });
+    },
+    updateDraft(draftId, body) {
+      return request("PATCH", `/api/project-drafts/${draftId}`, { body });
+    },
+    create(draftId, body) {
+      return request("POST", `/api/project-drafts/${draftId}/create`, { body });
+    },
+    update(projectId, body) {
+      return request("PATCH", `/api/projects/${projectId}`, { body });
+    },
+    syncYougile(projectId) {
+      return request("POST", `/api/projects/${projectId}/yougile/sync`);
+    },
+    createTask(projectId, body) {
+      return request("POST", `/api/projects/${projectId}/tasks`, { body });
+    },
+    setTaskAssignees(projectId, taskId, userIds) {
+      return request("PUT", `/api/projects/${projectId}/tasks/${taskId}/assignees`, {
+        body: { user_ids: userIds },
+      });
     },
   },
   aiInbox: {
