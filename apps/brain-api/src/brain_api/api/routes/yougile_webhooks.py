@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from brain_api.api.deps import get_container
 from brain_api.api.routes.accounts import get_db
 from brain_api.application.task_numbering import next_task_public_id
+from brain_api.application.use_cases.cross_team_projects import (
+    record_cross_team_task_completion,
+)
 from brain_api.application.use_cases.team_gamification import TASK_COMPLETED_XP, grant_team_xp
 from brain_api.container import Container
 from brain_api.infrastructure.board.yougile import was_recent_outbound
@@ -115,6 +118,31 @@ async def receive_yougile_webhook(
             reason=f"Закрыл задачу {task.public_id} в YouGile",
             idempotency_key=f"task_completed:{task.id}",
         )
+        if await record_cross_team_task_completion(
+            session,
+            task=task,
+            actor_user_id=task.assignee_id,
+        ):
+            assignee_ids = set(
+                await session.scalars(
+                    select(m.TaskAssigneeModel.user_id).where(
+                        m.TaskAssigneeModel.task_id == task.id
+                    )
+                )
+            )
+            if task.assignee_id:
+                assignee_ids.add(task.assignee_id)
+            for user_id in assignee_ids:
+                await grant_team_xp(
+                    session,
+                    user_id=user_id,
+                    team_id=team_id,
+                    task_id=task.id,
+                    kind="cross_team_task_completed",
+                    points=15,
+                    reason=f"Завершена межкомандная задача {task.public_id}",
+                    idempotency_key=f"cross-team:{task.id}:{user_id}",
+                )
     link = await _upsert_external_link(
         session,
         team_id=team_id,

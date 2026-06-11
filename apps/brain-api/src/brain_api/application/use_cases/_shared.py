@@ -176,6 +176,11 @@ async def create_task_from_proposal(
         priority=proposal.priority,
         source=proposal.source,
         project_id=project.id,
+        company_project_id=(
+            UUID(str(proposal.extractor_payload["project_context"]["project_id"]))
+            if (proposal.extractor_payload or {}).get("project_context", {}).get("project_id")
+            else None
+        ),
         assignee_id=proposal.assignee_id,
         assignee_text=proposal.assignee_text,
         deadline=proposal.deadline,

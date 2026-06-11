@@ -96,3 +96,16 @@ test("team bot settings API maps to the team settings endpoints", async () => {
     "PUT /api/teams/team-1/bot-settings",
   ]);
 });
+
+test("people profile API keeps the selected team context", async () => {
+  let call;
+  globalThis.fetch = async (url, init) => {
+    call = `${init.method} ${url}`;
+    return new Response(JSON.stringify({ user: {}, tasks: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  await api.people.profile("user-1", "team-1");
+  assert.equal(call, "GET /api/users/me/profile?user_id=user-1&team_id=team-1");
+});

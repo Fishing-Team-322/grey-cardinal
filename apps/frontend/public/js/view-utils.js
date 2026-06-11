@@ -15,7 +15,12 @@ export function formatDate(value) {
 }
 
 export function currentTeam(user, id = null) {
-  return user.teams?.find((team) => team.id === id) || user.teams?.[0] || null;
+  const teams = user?.teams || [];
+  if (id != null) {
+    return teams.find((team) => String(team.id) === String(id)) || teams[0] || null;
+  }
+  const selected = typeof window !== "undefined" && window.gcSelectedTeamId ? window.gcSelectedTeamId() : null;
+  return teams.find((team) => String(team.id) === String(selected)) || teams[0] || null;
 }
 
 export function setTopbar(title, actions = "") {

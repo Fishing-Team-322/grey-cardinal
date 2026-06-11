@@ -19,6 +19,7 @@
     board: '<path d="M3 3h7v18H3zM14 3h7v10h-7zM14 17h7v4h-7z"/>',
     inbox: '<path d="M4 4h16v13H4zM4 13h4l2 3h4l2-3h4M8 21h8"/>',
     insights: '<path d="M3 3v18h18M7 14l3-4 3 3 5-7"/><circle cx="7" cy="14" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="18" cy="6" r="1"/>',
+    projects: '<path d="M3 7h7l2 2h9v10H3zM3 7V5h7l2 2"/>',
   };
   window.gcIcon = (name, width = 1.7) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${icons[name] || ""}</svg>`;
@@ -60,6 +61,7 @@
         <span class="meta grow"><b>${escapeHtml(user.display_name || user.login)}</b><span>${roleLabel(role)}</span></span>
         ${window.gcIcon("cog")}
       </a>
+      ${teamSwitch(user)}
       <div class="nav-group"><div class="nav-label">Командные центры</div>
         ${item("/app/companies", "company", "Компании", "/app/companies", ["director"])}
         ${item("/app/teams/:id", "team", "Команда", firstTeam(user), ["director", "manager"])}
@@ -70,6 +72,7 @@
         ${item("/app/settings", "cog", "Настройки", "/app/settings", ["director", "manager", "employee"])}
       </div>
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
+        ${item("/app/projects", "projects", "Проекты", "/app/projects", ["director", "manager", "employee"])}
         ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
         ${item("/app/teams/:teamId/ai-inbox", "inbox", "Входящие AI", firstInbox(user), ["director", "manager"])}
         ${item("/app/teams/:teamId/insights", "insights", "AI-аналитика", firstInsights(user), ["director", "manager"])}
@@ -85,23 +88,60 @@
       <div class="sidebar-foot">${item("/app/deploy", "deploy", "Деплой", "/app/deploy", ["director"])}</div>`;
   };
 
+  function selectedTeam(user) {
+    const teams = user.teams || [];
+    const sel = window.gcSelectedTeamId ? window.gcSelectedTeamId() : null;
+    return teams.find((team) => String(team.id) === String(sel)) || teams[0] || null;
+  }
   function firstTeam(user) {
-    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}` : "/app/teams";
+    const team = selectedTeam(user);
+    return team ? `/app/teams/${team.id}` : "/app/teams";
   }
   function firstBoard(user) {
-    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/board` : "/app/teams";
+    const team = selectedTeam(user);
+    return team ? `/app/teams/${team.id}/board` : "/app/teams";
   }
   function firstInbox(user) {
-    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/ai-inbox` : "/app/teams";
+    const team = selectedTeam(user);
+    return team ? `/app/teams/${team.id}/ai-inbox` : "/app/teams";
   }
   function firstPet(user) {
-    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/pet` : "/app/teams";
+    const team = selectedTeam(user);
+    return team ? `/app/teams/${team.id}/pet` : "/app/teams";
   }
   function firstInsights(user) {
-    return user.teams?.[0] ? `/app/teams/${user.teams[0].id}/insights` : "/app/teams";
+    const team = selectedTeam(user);
+    return team ? `/app/teams/${team.id}/insights` : "/app/teams";
   }
   function firstCompanyMap(user) {
     return user.companies?.[0] ? `/app/companies/${user.companies[0].id}/map` : "/app/companies";
+  }
+  function teamSwitch(user) {
+    const teams = user.teams || [];
+    if (teams.length < 2) return "";
+    const active = selectedTeam(user) || teams[0];
+    const chevron = '<svg class="ts-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+    const check = '<svg viewBox="0 0 24 24" width="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 6"/></svg>';
+    const opts = teams.map((team) => {
+      const on = String(team.id) === String(active.id);
+      return `<button class="team-switch-opt ${on ? "active" : ""}" type="button" data-team-select="${team.id}" role="option" aria-selected="${on}">
+        <span class="tso-av">${teamInitials(team.name)}</span>
+        <span class="tso-meta"><b>${escapeHtml(team.name)}</b><span>${escapeHtml(roleLabel(team.role) || "Команда")}</span></span>
+        ${on ? check : ""}
+      </button>`;
+    }).join("");
+    return `<div class="team-switch" id="teamSwitch">
+      <button class="team-switch-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+        <span class="tso-av">${teamInitials(active.name)}</span>
+        <span class="ts-meta grow"><span class="ts-cap">Активная команда</span><b>${escapeHtml(active.name)}</b></span>
+        ${chevron}
+      </button>
+      <div class="team-switch-menu" role="listbox">${opts}</div>
+    </div>`;
+  }
+  function teamInitials(name) {
+    return String(name || "")
+      .trim().split(/\s+/).slice(0, 2).map((part) => (part[0] || "").toUpperCase()).join("") || "К";
   }
   function roleLabel(role) {
     return { director: "Директор", manager: "Руководитель", employee: "Сотрудник" }[role];

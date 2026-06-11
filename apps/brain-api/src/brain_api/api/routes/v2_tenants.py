@@ -1323,9 +1323,12 @@ class BotSettingsRequest(BaseModel):
     meeting_reminders: bool | None = None
     daemon_autorecord: bool | None = None
     require_cardinal_mention: bool | None = None
+    emotion_analysis: bool | None = None
 
 
 def _bot_settings_payload(team: m.TeamModel) -> dict:
+    from brain_api.application.use_cases.team_settings import emotion_analysis_enabled
+
     cfg = team.board_config or {}
     return {
         "team_id": str(team.id),
@@ -1336,6 +1339,7 @@ def _bot_settings_payload(team: m.TeamModel) -> dict:
         "meeting_reminders": cfg.get("meeting_reminders", True),
         "daemon_autorecord": cfg.get("daemon_autorecord", True),
         "require_cardinal_mention": cfg.get("require_cardinal_mention", False),
+        "emotion_analysis": emotion_analysis_enabled(team),
     }
 
 
@@ -1383,7 +1387,19 @@ async def set_bot_settings(
         cfg["require_cardinal_mention"] = bool(body.require_cardinal_mention)
     team.board_config = cfg
     session.add(team)
+    if body.emotion_analysis is not None:
+        # Эмоц. анализ — согласие отдела. Единый источник правды: pet privacy
+        # (analyze_chat) зеркалится в board_config.emotion_analysis внутри update_privacy.
+        from brain_api.application.use_cases.team_pet_service import update_privacy
+
+        await update_privacy(
+            session,
+            team_id,
+            {"analyze_chat": bool(body.emotion_analysis)},
+            can_enable_sensitive=True,
+        )
     await session.commit()
+    await session.refresh(team)
     return _bot_settings_payload(team)
 
 

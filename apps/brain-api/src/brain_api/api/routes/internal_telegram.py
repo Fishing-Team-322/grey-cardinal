@@ -24,6 +24,7 @@ from brain_api.application.agentic_tasks import (
     InteractionMode,
     TaskDecisionEngine,
 )
+from brain_api.application.project_context import resolve_project_context
 from brain_api.application.rendering import (
     CB_CONFIRM,
     CB_EDIT,
@@ -1024,6 +1025,17 @@ async def _try_v2_semantic_message(
         )
         session.add(message)
         await session.flush()
+        project_context = await resolve_project_context(
+            session,
+            telegram_chat_id=chat.id,
+            message_thread_id=event.message_thread_id,
+            team_id=team.id,
+            text=semantic_text or event.text,
+        )
+        message.raw_json = {
+            **(message.raw_json or {}),
+            "_gc_project": project_context.payload(),
+        }
 
         if ignore_reason is not None:
             session.add(
@@ -1199,6 +1211,18 @@ async def _route_v2_task_candidate(
     autonomous: bool = False,
 ):
     task = parsed.get("task") or {}
+    project_context = dict((message.raw_json or {}).get("_gc_project") or {})
+    if project_context.get("ambiguous"):
+        candidates = project_context.get("candidates") or []
+        choices = "\n".join(
+            f"• {item.get('code')} — {item.get('name')}" for item in candidates
+        )
+        await session.commit()
+        return _text(
+            event.chat.id,
+            "У команды несколько активных проектов. Укажите код проекта в сообщении, "
+            "чтобы я не создал задачу не там:\n\n" + choices,
+        )
     title = str(task.get("title") or semantic_text[:120]).strip()
     assignee_text = (
         resolution.display_name
@@ -1287,7 +1311,11 @@ async def _route_v2_task_candidate(
             priority=task.get("priority") or "medium",
             confidence=float(parsed["confidence"]),
             raw_text=semantic_text,
-            extractor_payload={**parsed, "identity_resolution": resolution.payload()},
+            extractor_payload={
+                **parsed,
+                "identity_resolution": resolution.payload(),
+                "project_context": project_context,
+            },
             similar_task_id=duplicate.id,
         )
         session.add(proposal)
@@ -1345,7 +1373,11 @@ async def _route_v2_task_candidate(
         priority=task.get("priority") or "medium",
         confidence=float(parsed["confidence"]),
         raw_text=semantic_text,
-        extractor_payload={**parsed, "identity_resolution": resolution.payload()},
+        extractor_payload={
+            **parsed,
+            "identity_resolution": resolution.payload(),
+            "project_context": project_context,
+        },
     )
     session.add(proposal)
     await session.flush()
@@ -1368,6 +1400,11 @@ async def _route_v2_task_candidate(
         auto_task = m.TaskModel(
             seq=next_seq,
             public_id=f"GC-{next_seq}",
+            company_project_id=(
+                UUID(project_context["project_id"])
+                if project_context.get("project_id")
+                else None
+            ),
             team_id=team.id,
             title=title,
             description=task.get("description"),
@@ -1382,6 +1419,23 @@ async def _route_v2_task_candidate(
             created_from_proposal_id=proposal.id,
         )
         session.add(auto_task)
+        await session.flush()
+        if auto_task.company_project_id:
+            session.add(
+                m.TaskTeamModel(
+                    task_id=auto_task.id,
+                    team_id=team.id,
+                    role="owner",
+                )
+            )
+            if actual_assignee_id:
+                session.add(
+                    m.TaskAssigneeModel(
+                        task_id=auto_task.id,
+                        user_id=actual_assignee_id,
+                        role="owner",
+                    )
+                )
         # Capture before commit: SQLAlchemy expires attributes on commit.
         auto_task_public_id = f"GC-{next_seq}"
         await session.commit()

@@ -581,25 +581,42 @@ async def person_profile(user_id: UUID, current_user: CurrentUser, session: Asyn
 async def my_profile(
     current_user: CurrentUser,
     user_id: UUID | None = None,
+    team_id: UUID | None = None,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     target = current_user.id
     if user_id is not None and user_id != current_user.id:
-        # Allow viewing a teammate's profile only if they share a team.
-        shares_team = await session.scalar(
+        # Allow viewing a teammate's profile only if they share the requested team.
+        shared_teams = select(m.TeamMemberModel.team_id).where(
+            m.TeamMemberModel.user_id == current_user.id
+        )
+        shares_team_query = (
             select(m.TeamMemberModel.id)
             .where(m.TeamMemberModel.user_id == user_id)
-            .where(
-                m.TeamMemberModel.team_id.in_(
-                    select(m.TeamMemberModel.team_id).where(
-                        m.TeamMemberModel.user_id == current_user.id
-                    )
-                )
+            .where(m.TeamMemberModel.team_id.in_(shared_teams))
+        )
+        if team_id is not None:
+            shares_team_query = shares_team_query.where(m.TeamMemberModel.team_id == team_id)
+        shares_team = await session.scalar(shares_team_query)
+        if shares_team is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Shared team required")
+        target = user_id
+    if team_id is not None:
+        target_membership = await session.scalar(
+            select(m.TeamMemberModel.id).where(
+                m.TeamMemberModel.team_id == team_id,
+                m.TeamMemberModel.user_id == target,
             )
         )
-        if shares_team is not None:
-            target = user_id
-    return await employee_profile_payload(session, target)
+        current_membership = await session.scalar(
+            select(m.TeamMemberModel.id).where(
+                m.TeamMemberModel.team_id == team_id,
+                m.TeamMemberModel.user_id == current_user.id,
+            )
+        )
+        if target_membership is None or current_membership is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Team access required")
+    return await employee_profile_payload(session, target, team_id=team_id)
 
 
 @router.get("/api/teams/{team_id}/telegram/topics")

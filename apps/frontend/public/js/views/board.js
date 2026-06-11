@@ -52,7 +52,7 @@ function injectStyles() {
   style.id = "gc-board-v2";
   style.textContent = `
   .grey-board{display:flex;gap:14px;overflow-x:auto;padding-bottom:12px;align-items:flex-start}
-  .board-column{background:#121216;border:1px solid #232329;border-radius:14px;min-width:280px;max-width:300px;
+  .board-column{background:#121216;border:1px solid #232329;border-radius:14px;min-width:240px;max-width:260px;
     flex:0 0 auto;display:flex;flex-direction:column;max-height:calc(100vh - 220px)}
   .board-column>header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #1e1e24;
     font-weight:600;position:sticky;top:0;background:#121216;border-radius:14px 14px 0 0;z-index:1}
@@ -78,6 +78,8 @@ function injectStyles() {
   .gc-card .c-top{display:flex;align-items:center;gap:8px;font-size:11px;color:#7d7d87;margin-bottom:5px}
   .gc-card .c-pid{color:#ff003c;font-weight:700;letter-spacing:.3px}
   .gc-card .c-src{margin-left:auto;text-transform:uppercase;font-size:9.5px;opacity:.6}
+  .gc-card .c-project{display:inline-flex;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    color:#d7a1aa;background:#2a171d;border:1px solid #4a252f;border-radius:6px;padding:2px 6px;font-size:10px}
   .gc-card .c-title{font-weight:600;line-height:1.3;margin-bottom:9px;word-break:break-word}
   .gc-card .c-foot{display:flex;align-items:center;gap:8px}
   .gc-card .c-ava{width:22px;height:22px;border-radius:50%;background:#2a2a33;color:#ddd;font-size:10px;
@@ -93,6 +95,7 @@ function injectStyles() {
   .board-column.drop-target{outline:2px dashed #ff003c;outline-offset:-2px}
   .board-toolbar2{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
   .board-toolbar2 input[type=search]{flex:1;min-width:160px;padding:8px 11px;border-radius:9px;border:1px solid #232329;background:#16161a;color:inherit}
+  .board-toolbar2 select{padding:8px 11px;border-radius:9px;border:1px solid #232329;background:#16161a;color:inherit;max-width:260px}
   .board-toolbar2 .chip{padding:7px 11px;border-radius:9px;border:1px solid #232329;background:#16161a;cursor:pointer;font-size:13px;user-select:none}
   .board-toolbar2 .chip.on{border-color:#ff003c;color:#fff;background:#1c1216}
   .board-hidden{display:none!important}
@@ -140,6 +143,7 @@ export default async function boardView(root, params, query) {
   setTopbar("Доска");
   const teamId = params.teamId;
   let activeView = query.view || "status";
+  let activeProject = query.project || "";
   let search = "";
   let onlyMine = false;
   const collapsed = new Set();
@@ -147,6 +151,7 @@ export default async function boardView(root, params, query) {
   const controls = root.querySelector("#board-views");
   try { currentUserId = window.gcCurrentUser?.id || null; } catch { currentUserId = null; }
   const members = await api.teams.members(teamId).then((d) => d.items).catch(() => []);
+  const projects = await api.projects.team(teamId).then((d) => d.items || []).catch(() => []);
   root.querySelector("#board-inbox-link").href = `/app/teams/${teamId}/ai-inbox`;
   controls.innerHTML = VIEWS.map(([k, label]) => `<button data-view="${k}" class="${k === activeView ? "active" : ""}">${label}</button>`).join("");
 
@@ -164,12 +169,21 @@ export default async function boardView(root, params, query) {
     toolbar = document.createElement("div");
     toolbar.id = "board-toolbar2";
     toolbar.className = "board-toolbar2";
-    toolbar.innerHTML = `<input type="search" id="board-search" placeholder="Поиск ( / )">
+    toolbar.innerHTML = `<select id="board-project"><option value="">Все задачи команды</option>${projects.map((project) => `<option value="${escapeAttr(project.id)}" ${String(project.id) === String(activeProject) ? "selected" : ""}>${escapeHtml(project.code)} · ${escapeHtml(project.name)}</option>`).join("")}</select>
+      <input type="search" id="board-search" placeholder="Поиск ( / )">
       <span class="chip" id="board-mine">👤 Только мои</span>
       <span class="chip" title="Перетаскивайте карточки мышкой">🖱️ drag-n-drop</span>
       ${canEditBoard ? '<span class="chip" id="board-cfg" title="Настроить статусы">⚙️ Статусы</span>' : ""}`;
     content.parentNode.insertBefore(toolbar, content);
     toolbar.querySelector("#board-search").addEventListener("input", (e) => { search = e.target.value.trim().toLowerCase(); applyFilter(); });
+    toolbar.querySelector("#board-project").addEventListener("change", async (e) => {
+      activeProject = e.target.value;
+      const params = new URLSearchParams(location.search);
+      if (activeProject) params.set("project", activeProject); else params.delete("project");
+      params.set("view", activeView);
+      history.replaceState({}, "", `${location.pathname}?${params}`);
+      await load();
+    });
     toolbar.querySelector("#board-mine").addEventListener("click", (e) => { onlyMine = !onlyMine; e.currentTarget.classList.toggle("on", onlyMine); applyFilter(); });
     toolbar.querySelector("#board-cfg")?.addEventListener("click", () => openStatusEditor(root, teamId, load));
     document.addEventListener("keydown", (e) => {
@@ -189,8 +203,8 @@ export default async function boardView(root, params, query) {
   async function load() {
     content.innerHTML = '<div class="view-loading">Собираем доску…</div>';
     try {
-      const data = await api.greyBoard.get(teamId, activeView);
-      root.querySelector("#board-summary").textContent = `${data.stats.tasks} задач · ${data.stats.overdue} просрочено · ${data.stats.sync_errors} ошибок sync`;
+      const data = await api.greyBoard.get(teamId, activeView, activeProject || null);
+      root.querySelector("#board-summary").textContent = `${data.stats.tasks} задач · ${data.stats.projects || 0} проектов · ${data.stats.overdue} просрочено`;
       let columns = data.columns || data.groups || [];
       if (activeView === "status") {
         const byId = new Map(columns.map((c) => [c.id, c]));
@@ -307,7 +321,10 @@ export default async function boardView(root, params, query) {
     if (!button) return;
     activeView = button.dataset.view;
     controls.querySelectorAll("button").forEach((i) => i.classList.toggle("active", i === button));
-    history.replaceState({}, "", `${location.pathname}?view=${activeView}`);
+    const params = new URLSearchParams(location.search);
+    params.set("view", activeView);
+    if (activeProject) params.set("project", activeProject);
+    history.replaceState({}, "", `${location.pathname}?${params}`);
     await load();
   };
   root.querySelector("#board-refresh").onclick = load;
@@ -359,12 +376,17 @@ function renderCard(task, columnKey = null) {
   const dl = task.deadline ? `<span class="c-dl ${task.risk?.overdue ? "overdue" : ""}">⏰ ${escapeHtml(fmtDeadline(task.deadline))}</span>` : "";
   const sc = task.sync.status === "synced" ? "ok" : (task.sync.status === "error" || task.sync.status === "conflict") ? "err" : "warn";
   const prio = task.risk?.overdue ? "p-overdue" : task.risk?.due_soon ? "p-soon" : (task.priority === "high" || task.priority === "urgent") ? "p-high" : "";
-  const mine = currentUserId && task.assignee?.id === currentUserId ? "1" : "0";
-  const searchText = `${task.public_id} ${task.title} ${aName} ${task.status}`.toLowerCase();
+  const mine = currentUserId && (
+    task.assignee?.id === currentUserId
+    || task.assignees?.some((person) => person.id === currentUserId)
+  ) ? "1" : "0";
+  const allAssignees = task.assignees?.map((person) => person.display_name).join(" ") || "";
+  const projectBadge = task.project ? `<span class="c-project" title="${escapeAttr(task.project.name)}">${escapeHtml(task.project.code)} · ${escapeHtml(task.project.name)}</span>` : "";
+  const searchText = `${task.public_id} ${task.title} ${aName} ${allAssignees} ${task.project?.name || ""} ${task.status}`.toLowerCase();
   return `<div class="gc-card ${prio}" data-task-id="${escapeAttr(task.id)}" data-col-key="${escapeAttr(columnKey || task.status)}" data-mine="${mine}" data-search="${escapeAttr(searchText)}" data-task='${escapeAttr(JSON.stringify(task))}'>
     <button class="c-copy" data-copy="${escapeAttr(task.public_id)}" title="Скопировать ID">📋</button>
     <div class="c-top"><span class="c-pid">${escapeHtml(task.public_id)}</span><span class="c-src">${escapeHtml(sourceLabel(task.source))}</span></div>
-    <div class="c-title">${escapeHtml(task.title)}</div>
+    ${projectBadge}<div class="c-title">${escapeHtml(task.title)}</div>
     <div class="c-foot">${ava}${dl}<span class="sync-dot ${sc}" title="YouGile: ${escapeHtml(task.sync.status)}"></span></div>
   </div>`;
 }
@@ -395,6 +417,8 @@ function openTask(root, task, members, reload) {
       ${task.sync.external_url ? `<a class="btn btn-sm btn-ghost" href="${escapeAttr(task.sync.external_url)}" target="_blank" rel="noreferrer">Открыть в YouGile</a>` : ""}
     </div>
     <dl class="task-details">
+      <dt>Проект</dt><dd>${task.project ? `<a href="/app/projects/${escapeAttr(task.project.id)}">${escapeHtml(task.project.code)} · ${escapeHtml(task.project.name)}</a>` : "Вне проекта"}</dd>
+      <dt>Команды</dt><dd>${task.teams?.length ? task.teams.map((team) => escapeHtml(team.name)).join(", ") : "Команда-владелец"}</dd>
       <dt>Источник</dt><dd>${escapeHtml(task.source)}</dd>
       <dt>Confidence</dt><dd>${task.confidence == null ? "—" : `${Math.round(task.confidence * 100)}%`}</dd>
       <dt>Исходное сообщение</dt><dd>${escapeHtml(task.evidence?.raw_text || "—")}</dd>
