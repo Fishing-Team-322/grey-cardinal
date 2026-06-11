@@ -71,6 +71,20 @@ ACHIEVEMENTS: tuple[dict[str, Any], ...] = (
         "kind": "risk_resolved",
         "target": 1,
     },
+    {
+        "id": "bridge_builder",
+        "title": "Связующее звено",
+        "description": "Закрыть первую межкомандную задачу",
+        "kind": "cross_team_task_completed",
+        "target": 1,
+    },
+    {
+        "id": "collaboration_champion",
+        "title": "Чемпион синергии",
+        "description": "Закрыть 10 межкомандных задач",
+        "kind": "cross_team_task_completed",
+        "target": 10,
+    },
 )
 
 
@@ -147,7 +161,13 @@ async def grant_team_xp(
 
 # Действия, которые «кормят» питомца (поднимают энергию/уровень).
 _PET_FEEDING_KINDS = frozenset(
-    {"task_completed", "meeting_summary_ready", "meeting_joined", "risk_resolved"}
+    {
+        "task_completed",
+        "cross_team_task_completed",
+        "meeting_summary_ready",
+        "meeting_joined",
+        "risk_resolved",
+    }
 )
 
 

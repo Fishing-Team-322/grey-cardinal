@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -236,12 +237,16 @@ class TaskModel(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("team_id", "public_id", name="uq_task_team_public_id"),
         UniqueConstraint("team_id", "seq", name="uq_task_team_seq"),
+        Index("ix_task_company_project", "company_project_id", "status"),
     )
 
     id: Mapped[UUID] = _uuid_pk()
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     public_id: Mapped[str] = mapped_column(Text, nullable=False)
     project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    company_project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("company_projects.id"), nullable=True
+    )
     team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -548,6 +553,219 @@ class TeamMemberModel(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)
     invited_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CompanyProjectModel(TimestampMixin, Base):
+    __tablename__ = "company_projects"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('draft','active','paused','completed','cancelled')",
+            name="ck_company_project_status",
+        ),
+        UniqueConstraint("company_id", "code", name="uq_company_project_code"),
+        Index("ix_company_project_company_status", "company_id", "status"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    owner_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    budget_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    budget_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="manual")
+    sync_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="local_only")
+    sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settings: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class CompanyProjectDraftModel(TimestampMixin, Base):
+    __tablename__ = "company_project_drafts"
+    __table_args__ = (
+        Index("ix_project_draft_company_created", "company_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    source_team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_name: Mapped[str] = mapped_column(Text, nullable=False)
+    horizon_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    payload: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProjectTeamModel(Base):
+    __tablename__ = "project_teams"
+    __table_args__ = (
+        CheckConstraint("role in ('lead','contributor','observer')", name="ck_project_team_role"),
+        CheckConstraint(
+            "participation_status in ('active','pending','declined')",
+            name="ck_project_team_participation",
+        ),
+        UniqueConstraint("project_id", "team_id", name="uq_project_team"),
+        Index("ix_project_team_team", "team_id", "project_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("company_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="contributor")
+    allocation_percent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="100")
+    participation_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="active"
+    )
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProjectMemberModel(Base):
+    __tablename__ = "project_members"
+    __table_args__ = (
+        CheckConstraint(
+            "role in ('owner','manager','contributor','observer')",
+            name="ck_project_member_role",
+        ),
+        UniqueConstraint("project_id", "user_id", name="uq_project_member"),
+        Index("ix_project_member_user", "user_id", "project_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("company_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="contributor")
+    allocation_percent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="100")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TaskTeamModel(Base):
+    __tablename__ = "task_teams"
+    __table_args__ = (
+        CheckConstraint(
+            "role in ('owner','contributor','reviewer')", name="ck_task_team_role"
+        ),
+        UniqueConstraint("task_id", "team_id", name="uq_task_team_participant"),
+        Index("ix_task_team_team", "team_id", "task_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="contributor")
+
+
+class TaskAssigneeModel(Base):
+    __tablename__ = "task_assignees"
+    __table_args__ = (
+        CheckConstraint(
+            "role in ('owner','contributor','reviewer')", name="ck_task_assignee_role"
+        ),
+        UniqueConstraint("task_id", "user_id", name="uq_task_assignee"),
+        Index("ix_task_assignee_user", "user_id", "task_id"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default="contributor")
+
+
+class ProjectExternalLinkModel(TimestampMixin, Base):
+    __tablename__ = "project_external_links"
+    __table_args__ = (
+        UniqueConstraint("project_id", "provider", name="uq_project_external_provider"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("company_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    source_team_id: Mapped[UUID] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    external_project_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_board_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sync_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProjectChatBindingModel(Base):
+    __tablename__ = "project_chat_bindings"
+    __table_args__ = (
+        UniqueConstraint(
+            "telegram_chat_id",
+            "message_thread_id",
+            name="uq_project_chat_binding",
+        ),
+        Index("ix_project_chat_context", "telegram_chat_id", "message_thread_id"),
+        Index(
+            "uq_project_chat_default",
+            "telegram_chat_id",
+            unique=True,
+            postgresql_where=text("message_thread_id IS NULL"),
+            sqlite_where=text("message_thread_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("company_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    telegram_chat_id: Mapped[UUID] = mapped_column(
+        ForeignKey("telegram_chats.id", ondelete="CASCADE"), nullable=False
+    )
+    message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="project")
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CollaborationEventModel(Base):
+    __tablename__ = "collaboration_events"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_collaboration_event_key"),
+        Index("ix_collaboration_company_created", "company_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("company_projects.id"))
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"))
+    actor_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    source_team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"))
+    target_team_id: Mapped[UUID | None] = mapped_column(ForeignKey("teams.id"))
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    points: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 

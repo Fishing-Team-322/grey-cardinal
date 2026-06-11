@@ -305,15 +305,84 @@ async function renderPlanner(content, teamId) {
     form.querySelector("button").disabled = true;
     output.innerHTML = '<div class="view-loading compact">Сравниваю сценарии...</div>';
     try {
-      const plan = await api.insights.plan(teamId, {
+      const team = (window.gcCurrentUser?.teams || []).find((item) => String(item.id) === String(teamId));
+      const companyId = team?.company_id || window.gcCurrentUser?.companies?.[0]?.id;
+      if (!companyId) throw new Error("Не удалось определить компанию команды");
+      const plan = await api.projects.preview(companyId, {
         description,
         horizon_weeks: horizonWeeks,
+        source_team_id: teamId,
       });
-      output.innerHTML = renderPlan(plan);
+      output.innerHTML = renderProjectDraft(plan);
+      bindProjectDraft(output, plan);
     } catch (error) {
       output.innerHTML = errorState(errorMessage(error));
     } finally {
       form.querySelector("button").disabled = false;
+    }
+  };
+}
+
+function renderProjectDraft(draft) {
+  const plan = draft.plan || {};
+  const teamOptions = (draft.teams || []).map((team) => `<option value="${escapeHtml(team.id)}">${escapeHtml(team.name)}</option>`).join("");
+  return `
+    <section class="card card-pad project-draft">
+      <div class="card-head"><div><div class="eyebrow muted">Предпросмотр проекта</div><div class="card-title mt-6">Настройте план перед созданием</div></div><span class="pill info">версия ${draft.version}</span></div>
+      <div class="grid g2 mt-16">
+        <label class="field"><span>Название проекта</span><input id="draft-name" value="${escapeHtml(draft.name || draft.generated_name || "")}"></label>
+        <label class="field"><span>Срок</span><input id="draft-deadline" type="datetime-local" value="${draft.deadline ? new Date(draft.deadline).toISOString().slice(0, 16) : ""}"></label>
+      </div>
+      <div class="team-allocation mt-16">${(draft.teams || []).map((team) => `<label class="team-allocation-row"><input type="checkbox" data-draft-team="${escapeHtml(team.id)}" checked><span><b>${escapeHtml(team.name)}</b><small>${team.role === "lead" ? "ведущая команда" : "участник"} · ${team.allocation_percent}%</small></span></label>`).join("")}</div>
+      <div class="card-head mt-20"><div class="card-title">Предлагаемые задачи</div><span class="card-sub">${(draft.tasks || []).length}</span></div>
+      <div class="draft-task-list">${(draft.tasks || []).map((task, index) => `
+        <div class="draft-task" data-draft-task="${index}">
+          <input class="draft-task-title" value="${escapeHtml(task.title)}">
+          <select class="draft-task-team">${teamOptions.replace(`value="${task.owner_team_id}"`, `value="${task.owner_team_id}" selected`)}</select>
+          <input class="draft-task-deadline" type="datetime-local" value="${task.deadline ? new Date(task.deadline).toISOString().slice(0, 16) : ""}">
+          <button type="button" class="btn btn-sm btn-ghost draft-task-remove">Убрать</button>
+        </div>`).join("")}</div>
+      <div class="planner-create-row mt-20">
+        <label><input id="draft-sync" type="checkbox"> Сразу создать проект и доску в YouGile</label>
+        <button class="btn btn-primary btn-lg" id="create-project" type="button">Создать проект</button>
+      </div>
+    </section>
+    ${renderPlan(plan)}`;
+}
+
+function bindProjectDraft(root, draft) {
+  root.querySelectorAll(".draft-task-remove").forEach((button) => {
+    button.onclick = () => button.closest(".draft-task").remove();
+  });
+  root.querySelector("#create-project").onclick = async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const teamIds = [...root.querySelectorAll("[data-draft-team]:checked")].map((input) => input.dataset.draftTeam);
+    const tasks = [...root.querySelectorAll(".draft-task")].map((row) => {
+      const source = draft.tasks[Number(row.dataset.draftTask)];
+      const ownerTeamId = row.querySelector(".draft-task-team").value;
+      return {
+        ...source,
+        title: row.querySelector(".draft-task-title").value.trim(),
+        owner_team_id: ownerTeamId,
+        team_ids: [...new Set([ownerTeamId, ...(source.team_ids || []).filter((id) => teamIds.includes(id))])],
+        assignee_ids: (source.assignee_ids || []),
+        deadline: row.querySelector(".draft-task-deadline").value ? new Date(row.querySelector(".draft-task-deadline").value).toISOString() : null,
+      };
+    }).filter((task) => task.title && teamIds.includes(task.owner_team_id));
+    try {
+      const project = await api.projects.create(draft.id, {
+        name: root.querySelector("#draft-name").value.trim(),
+        lead_team_id: teamIds.includes(draft.lead_team_id) ? draft.lead_team_id : teamIds[0],
+        team_ids: teamIds,
+        deadline: root.querySelector("#draft-deadline").value ? new Date(root.querySelector("#draft-deadline").value).toISOString() : null,
+        tasks,
+        sync_yougile: root.querySelector("#draft-sync").checked,
+      });
+      location.href = `/app/projects/${project.id}`;
+    } catch (error) {
+      button.disabled = false;
+      root.insertAdjacentHTML("afterbegin", errorState(errorMessage(error)));
     }
   };
 }

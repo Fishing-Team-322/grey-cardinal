@@ -225,6 +225,7 @@ def _task(row: m.TaskModel) -> Task:
         priority=_safe_enum(TaskPriority, row.priority, TaskPriority.medium),
         source=_safe_enum(TaskSource, row.source, TaskSource.manual),
         project_id=row.project_id,
+        company_project_id=row.company_project_id,
         description=row.description,
         assignee_id=row.assignee_id,
         assignee_text=row.assignee_text,
@@ -923,6 +924,7 @@ class TaskRepositoryImpl:
             seq=seq,
             public_id=task.public_id,
             project_id=task.project_id,
+            company_project_id=task.company_project_id,
             title=task.title,
             description=task.description,
             status=task.status.value,
@@ -938,6 +940,22 @@ class TaskRepositoryImpl:
         )
         self._s.add(row)
         await self._s.flush()
+        if task.company_project_id and task.team_id:
+            self._s.add(
+                m.TaskTeamModel(
+                    task_id=row.id,
+                    team_id=task.team_id,
+                    role="owner",
+                )
+            )
+        if task.company_project_id and task.assignee_id:
+            self._s.add(
+                m.TaskAssigneeModel(
+                    task_id=row.id,
+                    user_id=task.assignee_id,
+                    role="owner",
+                )
+            )
         return _task(row)
 
     async def get(self, task_id: UUID) -> Task | None:

@@ -19,6 +19,7 @@
     board: '<path d="M3 3h7v18H3zM14 3h7v10h-7zM14 17h7v4h-7z"/>',
     inbox: '<path d="M4 4h16v13H4zM4 13h4l2 3h4l2-3h4M8 21h8"/>',
     insights: '<path d="M3 3v18h18M7 14l3-4 3 3 5-7"/><circle cx="7" cy="14" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="18" cy="6" r="1"/>',
+    projects: '<path d="M3 7h7l2 2h9v10H3zM3 7V5h7l2 2"/>',
   };
   window.gcIcon = (name, width = 1.7) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${icons[name] || ""}</svg>`;
@@ -70,6 +71,7 @@
         ${item("/app/settings", "cog", "Настройки", "/app/settings", ["director", "manager", "employee"])}
       </div>
       <div class="nav-group"><div class="nav-label">Рабочее пространство</div>
+        ${item("/app/projects", "projects", "Проекты", "/app/projects", ["director", "manager", "employee"])}
         ${item("/app/teams/:teamId/board", "board", "Grey Board", firstBoard(user), ["director", "manager", "employee"])}
         ${item("/app/teams/:teamId/ai-inbox", "inbox", "Входящие AI", firstInbox(user), ["director", "manager"])}
         ${item("/app/teams/:teamId/insights", "insights", "AI-аналитика", firstInsights(user), ["director", "manager"])}

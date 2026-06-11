@@ -196,9 +196,38 @@ export async function yougileFullView(root, params) {
 
 export async function teamMapView(root, params) {
   const companyId = params.companyId || params.id;
-  setHeader(root, "Карта команд", "Операционная карта команд, рисков и состояния синхронизации.");
+  setHeader(root, "Карта взаимодействий", "Проекты показывают, где команды реально работают вместе и где возникают блокировки.");
   const data = await api.companies.map(companyId);
-  root.querySelector("#agentic-content").innerHTML = `<div class="org-map"><div class="org-root">${escapeHtml(data.company.name)}</div>${data.teams.map(team => `<a href="/app/teams/${team.id}/board" class="org-team ${team.status}"><b>${escapeHtml(team.name)}</b><span>Открыто ${team.open_tasks}</span><span>Риски ${team.risks}</span><span>${escapeHtml(team.sync_health)}</span></a>`).join("")}</div>`;
+  const teamNames = new Map((data.teams || []).map((team) => [team.id, team.name]));
+  root.querySelector("#agentic-content").innerHTML = `
+    <div class="collab-kpis">
+      <div><b>${data.stats?.active_projects || 0}</b><span>активных проектов</span></div>
+      <div><b>${data.stats?.participating_teams || 0}</b><span>команд в проектах</span></div>
+      <div><b>${data.stats?.collaboration_links || 0}</b><span>рабочих связей</span></div>
+    </div>
+    <section class="collab-map">
+      <div class="collab-company">${escapeHtml(data.company.name)}</div>
+      <div class="collab-projects">
+        ${(data.projects || []).map((project) => `
+          <a class="collab-project" href="/app/projects/${project.id}">
+            <div class="project-code">${escapeHtml(project.code)}</div>
+            <h3>${escapeHtml(project.name)}</h3>
+            <div class="collab-progress"><i style="width:${project.progress || 0}%"></i></div>
+            <small>${project.progress || 0}% · ${project.done || 0}/${project.tasks || 0} задач</small>
+            <div class="collab-team-chips">${project.teams.map((team) => `<span class="${team.role === "lead" ? "lead" : ""}">${escapeHtml(team.name)}</span>`).join("")}</div>
+          </a>`).join("") || '<div class="project-empty">Активных межкомандных проектов пока нет.</div>'}
+      </div>
+    </section>
+    <div class="grid g2 mt-20">
+      <section class="card card-pad">
+        <div class="card-head"><div class="card-title">Команды</div><span class="card-sub">нагрузка и риски</span></div>
+        <div class="collab-team-list">${(data.teams || []).map((team) => `<a href="/app/teams/${team.id}/board" class="collab-team-row ${team.status}"><span class="status-dot"></span><b>${escapeHtml(team.name)}</b><small>${team.open_tasks} открыто · ${team.risks} рисков</small></a>`).join("")}</div>
+      </section>
+      <section class="card card-pad">
+        <div class="card-head"><div class="card-title">Связи между командами</div><span class="card-sub">по совместной работе</span></div>
+        <div class="collab-edge-list">${(data.edges || []).sort((a, b) => b.collaboration_points - a.collaboration_points).map((edge) => `<div class="collab-edge"><div><b>${escapeHtml(teamNames.get(edge.source_team_id) || "Команда")}</b><span>↔</span><b>${escapeHtml(teamNames.get(edge.target_team_id) || "Команда")}</b></div><small>${edge.projects} проектов · ${edge.completed_tasks} событий · ${edge.collaboration_points} баллов</small></div>`).join("") || '<div class="empty-inline">Совместных связей пока нет.</div>'}</div>
+      </section>
+    </div>`;
 }
 
 export async function recommendationsView(root, params) {
@@ -408,7 +437,7 @@ function activityTimeline(tasks) {
       <div>${items.map((task) => `
         <article>
           <span class="activity-marker"></span>
-          <div><p>Закрыл задачу <b>${escapeHtml(task.public_id)}</b></p><h4>${escapeHtml(task.title)}</h4></div>
+          <div><p>Закрыл задачу <b>${escapeHtml(task.public_id)}</b>${task.project ? ` в <a href="/app/projects/${task.project.id}">${escapeHtml(task.project.code)}</a>` : ""}</p><h4>${escapeHtml(task.title)}</h4></div>
           <small>${new Date(task.completed_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</small>
         </article>`).join("")}</div>
     </section>`).join("")}</div>`;
@@ -418,7 +447,7 @@ function profileTaskRow(task) {
   const done = ["done", "cancelled", "rejected"].includes(task.status);
   return `<div class="profile-task-row" data-task-state="${done ? "done" : "open"}">
     <span class="task-key">${escapeHtml(task.public_id)}</span>
-    <div><b>${escapeHtml(task.title)}</b><small>${task.completed_at ? `Закрыто ${formatDate(task.completed_at)}` : task.deadline ? `Срок ${formatDate(task.deadline)}` : "Без дедлайна"}</small></div>
+    <div><b>${escapeHtml(task.title)}</b><small>${task.project ? `${escapeHtml(task.project.code)} · ` : ""}${task.completed_at ? `Закрыто ${formatDate(task.completed_at)}` : task.deadline ? `Срок ${formatDate(task.deadline)}` : "Без дедлайна"}</small></div>
     <span class="pill ${task.status === "done" ? "ok" : task.status === "blocked" ? "warn" : "idle"}">${escapeHtml(profileStatusLabel(task.status))}</span>
   </div>`;
 }

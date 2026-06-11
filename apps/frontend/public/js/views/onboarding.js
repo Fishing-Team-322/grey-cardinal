@@ -100,8 +100,16 @@ function renderJoin(el, user, invite = "") {
 
 // ── Create (director) flow ───────────────────────────────────────────────────
 function renderCreate(el) {
-  const state = { step: 1, companyId: null, teamId: null, team: null, companyName: "", teamName: "" };
-  const steps = ["Компания", "Команда", "Telegram", "YouGile", "Приглашения"];
+  const state = {
+    step: 1,
+    companyId: null,
+    teamId: null,
+    team: null,
+    companyName: "",
+    teamName: "",
+    workMode: "hybrid",
+  };
+  const steps = ["Компания", "Режим", "Команда", "Первый результат", "Telegram", "YouGile", "Приглашения"];
 
   function shell(inner) {
     el.innerHTML = `
@@ -117,9 +125,11 @@ function renderCreate(el) {
 
   function route() {
     if (state.step === 1) stepCompany();
-    else if (state.step === 2) stepTeam();
-    else if (state.step === 3) stepTelegram();
-    else if (state.step === 4) stepYougile();
+    else if (state.step === 2) stepMode();
+    else if (state.step === 3) stepTeam();
+    else if (state.step === 4) stepFirstResult();
+    else if (state.step === 5) stepTelegram();
+    else if (state.step === 6) stepYougile();
     else stepInvite();
   }
 
@@ -140,6 +150,22 @@ function renderCreate(el) {
     };
   }
 
+  function stepMode() {
+    shell(`<h2>Как вы организуете работу?</h2><p class="ob-sub">Режим можно изменить позже. Он не ограничивает функции, а только настраивает удобный старт.</p>
+      <div class="ob-mode-grid">
+        <button class="ob-mode ${state.workMode === "hybrid" ? "selected" : ""}" data-mode="hybrid"><b>Команды + проекты</b><span>Для совместной работы нескольких отделов и обычных задач внутри команд.</span></button>
+        <button class="ob-mode ${state.workMode === "team" ? "selected" : ""}" data-mode="team"><b>Только команды</b><span>Для постоянных процессов без обязательной проектной структуры.</span></button>
+      </div>
+      <button class="btn btn-primary mt-16" id="mode-next">Далее →</button>`);
+    el.querySelectorAll("[data-mode]").forEach((button) => {
+      button.onclick = () => {
+        state.workMode = button.dataset.mode;
+        el.querySelectorAll("[data-mode]").forEach((item) => item.classList.toggle("selected", item === button));
+      };
+    });
+    el.querySelector("#mode-next").onclick = () => { state.step = 3; route(); };
+  }
+
   function stepTeam() {
     shell(`<h2>Создайте команду</h2><p class="ob-sub">Команда — это рабочее пространство с доской и Telegram-чатом.</p>
       <label class="ob-fld">Название команды<input id="t-name" value="${escapeHtml(state.teamName)}" placeholder="Например, Разработка"></label>
@@ -151,8 +177,30 @@ function renderCreate(el) {
         const team = await api.teams.create(state.companyId, name, PREF_TZ);
         state.teamId = team.id; state.team = team; state.teamName = name;
         await refreshContext();
-        state.step = 3; route();
+        state.step = 4; route();
       } catch (e) { el.querySelector("#t-msg").textContent = "Ошибка: " + (e.message || ""); }
+    };
+  }
+
+  function stepFirstResult() {
+    shell(`<h2>Создайте первый рабочий контур</h2><p class="ob-sub">Добавьте до пяти реальных задач, по одной на строку. Так команда сразу увидит полезную доску, а не пустой интерфейс.</p>
+      <label class="ob-fld">Первые задачи<textarea id="starter-tasks" rows="6" placeholder="Подготовить план запуска&#10;Собрать требования&#10;Назначить ответственного"></textarea></label>
+      ${state.workMode === "hybrid" ? '<div class="ob-hint">После настройки откроется AI-планировщик: он предложит межкомандный проект, сроки и задачи в режиме предпросмотра.</div>' : ""}
+      <div class="ob-row mt-16"><button class="btn btn-primary" id="starter-next">Создать и продолжить</button><button class="btn btn-ghost" id="starter-skip">Пропустить</button></div>
+      <div class="ob-note" id="starter-msg"></div>`);
+    el.querySelector("#starter-skip").onclick = () => { state.step = 5; route(); };
+    el.querySelector("#starter-next").onclick = async () => {
+      const tasks = el.querySelector("#starter-tasks").value.split(/\n+/).map((value) => value.trim()).filter(Boolean).slice(0, 5);
+      const message = el.querySelector("#starter-msg");
+      try {
+        for (const title of tasks) {
+          await api.greyBoard.createTask(state.teamId, { title, status: "todo" });
+        }
+        state.step = 5;
+        route();
+      } catch (error) {
+        message.textContent = "Не удалось создать стартовые задачи: " + (error.message || "");
+      }
     };
   }
 
@@ -164,8 +212,8 @@ function renderCreate(el) {
         <li>Отправьте в чат: <code id="tg-cmd">/bind_team КОД</code></li>
       </ol>
       <div class="ob-row"><button class="btn btn-primary" id="tg-next">Далее →</button><button class="btn btn-ghost" id="tg-skip">Пропустить</button></div>`);
-    el.querySelector("#tg-skip").onclick = () => { state.step = 4; route(); };
-    el.querySelector("#tg-next").onclick = () => { state.step = 4; route(); };
+    el.querySelector("#tg-skip").onclick = () => { state.step = 6; route(); };
+    el.querySelector("#tg-next").onclick = () => { state.step = 6; route(); };
     api.teams.telegramBindCode(state.teamId).then((res) => {
       const code = res.code || res.bind_code || "—";
       el.querySelector("#tg-code").innerHTML = `Код привязки: <b class="ob-code">${escapeHtml(code)}</b> (действует ~20 мин)`;
@@ -181,8 +229,8 @@ function renderCreate(el) {
       </div>
       <div class="ob-hint mt-12">Подключение откроется на отдельной странице. Вернитесь сюда, чтобы завершить настройку.</div>
       <button class="btn btn-primary mt-16" id="y-next">Далее →</button>`);
-    el.querySelector("#y-skip").onclick = () => { state.step = 5; route(); };
-    el.querySelector("#y-next").onclick = () => { state.step = 5; route(); };
+    el.querySelector("#y-skip").onclick = () => { state.step = 7; route(); };
+    el.querySelector("#y-next").onclick = () => { state.step = 7; route(); };
   }
 
   function stepInvite() {
@@ -206,7 +254,10 @@ function renderCreate(el) {
   async function finish() {
     const user = await refreshContext().catch(() => window.gcCurrentUser);
     toast("Готово! Добро пожаловать в Grey Cardinal 🖤");
-    Router.navigate(state.teamId ? `/app/teams/${state.teamId}/board` : homeForUser(user || {}), true);
+    const target = state.workMode === "hybrid" && state.teamId
+      ? `/app/teams/${state.teamId}/insights?view=planner`
+      : (state.teamId ? `/app/teams/${state.teamId}/board` : homeForUser(user || {}));
+    Router.navigate(target, true);
   }
 
   route();
@@ -243,7 +294,9 @@ function injectStyles() {
   .ob-panel h2{margin:0 0 4px}
   .ob-sub{color:#9a9aa3;margin:0 0 16px}
   .ob-fld{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;font-size:13px;color:#9a9aa3}
-  .ob-fld input,.ob-fld select{padding:10px 12px;border-radius:10px;border:1px solid #2a2a33;background:#1a1a1f;color:#ececf0;font:inherit}
+  .ob-fld input,.ob-fld select,.ob-fld textarea{padding:10px 12px;border-radius:10px;border:1px solid #2a2a33;background:#1a1a1f;color:#ececf0;font:inherit;resize:vertical}
+  .ob-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ob-mode{display:flex;flex-direction:column;gap:6px;text-align:left;padding:16px;border:1px solid #2a2a33;border-radius:13px;background:#1a1a1f;color:inherit;cursor:pointer}.ob-mode span{color:#92929b;font-size:13px}.ob-mode.selected{border-color:#c2152e;background:#241419}
+  @media(max-width:620px){.ob-mode-grid{grid-template-columns:1fr}}
   .ob-note{margin-top:12px;color:#9a9aa3;font-size:13px}
   .ob-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .ob-list{color:#cfcfd6;line-height:1.9;margin:10px 0}

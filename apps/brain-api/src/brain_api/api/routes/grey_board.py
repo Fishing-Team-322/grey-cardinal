@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.api.deps import get_container
@@ -23,6 +23,10 @@ from brain_api.application.agentic_tasks import (
 from brain_api.application.semantic_parser import SemanticMessageInput
 from brain_api.application.task_numbering import next_task_public_id
 from brain_api.application.task_status_service import TaskStatusService
+from brain_api.application.use_cases.cross_team_projects import (
+    record_cross_team_task_completion,
+)
+from brain_api.application.use_cases.team_gamification import grant_team_xp
 from brain_api.container import Container
 from brain_api.domain.enums import TaskStatus
 from brain_api.infrastructure.db import models as m
@@ -97,14 +101,63 @@ async def _team_access(
     return team
 
 
+async def _task_access(
+    task: m.TaskModel,
+    current_user: CurrentUser,
+    session: AsyncSession,
+) -> None:
+    if task.team_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    ctx = await build_tenant_context(current_user.id, session)
+    owner_team = await session.get(m.TeamModel, task.team_id)
+    if owner_team is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task team not found")
+    if task.team_id in ctx.team_roles or ctx.company_roles.get(owner_team.company_id) == "director":
+        return
+    shared_team_ids = list(
+        await session.scalars(
+            select(m.TaskTeamModel.team_id).where(m.TaskTeamModel.task_id == task.id)
+        )
+    )
+    if any(team_id in ctx.team_roles for team_id in shared_team_ids):
+        return
+    if await session.scalar(
+        select(m.TaskAssigneeModel.id).where(
+            m.TaskAssigneeModel.task_id == task.id,
+            m.TaskAssigneeModel.user_id == current_user.id,
+        )
+    ):
+        return
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Task access required")
+
+
 @router.get("/api/teams/{team_id}/grey-board")
 async def grey_board(
     team_id: UUID,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_db),
     view: str = "agent",
+    project_id: UUID | None = None,
 ) -> dict[str, Any]:
     team = await _team_access(team_id, current_user, session)
+    shared_task_ids = select(m.TaskTeamModel.task_id).where(
+        m.TaskTeamModel.team_id == team_id
+    )
+    task_scope = or_(
+        m.TaskModel.team_id == team_id,
+        m.TaskModel.id.in_(shared_task_ids),
+    )
+    if project_id is not None:
+        project_team = await session.scalar(
+            select(m.ProjectTeamModel.id).where(
+                m.ProjectTeamModel.project_id == project_id,
+                m.ProjectTeamModel.team_id == team_id,
+                m.ProjectTeamModel.participation_status == "active",
+            )
+        )
+        if project_team is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found for this team")
+        task_scope = task_scope & (m.TaskModel.company_project_id == project_id)
     rows = (
         await session.execute(
             select(
@@ -128,14 +181,19 @@ async def grey_board(
                 m.ChatMessageModel,
                 m.ChatMessageModel.id == m.TaskModel.source_message_id,
             )
-            .where(m.TaskModel.team_id == team_id)
+            .where(task_scope)
             .order_by(m.TaskModel.seq)
         )
     ).all()
-    cards = [
-        _task_card(task, user, link, proposal, source_message, team.timezone)
-        for task, user, link, proposal, source_message in rows
-    ]
+    cards = []
+    project_ids: set[UUID] = set()
+    for task, user, link, proposal, source_message in rows:
+        card = _task_card(task, user, link, proposal, source_message, team.timezone)
+        context = await _task_project_context(session, task)
+        card.update(context)
+        cards.append(card)
+        if task.company_project_id:
+            project_ids.add(task.company_project_id)
     columns = _group_cards(view, cards)
     pending_inbox = []
     if view == "agent":
@@ -200,6 +258,7 @@ async def grey_board(
         },
         "stats": {
             "tasks": len(cards),
+            "projects": len(project_ids),
             "overdue": overdue_count,
             "risks": risk_count,
             "sync_errors": sync_error_count,
@@ -209,6 +268,7 @@ async def grey_board(
         # current frontend uses `columns[].cards`.
         "columns": board_columns,
         "groups": board_columns,
+        "project_id": str(project_id) if project_id else None,
         "recommendations": [],
     }
 
@@ -226,13 +286,41 @@ async def move_task(
     task = await session.get(m.TaskModel, task_id)
     if task is None or task.team_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
-    await _team_access(task.team_id, current_user, session)
+    await _task_access(task, current_user, session)
     result = await TaskStatusService(container.board_mirror).update_status(
         task_id,
         body.status,
         actor_id=current_user.id,
         action="grey_board_status_changed",
     )
+    if body.status == TaskStatus.done and task.company_project_id:
+        await session.refresh(task)
+        if await record_cross_team_task_completion(
+            session,
+            task=task,
+            actor_user_id=current_user.id,
+        ):
+            assignee_ids = set(
+                await session.scalars(
+                    select(m.TaskAssigneeModel.user_id).where(
+                        m.TaskAssigneeModel.task_id == task.id
+                    )
+                )
+            )
+            if task.assignee_id:
+                assignee_ids.add(task.assignee_id)
+            for user_id in assignee_ids:
+                await grant_team_xp(
+                    session,
+                    user_id=user_id,
+                    team_id=task.team_id,
+                    kind="cross_team_task_completed",
+                    points=15,
+                    reason="Завершена межкомандная задача",
+                    idempotency_key=f"cross-team:{task.id}:{user_id}",
+                    task_id=task.id,
+                )
+            await session.commit()
     return {
         "task_id": str(task_id),
         "status": result.status,
@@ -909,6 +997,51 @@ def _task_card(
         },
         "created_at": task.created_at,
         "updated_at": task.updated_at,
+    }
+
+
+async def _task_project_context(
+    session: AsyncSession,
+    task: m.TaskModel,
+) -> dict[str, Any]:
+    if task.company_project_id is None:
+        return {"project": None, "teams": [], "assignees": []}
+    project = await session.get(m.CompanyProjectModel, task.company_project_id)
+    team_rows = (
+        await session.execute(
+            select(m.TaskTeamModel, m.TeamModel)
+            .join(m.TeamModel, m.TeamModel.id == m.TaskTeamModel.team_id)
+            .where(m.TaskTeamModel.task_id == task.id)
+            .order_by(m.TaskTeamModel.role, m.TeamModel.name)
+        )
+    ).all()
+    assignee_rows = (
+        await session.execute(
+            select(m.TaskAssigneeModel, m.UserModel)
+            .join(m.UserModel, m.UserModel.id == m.TaskAssigneeModel.user_id)
+            .where(m.TaskAssigneeModel.task_id == task.id)
+            .order_by(m.TaskAssigneeModel.role, m.UserModel.display_name)
+        )
+    ).all()
+    return {
+        "project": (
+            {"id": str(project.id), "code": project.code, "name": project.name}
+            if project
+            else None
+        ),
+        "teams": [
+            {"id": str(team.id), "name": team.name, "role": row.role}
+            for row, team in team_rows
+        ],
+        "assignees": [
+            {
+                "id": str(user.id),
+                "display_name": user.display_name,
+                "photo_data_url": user.photo_data_url,
+                "role": row.role,
+            }
+            for row, user in assignee_rows
+        ],
     }
 
 

@@ -25,6 +25,7 @@ import pet from "./views/pet.js";
 import insights from "./views/insights.js";
 import aiInbox from "./views/ai-inbox.js";
 import onboarding from "./views/onboarding.js";
+import { projectDetailView, projectsView } from "./views/projects.js";
 import { teamMapView, setupView, profileView } from "./views/agentic.js";
 
 function ensureMobileMenu() {
@@ -98,6 +99,8 @@ async function boot() {
   Router.register("/app/teams", "/partials/teams.html", teams, guardFor("director", "manager"));
   Router.register("/app/teams/:id", "/partials/manager.html", manager, guardFor("director", "manager"));
   Router.register("/app/teams/:teamId/board", "/partials/board.html", board);
+  Router.register("/app/projects", "/partials/projects.html", projectsView);
+  Router.register("/app/projects/:projectId", "/partials/projects.html", projectDetailView);
   Router.register("/app/teams/:teamId/pet", "/partials/pet.html", pet);
   Router.register("/app/teams/:teamId/insights", "/partials/insights.html", insights, guardFor("director", "manager"));
   Router.register("/app/teams/:teamId/ai-inbox", "/partials/ai-inbox.html", aiInbox, guardFor("director", "manager"));
