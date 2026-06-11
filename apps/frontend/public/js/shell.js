@@ -75,6 +75,63 @@ document.addEventListener("click", (event) => {
   }
 });
 
+const TEAM_STORAGE_KEY = "gc.selectedTeamId";
+
+function initialSelectedTeam(user) {
+  const ids = (user.teams || []).map((team) => String(team.id));
+  let saved = null;
+  try { saved = localStorage.getItem(TEAM_STORAGE_KEY); } catch { saved = null; }
+  if (saved && ids.includes(saved)) return saved;
+  return ids[0] || null;
+}
+
+function setupTeamSelection(user) {
+  window.gcSelectedTeamId = () => appStore.state.selectedTeamId;
+  window.gcSelectTeam = (teamId) => {
+    const id = String(teamId);
+    const teams = (window.gcCurrentUser?.teams || []).map((team) => String(team.id));
+    if (!teams.includes(id) || id === String(appStore.state.selectedTeamId)) {
+      document.querySelectorAll(".team-switch.open").forEach((el) => el.classList.remove("open"));
+      return;
+    }
+    appStore.state.selectedTeamId = id;
+    try { localStorage.setItem(TEAM_STORAGE_KEY, id); } catch { /* storage may be unavailable */ }
+    document.body.classList.remove("sidebar-open");
+    window.gcSidebar(window.gcCurrentUser, roleForUser(window.gcCurrentUser));
+    const match = location.pathname.match(/^\/app\/teams\/[^/]+(\/[^?#]*)?$/);
+    if (match) {
+      const rest = match[1] || "";
+      Router.navigate(`/app/teams/${id}${rest}${location.search}`);
+    } else {
+      Router.highlightNav();
+    }
+    const team = (window.gcCurrentUser?.teams || []).find((t) => String(t.id) === id);
+    if (team) toast(`Команда: ${team.name}`, "info");
+  };
+}
+
+document.addEventListener("click", (event) => {
+  const optButton = event.target.closest("[data-team-select]");
+  if (optButton) {
+    event.preventDefault();
+    window.gcSelectTeam?.(optButton.dataset.teamSelect);
+    return;
+  }
+  const switchBtn = event.target.closest(".team-switch-btn");
+  if (switchBtn) {
+    event.preventDefault();
+    const box = switchBtn.closest(".team-switch");
+    const willOpen = !box.classList.contains("open");
+    document.querySelectorAll(".team-switch.open").forEach((el) => el.classList.remove("open"));
+    box.classList.toggle("open", willOpen);
+    switchBtn.setAttribute("aria-expanded", String(willOpen));
+    return;
+  }
+  if (!event.target.closest(".team-switch")) {
+    document.querySelectorAll(".team-switch.open").forEach((el) => el.classList.remove("open"));
+  }
+});
+
 async function boot() {
   let user;
   try {
@@ -86,7 +143,8 @@ async function boot() {
   window.gcCurrentUser = user;
   appStore.state.currentUser = user;
   appStore.state.context = { companies: user.companies, teams: user.teams };
-  appStore.state.selectedTeamId = user.teams?.[0]?.id || null;
+  appStore.state.selectedTeamId = initialSelectedTeam(user);
+  setupTeamSelection(user);
   window.gcSidebar(user, roleForUser(user));
   wsConnect();
   bindCabinetNotifications(user);

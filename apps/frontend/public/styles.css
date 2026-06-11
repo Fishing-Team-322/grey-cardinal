@@ -432,6 +432,48 @@ h3 { font-size: 22px; }
 .role-chip .meta span { font-size:11.5px; color:var(--text-faint); }
 .role-chip > svg { width:16px; height:16px; flex:none; color:var(--text-faint); }
 
+/* team switcher in sidebar */
+.team-switch { position:relative; margin-top:10px; }
+.team-switch-btn {
+  width:100%; display:flex; align-items:center; gap:10px; padding:9px 11px; cursor:pointer;
+  border:1px solid var(--line-2); border-radius:11px; background:var(--surface); color:var(--text);
+  transition:border-color .14s, background .14s; text-align:left;
+}
+.team-switch-btn:hover { border-color:var(--line-strong); background:var(--surface-2); }
+.team-switch.open .team-switch-btn { border-color:var(--accent-line); background:var(--surface-2); }
+.tso-av {
+  width:30px; height:30px; flex:none; border-radius:9px; display:grid; place-items:center;
+  font-weight:700; font-size:12px; color:#fff;
+  background:linear-gradient(135deg,var(--accent),#7c2d3a); border:1px solid var(--line-2);
+}
+.team-switch .ts-meta { min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+.team-switch .ts-cap {
+  font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--text-faint);
+}
+.team-switch .ts-meta b { font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.team-switch .ts-chev { width:16px; height:16px; flex:none; color:var(--text-faint); transition:transform .18s; }
+.team-switch.open .ts-chev { transform:rotate(180deg); }
+.team-switch-menu {
+  position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:40;
+  display:none; flex-direction:column; gap:2px; padding:6px;
+  border:1px solid var(--line-2); border-radius:12px; background:var(--bg-2);
+  box-shadow:0 16px 40px rgba(0,0,0,0.5); max-height:340px; overflow:auto;
+}
+.team-switch.open .team-switch-menu { display:flex; }
+.team-switch-opt {
+  display:flex; align-items:center; gap:10px; padding:8px 9px; cursor:pointer;
+  border:1px solid transparent; border-radius:9px; background:transparent; color:var(--text-dim);
+  text-align:left; transition:background .12s, color .12s;
+}
+.team-switch-opt:hover { background:var(--surface); color:var(--text); }
+.team-switch-opt.active { background:var(--accent-soft); color:#fff; border-color:var(--accent-line); }
+.team-switch-opt .tso-av { width:28px; height:28px; font-size:11px; }
+.team-switch-opt .tso-meta { min-width:0; display:flex; flex-direction:column; line-height:1.2; }
+.team-switch-opt .tso-meta b { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.team-switch-opt .tso-meta span { font-size:11px; color:var(--text-faint); }
+.team-switch-opt > svg { margin-left:auto; flex:none; color:var(--accent-2); }
+
 /* ============================================================
    LAYOUT HELPERS
    ============================================================ */

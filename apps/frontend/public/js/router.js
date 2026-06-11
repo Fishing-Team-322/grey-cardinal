@@ -66,6 +66,13 @@ export const Router = {
     return this._render();
   },
 
+  highlightNav() {
+    const match = this._matchRoute(location.pathname);
+    document.querySelectorAll(".nav-item").forEach((item) => {
+      item.classList.toggle("active", match ? isNavItemActive(item, match, location.pathname) : false);
+    });
+  },
+
   _intercept(event) {
     const link = event.target?.closest?.("a[href]");
     if (!link || link.target === "_blank" || event.defaultPrevented) return;
