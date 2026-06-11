@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { Router } from "../router.js";
 import { bindForm, currentTeam, errorMessage, escapeHtml, formatDate, setTopbar, toast } from "../view-utils.js";
 
 const BOARD_VIEWS = [
@@ -194,40 +195,263 @@ export async function yougileFullView(root, params) {
   };
 }
 
-export async function teamMapView(root, params) {
+export async function teamMapView(root, params, query = {}) {
   const companyId = params.companyId || params.id;
-  setHeader(root, "Карта взаимодействий", "Проекты показывают, где команды реально работают вместе и где возникают блокировки.");
+  setHeader(root, "Карта команд", "Живая карта взаимодействий: где команды работают вместе, где блокировки и как распределена нагрузка.");
+  const content = root.querySelector("#agentic-content");
+  content.innerHTML = '<div class="view-loading">Загрузка карты команд…</div>';
   const data = await api.companies.map(companyId);
+  const mode = query.mode === "dashboard" ? "dashboard" : "map";
   const teamNames = new Map((data.teams || []).map((team) => [team.id, team.name]));
-  root.querySelector("#agentic-content").innerHTML = `
-    <div class="collab-kpis">
-      <div><b>${data.stats?.active_projects || 0}</b><span>активных проектов</span></div>
-      <div><b>${data.stats?.participating_teams || 0}</b><span>команд в проектах</span></div>
-      <div><b>${data.stats?.collaboration_links || 0}</b><span>рабочих связей</span></div>
-    </div>
-    <section class="collab-map">
-      <div class="collab-company">${escapeHtml(data.company.name)}</div>
-      <div class="collab-projects">
-        ${(data.projects || []).map((project) => `
-          <a class="collab-project" href="/app/projects/${project.id}">
-            <div class="project-code">${escapeHtml(project.code)}</div>
-            <h3>${escapeHtml(project.name)}</h3>
-            <div class="collab-progress"><i style="width:${project.progress || 0}%"></i></div>
-            <small>${project.progress || 0}% · ${project.done || 0}/${project.tasks || 0} задач</small>
-            <div class="collab-team-chips">${project.teams.map((team) => `<span class="${team.role === "lead" ? "lead" : ""}">${escapeHtml(team.name)}</span>`).join("")}</div>
-          </a>`).join("") || '<div class="project-empty">Активных межкомандных проектов пока нет.</div>'}
+
+  const toggle = `
+    <div class="tmap-toolbar">
+      <div class="seg-toggle" role="tablist">
+        <a role="tab" class="${mode === "map" ? "active" : ""}" href="/app/companies/${companyId}/map?mode=map">
+          <svg viewBox="0 0 24 24" width="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M9 6h6M6 9v6a3 3 0 0 0 3 3h6"/></svg>
+          Карта связей
+        </a>
+        <a role="tab" class="${mode === "dashboard" ? "active" : ""}" href="/app/companies/${companyId}/map?mode=dashboard">
+          <svg viewBox="0 0 24 24" width="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18M7 14l3-4 4 3 5-7"/></svg>
+          Дашборды
+        </a>
       </div>
+      <div class="tmap-company"><span class="dot live"></span>${escapeHtml(data.company?.name || "Компания")}</div>
+    </div>`;
+
+  content.innerHTML = toggle + (mode === "map" ? mapHtml(data, teamNames) : dashboardHtml(data, teamNames));
+  if (mode === "map") bindMapInteractions(content);
+}
+
+function kpi(value, label, accent) {
+  return `<div class="tmap-kpi"${accent ? ` style="--kc:${accent}"` : ""}><b>${escapeHtml(String(value))}</b><span>${escapeHtml(label)}</span></div>`;
+}
+
+function mapHtml(data, teamNames) {
+  const teams = data.teams || [];
+  const edges = data.edges || [];
+  const W = 820, H = 560, cx = W / 2, cy = H / 2;
+  const R = Math.min(220, 150 + teams.length * 8);
+  const statusColor = { green: "#3FB660", yellow: "#D9A441", red: "#E5484D" };
+  const pos = new Map();
+  teams.forEach((team, i) => {
+    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(1, teams.length);
+    pos.set(team.id, { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle), team });
+  });
+  const maxPoints = Math.max(1, ...edges.map((e) => e.collaboration_points || 0));
+  const maxOpen = Math.max(1, ...teams.map((t) => t.open_tasks || 0));
+
+  // collaboration edges (curved, weighted)
+  const edgeSvg = edges
+    .filter((e) => pos.has(e.source_team_id) && pos.has(e.target_team_id))
+    .sort((a, b) => (a.collaboration_points || 0) - (b.collaboration_points || 0))
+    .map((e) => {
+      const a = pos.get(e.source_team_id), b = pos.get(e.target_team_id);
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const curve = 0.16, ox = (my - cy) * curve, oy = (cx - mx) * curve;
+      const w = 1.3 + 4.7 * ((e.collaboration_points || 0) / maxPoints);
+      const strong = (e.collaboration_points || 0) >= maxPoints * 0.6;
+      return `<path class="tmap-edge" data-a="${e.source_team_id}" data-b="${e.target_team_id}"
+        d="M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${(mx + ox).toFixed(1)} ${(my + oy).toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}"
+        stroke="${strong ? "var(--accent-2)" : "#5b5b66"}" stroke-width="${w.toFixed(1)}" stroke-opacity="${strong ? 0.55 : 0.32}" fill="none" stroke-linecap="round">
+        <title>${escapeHtml(teamNames.get(e.source_team_id) || "")} ↔ ${escapeHtml(teamNames.get(e.target_team_id) || "")}: ${e.collaboration_points || 0} баллов, ${e.projects || 0} проектов</title></path>`;
+    }).join("");
+
+  // spokes from company hub to each team
+  const spokeSvg = teams.map((t) => {
+    const p = pos.get(t.id);
+    return `<line class="tmap-spoke" x1="${cx}" y1="${cy}" x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 5"/>`;
+  }).join("");
+
+  // team nodes
+  const nodeSvg = teams.map((t) => {
+    const p = pos.get(t.id);
+    const r = 22 + 14 * ((t.open_tasks || 0) / maxOpen);
+    const col = statusColor[t.status] || "#3FB660";
+    const initials = (t.name || "").trim().split(/\s+/).slice(0, 2).map((w) => (w[0] || "").toUpperCase()).join("");
+    return `<g class="tmap-node" data-id="${t.id}" data-href="/app/teams/${t.id}/board" transform="translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})" tabindex="0" role="button">
+      <circle class="tmap-halo" r="${r + 9}" fill="${col}" opacity="0.0"/>
+      <circle r="${r}" fill="var(--surface)" stroke="${col}" stroke-width="3"/>
+      <circle r="${r}" fill="${col}" opacity="0.10"/>
+      <text class="tmap-init" text-anchor="middle" dy="6" font-size="${r > 28 ? 18 : 15}" font-weight="800" fill="var(--text)">${escapeHtml(initials || "?")}</text>
+      ${t.overdue ? `<g transform="translate(${(r * 0.7).toFixed(0)} ${(-r * 0.7).toFixed(0)})"><circle r="9" fill="#E5484D"/><text text-anchor="middle" dy="3.5" font-size="10" font-weight="700" fill="#fff">${t.overdue}</text></g>` : ""}
+      <text class="tmap-label" text-anchor="middle" y="${r + 17}" font-size="12.5" font-weight="600" fill="var(--text-dim)">${escapeHtml((t.name || "").length > 16 ? t.name.slice(0, 15) + "…" : t.name)}</text>
+      <text class="tmap-sub" text-anchor="middle" y="${r + 32}" font-size="10.5" fill="var(--text-faint)">${t.open_tasks || 0} задач · ${t.risks || 0} рисков</text>
+    </g>`;
+  }).join("");
+
+  const hub = `<g class="tmap-hub" transform="translate(${cx} ${cy})">
+    <circle r="40" fill="var(--accent-soft)" stroke="var(--accent-line)" stroke-width="1.5"/>
+    <circle r="30" fill="var(--accent)"/>
+    <text text-anchor="middle" dy="5" font-size="13" font-weight="800" fill="#fff">${escapeHtml(((data.company?.name || "Co").slice(0, 8)))}</text></g>`;
+
+  const emptyOverlay = teams.length === 0
+    ? '<div class="tmap-empty">Команд пока нет. Добавьте команды, чтобы увидеть карту взаимодействий.</div>' : "";
+
+  return `
+    <div class="tmap-kpis">
+      ${kpi(teams.length, "команд", "#4493F8")}
+      ${kpi(data.stats?.active_projects || 0, "активных проектов", "#a78bfa")}
+      ${kpi(data.stats?.collaboration_links || 0, "рабочих связей", "#2dd4bf")}
+      ${kpi(teams.reduce((s, t) => s + (t.open_tasks || 0), 0), "открытых задач", "#D9A441")}
+    </div>
+    <section class="tmap-canvas-card">
+      <div class="tmap-legend">
+        <span><i class="lg-dot" style="background:#3FB660"></i>в норме</span>
+        <span><i class="lg-dot" style="background:#D9A441"></i>есть риски</span>
+        <span><i class="lg-dot" style="background:#E5484D"></i>просрочки</span>
+        <span class="lg-sep"></span>
+        <span><i class="lg-line"></i>толщина = интенсивность совместной работы</span>
+      </div>
+      <div class="tmap-canvas">
+        ${emptyOverlay}
+        <svg viewBox="0 0 ${W} ${H}" class="tmap-svg" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+          <g class="tmap-edges">${spokeSvg}${edgeSvg}</g>
+          ${hub}
+          <g class="tmap-nodes">${nodeSvg}</g>
+        </svg>
+      </div>
+      <div class="tmap-hint">Нажмите на команду, чтобы открыть её доску · наведите — чтобы подсветить связи</div>
     </section>
-    <div class="grid g2 mt-20">
-      <section class="card card-pad">
-        <div class="card-head"><div class="card-title">Команды</div><span class="card-sub">нагрузка и риски</span></div>
-        <div class="collab-team-list">${(data.teams || []).map((team) => `<a href="/app/teams/${team.id}/board" class="collab-team-row ${team.status}"><span class="status-dot"></span><b>${escapeHtml(team.name)}</b><small>${team.open_tasks} открыто · ${team.risks} рисков</small></a>`).join("")}</div>
+    ${data.projects && data.projects.length ? `
+    <div class="sh-row"><h3>Совместные проекты</h3><span class="card-sub">${data.projects.length} активных</span></div>
+    <div class="collab-projects">
+      ${data.projects.map(projectCard).join("")}
+    </div>` : ""}`;
+}
+
+function projectCard(project) {
+  const blocked = project.blocked || 0;
+  return `<a class="collab-project" href="/app/projects/${project.id}">
+    <div class="flex between center"><div class="project-code">${escapeHtml(project.code)}</div>${blocked ? `<span class="pill warn" style="padding:2px 8px"><span class="dot"></span>${blocked} блок</span>` : ""}</div>
+    <h3>${escapeHtml(project.name)}</h3>
+    <div class="collab-progress"><i style="width:${project.progress || 0}%"></i></div>
+    <small>${project.progress || 0}% · ${project.done || 0}/${project.tasks || 0} задач</small>
+    <div class="collab-team-chips">${(project.teams || []).map((team) => `<span class="${team.role === "lead" ? "lead" : ""}">${escapeHtml(team.name)}</span>`).join("")}</div>
+  </a>`;
+}
+
+function dashboardHtml(data, teamNames) {
+  const teams = data.teams || [];
+  const edges = (data.edges || []).slice().sort((a, b) => (b.collaboration_points || 0) - (a.collaboration_points || 0));
+  const projects = data.projects || [];
+  const totalOpen = teams.reduce((s, t) => s + (t.open_tasks || 0), 0);
+  const totalOverdue = teams.reduce((s, t) => s + (t.overdue || 0), 0);
+  const totalRisks = teams.reduce((s, t) => s + (t.risks || 0), 0);
+  const avgProgress = projects.length ? Math.round(projects.reduce((s, p) => s + (p.progress || 0), 0) / projects.length) : 0;
+  const maxOpen = Math.max(1, ...teams.map((t) => t.open_tasks || 0));
+  const healthCounts = { green: 0, yellow: 0, red: 0 };
+  teams.forEach((t) => { healthCounts[t.status] = (healthCounts[t.status] || 0) + 1; });
+  const total = teams.length || 1;
+  const donut = (() => {
+    const segs = [["green", "#3FB660"], ["yellow", "#D9A441"], ["red", "#E5484D"]];
+    let acc = 0; const C = 2 * Math.PI * 52;
+    const arcs = segs.map(([k, col]) => {
+      const frac = (healthCounts[k] || 0) / total;
+      const dash = `${(frac * C).toFixed(1)} ${(C - frac * C).toFixed(1)}`;
+      const off = -acc * C; acc += frac;
+      return `<circle cx="70" cy="70" r="52" fill="none" stroke="${col}" stroke-width="16" stroke-dasharray="${dash}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 70 70)"/>`;
+    }).join("");
+    return `<svg viewBox="0 0 140 140" width="140" height="140">${arcs}<text x="70" y="66" text-anchor="middle" font-size="26" font-weight="800" fill="var(--text)">${teams.length}</text><text x="70" y="86" text-anchor="middle" font-size="11" fill="var(--text-faint)">команд</text></svg>`;
+  })();
+
+  return `
+    <div class="tmap-kpis tmap-kpis-6">
+      ${kpi(projects.length, "активных проектов", "#a78bfa")}
+      ${kpi(data.stats?.participating_teams || 0, "команд в проектах", "#4493F8")}
+      ${kpi(data.stats?.collaboration_links || 0, "рабочих связей", "#2dd4bf")}
+      ${kpi(totalOpen, "открытых задач", "#D9A441")}
+      ${kpi(totalOverdue, "просрочено", totalOverdue ? "#E5484D" : "#3FB660")}
+      ${kpi(avgProgress + "%", "средний прогресс", "#3FB660")}
+    </div>
+
+    <div class="dash-grid">
+      <section class="card card-pad dash-span-2">
+        <div class="card-head"><div class="card-title">Нагрузка команд</div><span class="card-sub">открытые задачи и просрочки</span></div>
+        <div class="dash-bars">
+          ${teams.length ? teams.slice().sort((a, b) => (b.open_tasks || 0) - (a.open_tasks || 0)).map((t) => `
+            <a class="dash-bar-row" href="/app/teams/${t.id}/board">
+              <span class="dbr-name">${escapeHtml(t.name)}</span>
+              <span class="dbr-track"><i class="status-${t.status}" style="width:${Math.max(3, Math.round(((t.open_tasks || 0) / maxOpen) * 100))}%"></i></span>
+              <span class="dbr-val mono">${t.open_tasks || 0}${t.overdue ? ` <em>+${t.overdue}!</em>` : ""}</span>
+            </a>`).join("") : '<div class="empty-inline">Команд пока нет.</div>'}
+        </div>
       </section>
+
       <section class="card card-pad">
-        <div class="card-head"><div class="card-title">Связи между командами</div><span class="card-sub">по совместной работе</span></div>
-        <div class="collab-edge-list">${(data.edges || []).sort((a, b) => b.collaboration_points - a.collaboration_points).map((edge) => `<div class="collab-edge"><div><b>${escapeHtml(teamNames.get(edge.source_team_id) || "Команда")}</b><span>↔</span><b>${escapeHtml(teamNames.get(edge.target_team_id) || "Команда")}</b></div><small>${edge.projects} проектов · ${edge.completed_tasks} событий · ${edge.collaboration_points} баллов</small></div>`).join("") || '<div class="empty-inline">Совместных связей пока нет.</div>'}</div>
+        <div class="card-head"><div class="card-title">Здоровье</div></div>
+        <div class="dash-donut">
+          ${donut}
+          <div class="dash-donut-legend">
+            <span><i style="background:#3FB660"></i>в норме <b>${healthCounts.green || 0}</b></span>
+            <span><i style="background:#D9A441"></i>риски <b>${healthCounts.yellow || 0}</b></span>
+            <span><i style="background:#E5484D"></i>просрочки <b>${healthCounts.red || 0}</b></span>
+            <span class="dash-risk-tot"><b class="mono">${totalRisks}</b> рисков всего</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="sh-row"><h3>Совместные проекты</h3><span class="card-sub">${projects.length} активных</span></div>
+    <div class="collab-projects">
+      ${projects.map(projectCard).join("") || '<div class="project-empty">Активных межкомандных проектов пока нет.</div>'}
+    </div>
+
+    <div class="dash-grid mt-20">
+      <section class="card card-pad dash-span-2">
+        <div class="card-head"><div class="card-title">Топ связей между командами</div><span class="card-sub">по интенсивности совместной работы</span></div>
+        <div class="collab-edge-list">
+          ${edges.length ? edges.slice(0, 8).map((edge) => {
+            const max = Math.max(1, ...edges.map((e) => e.collaboration_points || 0));
+            const pct = Math.round(((edge.collaboration_points || 0) / max) * 100);
+            return `<div class="collab-edge">
+              <div class="flex between center"><div><b>${escapeHtml(teamNames.get(edge.source_team_id) || "Команда")}</b><span class="edge-arrow">↔</span><b>${escapeHtml(teamNames.get(edge.target_team_id) || "Команда")}</b></div><span class="mono dim">${edge.collaboration_points || 0}</span></div>
+              <div class="edge-track"><i style="width:${pct}%"></i></div>
+              <small>${edge.projects || 0} проектов · ${edge.completed_tasks || 0} событий</small>
+            </div>`;
+          }).join("") : '<div class="empty-inline">Совместных связей пока нет.</div>'}
+        </div>
+      </section>
+
+      <section class="card card-pad">
+        <div class="card-head"><div class="card-title">Команды</div><span class="card-sub">статус</span></div>
+        <div class="collab-team-list">${teams.map((team) => `<a href="/app/teams/${team.id}/board" class="collab-team-row ${team.status}"><span class="status-dot"></span><b>${escapeHtml(team.name)}</b><small>${team.open_tasks || 0} открыто · ${team.risks || 0} рисков</small></a>`).join("") || '<div class="empty-inline">Команд нет.</div>'}</div>
       </section>
     </div>`;
+}
+
+function bindMapInteractions(content) {
+  const svg = content.querySelector(".tmap-svg");
+  if (!svg) return;
+  const nodes = svg.querySelectorAll(".tmap-node");
+  const edges = svg.querySelectorAll(".tmap-edge");
+  nodes.forEach((node) => {
+    const id = node.getAttribute("data-id");
+    const open = () => { const href = node.getAttribute("data-href"); if (href) Router.navigate(href); };
+    node.addEventListener("click", open);
+    node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    node.addEventListener("mouseenter", () => {
+      svg.classList.add("hovering");
+      edges.forEach((edge) => {
+        const on = edge.getAttribute("data-a") === id || edge.getAttribute("data-b") === id;
+        edge.classList.toggle("edge-on", on);
+        edge.classList.toggle("edge-off", !on);
+      });
+      nodes.forEach((other) => {
+        if (other === node) return;
+        const linked = [...edges].some((edge) => {
+          const a = edge.getAttribute("data-a"), b = edge.getAttribute("data-b");
+          return (a === id && b === other.getAttribute("data-id")) || (b === id && a === other.getAttribute("data-id"));
+        });
+        other.classList.toggle("node-dim", !linked);
+      });
+    });
+    node.addEventListener("mouseleave", () => {
+      svg.classList.remove("hovering");
+      edges.forEach((edge) => edge.classList.remove("edge-on", "edge-off"));
+      nodes.forEach((other) => other.classList.remove("node-dim"));
+    });
+  });
 }
 
 export async function recommendationsView(root, params) {

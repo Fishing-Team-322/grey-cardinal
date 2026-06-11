@@ -1,5 +1,5 @@
 import { api, ApiError } from "../api.js";
-import { gcPet, PET_TYPES } from "../pet-avatars.js?v=20260611-1";
+import { gcPet, gcPetScene, PET_TYPES } from "../pet-avatars.js?v=20260612-1";
 import { currentTeam, errorMessage, escapeHtml, setTopbar, toast } from "../view-utils.js";
 
 const num = (value) => Number(value || 0).toLocaleString("ru-RU");
@@ -176,7 +176,7 @@ export default async function petView(root, params) {
             </div>
             <span class="lvl-badge">LVL <span class="mono">${pet.level}</span></span>
           </div>
-          <div class="pet-stage"><div class="pet-aura"></div><div class="pet-ground"></div><div class="pet-float" id="heroPet">${gcPet(pet.species, 270)}</div></div>
+          <div class="pet-stage bg-${escapeHtml(appearance.background || "studio")}" id="petStage"><div class="pet-aura aura-${escapeHtml(appearance.aura || "calm_aura")}"></div><div class="pet-ground"></div><div class="pet-float" id="heroPet">${gcPetScene(pet.species, 270, appearance)}</div></div>
           <div class="pc-foot">
             <span class="mood-chip mood-focus"><svg viewBox="0 0 24 24" width="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8 15h8"/></svg> Настроение: ${escapeHtml(pet.mood_label || "—")}</span>
             <span class="pill acc" id="auraChip"><span class="dot live"></span>${pet.emoji || "🐾"} ${escapeHtml(pet.phrase || "")}</span>
@@ -338,7 +338,7 @@ export default async function petView(root, params) {
         const res = await api.teamPet.equip(teamId, b.getAttribute("data-equip"));
         invData = res.inventory;
         if (res.pet?.appearance) updateHeroAppearance(res.pet);
-        toast("Предмет надет", "ok");
+        toast("Предмет надет — питомец обновлён", "ok");
         renderInv(curCat);
       } catch (error) {
         b.removeAttribute("disabled");
@@ -348,6 +348,16 @@ export default async function petView(root, params) {
   }
 
   function updateHeroAppearance(petPayload) {
+    const appearance = petPayload.appearance || {};
+    const species = petPayload.pet?.species;
+    const heroPet = host.querySelector("#heroPet");
+    if (heroPet && species) heroPet.innerHTML = gcPetScene(species, 270, appearance);
+    const stage = host.querySelector("#petStage");
+    if (stage) {
+      stage.className = `pet-stage bg-${appearance.background || "studio"}`;
+      const auraEl = stage.querySelector(".pet-aura");
+      if (auraEl) auraEl.className = `pet-aura aura-${appearance.aura || "calm_aura"}`;
+    }
     const aura = (invData.items || []).find((it) => it.category === "aura" && it.status === "equipped");
     if (aura) host.querySelector("#auraChip").innerHTML = `<span class="dot live"></span>Аура: ${escapeHtml(aura.name)}`;
   }

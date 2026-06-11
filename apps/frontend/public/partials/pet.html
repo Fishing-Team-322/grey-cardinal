@@ -43,6 +43,24 @@
   @keyframes flame{0%,100%{transform:scaleY(1)}50%{transform:scaleY(1.28)}}
   .pet-page .pet-ground{ position:absolute; bottom:18px; width:160px; height:14px; border-radius:50%;
     background:radial-gradient(circle, rgba(139,92,246,0.4), transparent 70%); filter:blur(3px); }
+  /* equipped accessory animations (overlay svg) */
+  .pet-page .pet-scene{ display:inline-block; }
+  .pet-page .acc-bob{ animation:accBob 5s ease-in-out infinite; transform-origin:center; }
+  @keyframes accBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}
+  .pet-page .acc-spark > *{ animation:accSpark 2.4s ease-in-out infinite; transform-origin:center; }
+  @keyframes accSpark{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1.12)}}
+  .pet-page .acc-spin{ animation:accSpin 9s linear infinite; }
+  @keyframes accSpin{to{transform:rotate(360deg)}}
+  .pet-page .acc-orbit{ animation:accOrbit 5.5s linear infinite; }
+  @keyframes accOrbit{to{transform:rotate(360deg)}}
+  /* equipped backgrounds for the hero stage */
+  .pet-page .pet-stage.bg-night_city{ background:radial-gradient(120% 90% at 50% 12%, rgba(99,102,241,0.22), transparent 60%), linear-gradient(180deg, #141826, transparent); border-radius:var(--r-lg); }
+  .pet-page .pet-stage.bg-focus_space{ background:radial-gradient(120% 90% at 50% 18%, rgba(56,189,248,0.20), transparent 58%), radial-gradient(60% 50% at 80% 80%, rgba(167,139,250,0.18), transparent 60%); border-radius:var(--r-lg); }
+  .pet-page .pet-stage.bg-aurora_bg{ background:linear-gradient(160deg, rgba(45,212,191,0.16), rgba(167,139,250,0.16) 55%, rgba(56,189,248,0.14)); border-radius:var(--r-lg); }
+  /* equipped aura tints */
+  .pet-page .pet-aura.aura-focus_flow{ background:radial-gradient(circle, rgba(56,189,248,0.32), transparent 62%); }
+  .pet-page .pet-aura.aura-warm_support{ background:radial-gradient(circle, rgba(245,158,11,0.30), transparent 62%); }
+  .pet-page .pet-aura.aura-rainbow_aura{ background:conic-gradient(from 0deg, rgba(251,113,133,0.30), rgba(245,182,66,0.30), rgba(45,212,191,0.30), rgba(56,189,248,0.30), rgba(167,139,250,0.30), rgba(251,113,133,0.30)); filter:blur(6px); }
   .pet-page .pet-name{ font-size:30px; font-weight:800; letter-spacing:-0.04em; }
   .pet-page .pet-species{ color:var(--pv2); font-weight:600; font-size:14px; margin-top:2px; }
   .pet-page .lvl-badge{ display:inline-flex; align-items:center; gap:8px; padding:7px 13px; border-radius:999px;

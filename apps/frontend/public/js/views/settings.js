@@ -38,7 +38,21 @@ export default async function settingsView(root) {
         </label>
         <button class="btn btn-primary" type="submit">Сохранить поведение бота</button>
         <div class="alert alert-error" id="bot-behavior-error" hidden></div>
-      </form>` : ""}
+      </form>
+      <div class="card card-pad col gap-12" id="emotion-card">
+        <div class="card-head"><div><div class="card-title">Эмоциональный анализ команды</div><div class="meta">${escapeHtml(botSettings.team_name)}</div></div>
+          <span class="pill ${botSettings.emotion_analysis ? "ok" : "idle"}" id="emotion-pill"><span class="dot"></span>${botSettings.emotion_analysis ? "включён" : "выключен"}</span></div>
+        <p class="meta" style="line-height:1.5">Оценивает <b>настроение и тонус команды</b> по сообщениям в чате — это питает командного питомца и радар выгорания. Анализируются только агрегаты (без чтения личного), строго по согласию команды.</p>
+        <label class="integration-row" style="cursor:pointer">
+          <span class="col gap-4"><b>Включить анализ настроения</b><span class="meta">Тон и активность чата → wellbeing-сигналы и питомец</span></span>
+          <span class="gc-switch ${botSettings.emotion_analysis ? "on" : ""}" id="emotion-toggle" role="switch" tabindex="0" aria-checked="${botSettings.emotion_analysis ? "true" : "false"}"></span>
+        </label>
+        <div class="note" style="font-size:12px;display:flex;gap:8px;align-items:flex-start">
+          <svg viewBox="0 0 24 24" width="15" fill="none" stroke="currentColor" stroke-width="1.8" style="flex:none;margin-top:1px;color:#a78bfa"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span>Это инструмент заботы о команде, а не слежки. Можно выключить в любой момент — сбор данных прекратится.</span>
+        </div>
+        <div class="alert alert-error" id="emotion-error" hidden></div>
+      </div>` : ""}
       <form class="card card-pad col gap-16" id="password-form"><div class="card-head"><div class="card-title">Безопасность</div></div><label>Текущий пароль<input class="input mt-6" type="password" name="old_password" required></label><label>Новый пароль<input class="input mt-6" type="password" name="new_password" minlength="6" required></label><button class="btn btn-primary" type="submit">Сменить пароль</button><div class="alert alert-error" id="password-error" hidden></div><button class="btn btn-ghost" type="button" id="logout">Выйти</button></form>
     </div>
   </div>`;
@@ -72,6 +86,38 @@ export default async function settingsView(root) {
         element.hidden = false;
       }
     });
+  }
+  if (botSettings) {
+    const toggle = root.querySelector("#emotion-toggle");
+    const pill = root.querySelector("#emotion-pill");
+    const errEl = root.querySelector("#emotion-error");
+    let saving = false;
+    const apply = async () => {
+      if (saving) return;
+      saving = true;
+      errEl.hidden = true;
+      const next = !toggle.classList.contains("on");
+      toggle.classList.toggle("on", next);
+      toggle.setAttribute("aria-checked", String(next));
+      try {
+        const res = await api.teams.saveBotSettings(managerTeam.id, { emotion_analysis: next });
+        const on = res.emotion_analysis !== false && next;
+        toggle.classList.toggle("on", on);
+        toggle.setAttribute("aria-checked", String(on));
+        pill.className = `pill ${on ? "ok" : "idle"}`;
+        pill.innerHTML = `<span class="dot"></span>${on ? "включён" : "выключен"}`;
+        toast(on ? "Эмоциональный анализ включён" : "Эмоциональный анализ выключен");
+      } catch (error) {
+        toggle.classList.toggle("on", !next);
+        toggle.setAttribute("aria-checked", String(!next));
+        errEl.textContent = errorMessage(error);
+        errEl.hidden = false;
+      } finally {
+        saving = false;
+      }
+    };
+    toggle.addEventListener("click", apply);
+    toggle.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); apply(); } });
   }
   bindForm(root, "#password-form", async (data, form) => {
     try {
