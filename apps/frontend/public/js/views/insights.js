@@ -75,7 +75,7 @@ export default async function insightsView(root, params, query = {}) {
     pulse: () => renderPulse(content, teamId),
     burnout: () => renderBurnout(content, teamId),
     standup: () => renderStandup(content, teamId),
-    planner: () => renderPlanner(content, teamId),
+    planner: () => renderPlanner(content, team),
     copilot: () => renderCopilot(content, teamId),
   };
 
@@ -257,42 +257,83 @@ async function renderStandup(content, teamId) {
     </div>`;
 }
 
-async function renderPlanner(content, teamId) {
+const PLAN_TEMPLATES = [
+  ["Личный кабинет", "Запустить личный кабинет пользователя: регистрация, профиль, история заказов и уведомления."],
+  ["Оплата", "Интеграция онлайн-оплаты с эквайрингом, чеками и обработкой возвратов."],
+  ["Мобильное приложение", "Мобильное приложение под iOS и Android с авторизацией и push-уведомлениями."],
+  ["Редизайн", "Редизайн главного экрана и ключевых сценариев с обновлением дизайн-системы."],
+];
+
+const PLAN_FACTORS = [
+  ["board", "История задач", "фактический темп команды"],
+  ["insights", "Навыки", "найденные в прошлой работе"],
+  ["pet", "Нагрузка и фон", "стресс и настроение людей"],
+  ["trophy", "Бюджет и срок", "диапазон затрат и P90"],
+];
+
+const PLAN_PRESETS = [2, 4, 6, 8, 12];
+
+async function renderPlanner(content, team) {
+  const teamId = team?.id;
   content.innerHTML = `
-    <section class="section-intro">
-      <div><div class="eyebrow muted">Сценарное планирование</div><h2>Проверить проект до старта</h2><p>Опишите результат, а система сравнит текущий состав, найм и более длинный горизонт.</p></div>
+    <section class="planner-hero">
+      <div class="eyebrow">Сценарное планирование</div>
+      <h2>Проверьте проект до старта</h2>
+      <p>Опишите результат — система сравнит текущий состав, найм и более длинный горизонт по данным вашей команды.</p>
+      <div class="planner-steps">
+        <span><b>1</b> Описание</span>
+        <span><b>2</b> Горизонт</span>
+        <span><b>3</b> Сценарии</span>
+      </div>
     </section>
-    <div class="planner-layout">
-      <form class="card card-pad planner-form" id="plan-form">
-        <label>
-          <span>Что нужно сделать</span>
-          <textarea id="plan-desc" rows="7" placeholder="Например: запустить личный кабинет, интеграцию оплаты и мобильное приложение"></textarea>
-        </label>
-        <label>
-          <span>Горизонт планирования</span>
+    <div class="planner-grid">
+      <form class="card planner-card" id="plan-form">
+        <div class="planner-field">
+          <label for="plan-desc">Что нужно сделать</label>
+          <textarea id="plan-desc" rows="6" placeholder="Например: запустить личный кабинет, интеграцию оплаты и мобильное приложение"></textarea>
+          <div class="planner-templates">
+            <span>Шаблоны:</span>
+            ${PLAN_TEMPLATES.map(([label, text]) => `<button type="button" data-template="${escapeHtml(text)}">${escapeHtml(label)}</button>`).join("")}
+          </div>
+        </div>
+        <div class="planner-field">
+          <label>Горизонт планирования</label>
+          <div class="planner-presets">
+            ${PLAN_PRESETS.map((value) => `<button type="button" data-weeks="${value}" class="${value === 6 ? "active" : ""}">${value} нед.</button>`).join("")}
+          </div>
           <div class="planner-horizon">
             <input id="plan-weeks" type="range" min="1" max="26" value="6">
             <output id="plan-weeks-value">6 недель</output>
           </div>
-        </label>
+        </div>
         <button class="btn btn-primary btn-lg" type="submit">Рассчитать сценарии</button>
       </form>
-      <aside class="planner-help">
-        <div class="eyebrow muted">Что попадёт в расчёт</div>
-        <ul>
-          <li>история задач и фактический темп;</li>
-          <li>навыки, найденные в прошлой работе;</li>
-          <li>нагрузка и эмоциональный фон;</li>
-          <li>диапазон бюджета и срок P90.</li>
+      <aside class="planner-aside">
+        <div class="planner-aside-head">Что попадёт в расчёт</div>
+        <ul class="planner-factors">
+          ${PLAN_FACTORS.map(([icon, title, sub]) => `<li><span class="pf-ic">${window.gcIcon(icon)}</span><div><b>${escapeHtml(title)}</b><small>${escapeHtml(sub)}</small></div></li>`).join("")}
         </ul>
+        ${team?.name ? `<div class="planner-team">Расчёт по команде <b>${escapeHtml(team.name)}</b></div>` : ""}
       </aside>
     </div>
     <div id="plan-result" class="mt-20"></div>`;
 
   const form = content.querySelector("#plan-form");
+  const desc = form.querySelector("#plan-desc");
   const weeks = form.querySelector("#plan-weeks");
   const weeksValue = form.querySelector("#plan-weeks-value");
-  weeks.oninput = () => { weeksValue.textContent = weeksLabel(Number(weeks.value)); };
+  const presets = form.querySelectorAll("[data-weeks]");
+  const syncWeeks = () => {
+    weeksValue.textContent = weeksLabel(Number(weeks.value));
+    presets.forEach((button) => button.classList.toggle("active", Number(button.dataset.weeks) === Number(weeks.value)));
+  };
+  weeks.oninput = syncWeeks;
+  presets.forEach((button) => {
+    button.onclick = () => { weeks.value = button.dataset.weeks; syncWeeks(); };
+  });
+  form.querySelectorAll("[data-template]").forEach((button) => {
+    button.onclick = () => { desc.value = button.dataset.template; desc.focus(); };
+  });
   form.onsubmit = async (event) => {
     event.preventDefault();
     const description = form.querySelector("#plan-desc").value.trim();
@@ -302,10 +343,10 @@ async function renderPlanner(content, teamId) {
       output.innerHTML = errorState("Добавьте короткое описание проекта.");
       return;
     }
-    form.querySelector("button").disabled = true;
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
     output.innerHTML = '<div class="view-loading compact">Сравниваю сценарии...</div>';
     try {
-      const team = (window.gcCurrentUser?.teams || []).find((item) => String(item.id) === String(teamId));
       const companyId = team?.company_id || window.gcCurrentUser?.companies?.[0]?.id;
       if (!companyId) throw new Error("Не удалось определить компанию команды");
       const plan = await api.projects.preview(companyId, {
@@ -318,7 +359,7 @@ async function renderPlanner(content, teamId) {
     } catch (error) {
       output.innerHTML = errorState(errorMessage(error));
     } finally {
-      form.querySelector("button").disabled = false;
+      submit.disabled = false;
     }
   };
 }
