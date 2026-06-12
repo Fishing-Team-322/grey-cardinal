@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.application.task_numbering import next_task_public_id
+from brain_api.application.task_status_service import TaskStatusUpdateResult
 from brain_api.application.use_cases.project_simulation import (
     MemberCapacity,
     WorkItem,
@@ -22,7 +23,7 @@ from brain_api.application.use_cases.project_simulation import (
 from brain_api.config import Settings
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.security.encryption import SecretCipher
-from brain_api.integrations.yougile import YouGileClient
+from brain_api.integrations.yougile import YouGileClient, YouGileNotFound
 
 PROJECT_DRAFT_TTL = timedelta(days=7)
 PROJECT_COLUMNS = (
@@ -504,6 +505,143 @@ async def sync_project_to_yougile(
         project.sync_error = error
         await session.commit()
         return {"ok": False, "status": "error", "error": error}
+
+
+async def move_project_task_status(
+    session: AsyncSession,
+    *,
+    task: m.TaskModel,
+    status_value: str,
+    settings: Settings,
+    actor_id: UUID | None = None,
+    client: YouGileClient | None = None,
+) -> TaskStatusUpdateResult:
+    """Apply a status change to a cross-team project task and mirror it onto the
+    project's own YouGile board (not the team board, where the card does not
+    live). Self-heals stale links: if YouGile no longer has the linked card
+    (404), the card is recreated on the project board instead of failing."""
+    now = datetime.now(UTC)
+    task.status = status_value
+    task.last_status_update_at = now
+    if status_value == "done":
+        task.completed_at = now
+    session.add(
+        m.AuditLogModel(
+            id=uuid4(),
+            actor_type="user" if actor_id else "system",
+            actor_id=str(actor_id) if actor_id else None,
+            action="grey_board_status_changed",
+            entity_type="task",
+            entity_id=task.id,
+            payload={
+                "public_id": task.public_id,
+                "status": status_value,
+                "scope": "company_project",
+            },
+        )
+    )
+
+    def _result(sync_status: str, sync_error: str | None) -> TaskStatusUpdateResult:
+        return TaskStatusUpdateResult(
+            task_id=task.id,
+            public_id=task.public_id,
+            status=task.status,
+            sync_status=sync_status,
+            sync_error=sync_error,
+        )
+
+    proj_link = await session.scalar(
+        select(m.ProjectExternalLinkModel).where(
+            m.ProjectExternalLinkModel.project_id == task.company_project_id,
+            m.ProjectExternalLinkModel.provider == "yougile",
+        )
+    )
+    if proj_link is None or not proj_link.external_board_id:
+        await session.commit()
+        return _result("local_only", "Проект не синхронизирован с YouGile")
+
+    columns = dict((proj_link.payload or {}).get("columns") or {})
+    target_column = columns.get(status_value) or columns.get("todo")
+    if not target_column:
+        await session.commit()
+        return _result("error", f"no_mapped_column:{status_value}")
+
+    if client is None:
+        team = await session.get(m.TeamModel, proj_link.source_team_id)
+        if team is None or not team.board_credentials_encrypted:
+            await session.commit()
+            return _result("local_only", "YouGile не подключён у ведущей команды")
+        cipher = SecretCipher(settings.board_creds_encryption_key or "dev-key")
+        raw = cipher.decrypt_text(team.board_credentials_encrypted) or "{}"
+        api_key = json.loads(raw).get("api_key", "")
+        client = YouGileClient(
+            api_key,
+            base_url=settings.yougile_api_base_url,
+            rate_per_minute=settings.yougile_rate_limit_per_minute,
+        )
+
+    project = await session.get(m.CompanyProjectModel, task.company_project_id)
+    external_link = await session.scalar(
+        select(m.ExternalTaskLinkModel).where(
+            m.ExternalTaskLinkModel.task_id == task.id,
+            m.ExternalTaskLinkModel.provider == "yougile",
+        )
+    )
+
+    async def _create_card() -> dict[str, Any]:
+        return await client.create_task(
+            f"{task.public_id} {task.title}".strip(),
+            target_column,
+            description=_yougile_task_description(session, task, project),
+            deadline=_yougile_deadline(task.deadline),
+        )
+
+    try:
+        has_card = bool(
+            external_link is not None
+            and external_link.external_task_id
+            and not external_link.external_task_id.startswith("pending:")
+        )
+        if has_card:
+            fields: dict[str, Any] = {"columnId": target_column}
+            if status_value == "done":
+                fields["completed"] = True
+            try:
+                data = await client.update_task(
+                    external_link.external_task_id, **fields
+                )
+            except YouGileNotFound:
+                # The linked card was deleted in YouGile — recreate it.
+                data = await _create_card()
+            external_id = str(data.get("id") or external_link.external_task_id)
+        else:
+            data = await _create_card()
+            external_id = str(data["id"])
+
+        if external_link is None:
+            external_link = m.ExternalTaskLinkModel(
+                id=uuid4(),
+                team_id=task.team_id,
+                task_id=task.id,
+                provider="yougile",
+            )
+            session.add(external_link)
+        external_link.external_task_id = external_id
+        external_link.external_board_id = proj_link.external_board_id
+        external_link.external_column_id = target_column
+        external_link.sync_status = "synced"
+        external_link.last_error = None
+        external_link.last_synced_at = datetime.now(UTC)
+        external_link.raw_payload = {**(external_link.raw_payload or {}), **data}
+        await session.commit()
+        return _result("synced", None)
+    except Exception as exc:  # noqa: BLE001
+        error = _safe_sync_error(exc)
+        if external_link is not None:
+            external_link.sync_status = "error"
+            external_link.last_error = error
+        await session.commit()
+        return _result("error", error)
 
 
 async def add_collaboration_event(

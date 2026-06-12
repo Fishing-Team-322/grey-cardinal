@@ -24,6 +24,7 @@ from brain_api.application.semantic_parser import SemanticMessageInput
 from brain_api.application.task_numbering import next_task_public_id
 from brain_api.application.task_status_service import TaskStatusService
 from brain_api.application.use_cases.cross_team_projects import (
+    move_project_task_status,
     record_cross_team_task_completion,
 )
 from brain_api.application.use_cases.team_gamification import grant_team_xp
@@ -287,12 +288,23 @@ async def move_task(
     if task is None or task.team_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
     await _task_access(task, current_user, session)
-    result = await TaskStatusService(container.board_mirror).update_status(
-        task_id,
-        body.status,
-        actor_id=current_user.id,
-        action="grey_board_status_changed",
-    )
+    if task.company_project_id is not None:
+        # Project tasks mirror onto the project's own YouGile board, not the
+        # team board that TaskStatusService targets.
+        result = await move_project_task_status(
+            session,
+            task=task,
+            status_value=body.status.value,
+            settings=container.settings,
+            actor_id=current_user.id,
+        )
+    else:
+        result = await TaskStatusService(container.board_mirror).update_status(
+            task_id,
+            body.status,
+            actor_id=current_user.id,
+            action="grey_board_status_changed",
+        )
     if body.status == TaskStatus.done and task.company_project_id:
         await session.refresh(task)
         if await record_cross_team_task_completion(

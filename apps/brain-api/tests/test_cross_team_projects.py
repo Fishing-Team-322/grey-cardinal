@@ -9,9 +9,11 @@ from brain_api.application.project_context import resolve_project_context
 from brain_api.application.use_cases.cross_team_projects import (
     build_project_draft,
     create_project_from_draft,
+    move_project_task_status,
     project_payload,
 )
 from brain_api.infrastructure.db import models as m
+from brain_api.integrations.yougile import YouGileNotFound
 
 
 async def _seed_company(session):
@@ -232,3 +234,160 @@ async def test_project_context_requires_explicit_choice_when_chat_has_many_proje
         )
         assert bound.project_id == projects[0].id
         assert bound.reason == "chat_binding"
+
+
+class _FakeProjectYouGile:
+    """Minimal YouGile client double for project-board task moves."""
+
+    def __init__(self, valid_ids=()):
+        self.valid = set(valid_ids)
+        self.updates = []
+        self.creates = []
+        self._n = 0
+
+    async def update_task(self, task_id, **fields):
+        self.updates.append((task_id, fields))
+        if task_id not in self.valid:
+            raise YouGileNotFound("PUT", f"/tasks/{task_id}", 404, '{"message":"not found"}')
+        return {"id": task_id, **fields}
+
+    async def create_task(self, title, column_id, **kwargs):
+        self._n += 1
+        new_id = f"new-card-{self._n}"
+        self.valid.add(new_id)
+        self.creates.append({"title": title, "column_id": column_id, **kwargs})
+        return {"id": new_id}
+
+
+async def _seed_project_with_task(session, company, team, owner, *, with_card, link_board=True):
+    project = m.CompanyProjectModel(
+        id=uuid4(),
+        company_id=company.id,
+        code="PRJ-T",
+        name="Test project",
+        status="active",
+        owner_id=owner.id,
+        created_by=owner.id,
+        source="manual",
+    )
+    session.add(project)
+    await session.flush()
+    task = m.TaskModel(
+        id=uuid4(),
+        seq=1,
+        public_id="GC-1",
+        team_id=team.id,
+        company_project_id=project.id,
+        title="Дизайн и вёрстка",
+        status="todo",
+        priority="medium",
+        source="manual",
+    )
+    session.add(task)
+    if link_board:
+        session.add(
+            m.ProjectExternalLinkModel(
+                id=uuid4(),
+                project_id=project.id,
+                provider="yougile",
+                source_team_id=team.id,
+                external_project_id="proj-ext",
+                external_board_id="board-ext",
+                sync_status="synced",
+                payload={
+                    "columns": {
+                        "todo": "col-todo",
+                        "in_progress": "col-prog",
+                        "review": "col-rev",
+                        "done": "col-done",
+                    }
+                },
+            )
+        )
+    if with_card:
+        session.add(
+            m.ExternalTaskLinkModel(
+                id=uuid4(),
+                team_id=team.id,
+                task_id=task.id,
+                provider="yougile",
+                external_board_id="board-ext",
+                external_column_id="col-todo",
+                external_task_id="card-1",
+                sync_status="synced",
+            )
+        )
+    await session.commit()
+    return project, task
+
+
+async def test_project_task_move_syncs_to_project_board(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        _, task = await _seed_project_with_task(session, company, backend, director, with_card=True)
+        fake = _FakeProjectYouGile(valid_ids={"card-1"})
+        result = await move_project_task_status(
+            session,
+            task=task,
+            status_value="done",
+            settings=None,
+            actor_id=director.id,
+            client=fake,
+        )
+
+    assert result.sync_status == "synced"
+    assert result.status == "done"
+    assert fake.updates == [("card-1", {"columnId": "col-done", "completed": True})]
+    assert fake.creates == []
+    async with session_factory() as session:
+        stored = await session.get(m.TaskModel, task.id)
+        link = await session.scalar(
+            select(m.ExternalTaskLinkModel).where(m.ExternalTaskLinkModel.task_id == task.id)
+        )
+    assert stored.status == "done" and stored.completed_at is not None
+    assert link.external_column_id == "col-done" and link.sync_status == "synced"
+
+
+async def test_project_task_move_recreates_stale_card_on_404(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        _, task = await _seed_project_with_task(session, company, backend, director, with_card=True)
+        fake = _FakeProjectYouGile(valid_ids=set())  # card-1 no longer exists -> 404
+        result = await move_project_task_status(
+            session,
+            task=task,
+            status_value="in_progress",
+            settings=None,
+            actor_id=director.id,
+            client=fake,
+        )
+
+    assert result.sync_status == "synced"
+    assert fake.updates[0][0] == "card-1"  # attempted the stale card first
+    assert len(fake.creates) == 1
+    assert fake.creates[0]["column_id"] == "col-prog"
+    async with session_factory() as session:
+        link = await session.scalar(
+            select(m.ExternalTaskLinkModel).where(m.ExternalTaskLinkModel.task_id == task.id)
+        )
+    assert link.external_task_id.startswith("new-card-")
+    assert link.sync_status == "synced"
+    assert link.last_error is None
+
+
+async def test_project_task_move_local_only_without_project_link(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        _, task = await _seed_project_with_task(
+            session, company, backend, director, with_card=False, link_board=False
+        )
+        fake = _FakeProjectYouGile()
+        result = await move_project_task_status(
+            session, task=task, status_value="done", settings=None, client=fake
+        )
+
+    assert result.sync_status == "local_only"
+    assert fake.updates == [] and fake.creates == []
+    async with session_factory() as session:
+        stored = await session.get(m.TaskModel, task.id)
+    assert stored.status == "done"
