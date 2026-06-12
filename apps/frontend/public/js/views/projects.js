@@ -40,6 +40,8 @@ function injectStyles() {
   .project-empty{padding:36px;text-align:center;border:1px dashed #303038;border-radius:15px;color:#92929b}
   .project-task-dialog{width:min(560px,calc(100vw - 24px));border:1px solid #303038;border-radius:16px;background:#151519;color:inherit;padding:0}.project-task-dialog::backdrop{background:rgba(0,0,0,.72)}
   .project-task-form{display:flex;flex-direction:column;gap:12px;padding:20px}.project-task-form label{display:flex;flex-direction:column;gap:6px;color:#92929b;font-size:13px}.project-task-form input,.project-task-form select{padding:10px;border:1px solid #2b2b33;border-radius:9px;background:#1d1d22;color:inherit}
+  .project-task[draggable]{cursor:grab}.project-task[draggable]:active{cursor:grabbing}.project-task.dragging{opacity:.45}
+  .project-column.drop-target{outline:2px dashed #c2152e;outline-offset:-3px;background:#171019}
   @media(max-width:900px){.project-layout{grid-template-columns:1fr}.project-kpis{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:620px){.project-board{grid-template-columns:1fr}}
   `;
@@ -148,6 +150,55 @@ export async function projectDetailView(root, params) {
   actions.querySelector("#add-project-task")?.addEventListener("click", () => {
     openProjectTaskDialog(root, project, () => projectDetailView(root, params));
   });
+  bindProjectBoardDnd(content, () => projectDetailView(root, params));
+}
+
+function bindProjectBoardDnd(content, reload) {
+  const board = content.querySelector(".project-board");
+  if (!board) return;
+  board.querySelectorAll(".project-task[data-task-id]").forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      card.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.taskId);
+    });
+    card.addEventListener("dragend", () => card.classList.remove("dragging"));
+  });
+  board.querySelectorAll(".project-column[data-status]").forEach((column) => {
+    column.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      column.classList.add("drop-target");
+    });
+    column.addEventListener("dragleave", (event) => {
+      if (!column.contains(event.relatedTarget)) column.classList.remove("drop-target");
+    });
+    column.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      column.classList.remove("drop-target");
+      const taskId = event.dataTransfer.getData("text/plain");
+      const target = column.dataset.status;
+      const card = board.querySelector(`.project-task[data-task-id="${taskId}"]`);
+      if (!card || card.dataset.status === target) return;
+      card.dataset.status = target;
+      column.appendChild(card);
+      try {
+        const result = await api.tasks.move(taskId, target);
+        const sync = result.sync_status;
+        toast(
+          sync === "error" || sync === "conflict"
+            ? "Статус сохранён, YouGile вернул ошибку"
+            : sync === "local_only"
+              ? "Статус сохранён, YouGile не подключён"
+              : "Готово, синхронизировано с YouGile",
+          sync === "error" || sync === "conflict" ? "warn" : "ok",
+        );
+      } catch (error) {
+        toast(error.message || "Не удалось перенести задачу", "warn");
+      }
+      await reload();
+    });
+  });
 }
 
 function projectCard(project) {
@@ -163,11 +214,11 @@ function projectCard(project) {
 function projectColumn(status, tasks) {
   const titles = { todo: "К выполнению", in_progress: "В работе", review: "Проверка", done: "Готово" };
   const items = tasks.filter((task) => task.status === status);
-  return `<section class="project-column"><header><b>${titles[status]}</b><span>${items.length}</span></header>${items.map(taskCard).join("") || '<div class="dim">Нет задач</div>'}</section>`;
+  return `<section class="project-column" data-status="${escapeHtml(status)}"><header><b>${titles[status]}</b><span>${items.length}</span></header>${items.map(taskCard).join("") || '<div class="dim">Нет задач</div>'}</section>`;
 }
 
 function taskCard(task) {
-  return `<article class="project-task"><span class="project-code">${escapeHtml(task.public_id)}</span><b>${escapeHtml(task.title)}</b><small>${task.deadline ? escapeHtml(formatDate(task.deadline)) : "Без срока"}</small><div class="project-task-teams">${(task.teams || []).map((team) => `<span>${escapeHtml(team.name)}</span>`).join("")}</div></article>`;
+  return `<article class="project-task" draggable="true" data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}"><span class="project-code">${escapeHtml(task.public_id)}</span><b>${escapeHtml(task.title)}</b><small>${task.deadline ? escapeHtml(formatDate(task.deadline)) : "Без срока"}</small><div class="project-task-teams">${(task.teams || []).map((team) => `<span>${escapeHtml(team.name)}</span>`).join("")}</div></article>`;
 }
 
 function personCard(person) {
