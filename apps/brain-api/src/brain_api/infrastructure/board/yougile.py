@@ -76,7 +76,7 @@ class YouGileBoardAdapter:
 
     # ── BoardGateway protocol ────────────────────────────────────────────────
     async def create_card(self, task: Task) -> BoardCardResult:
-        column_id = self._cols.get("todo")
+        column_id = self._cols.get("todo") or self._cols.get("backlog")
         if not column_id:
             return await self._degraded(task, "no default 'todo' column configured")
         assigned = await self._resolve_assignee(task.assignee_id)
@@ -114,7 +114,10 @@ class YouGileBoardAdapter:
     async def move_card(self, external_card_id: str, status: TaskStatus) -> None:
         if not external_card_id:
             return
-        target = self._cols.get(_STATUS_KEY.get(status, ""))
+        status_key = _STATUS_KEY.get(status, "")
+        target = self._cols.get(status_key)
+        if status_key == "todo" and not target:
+            target = self._cols.get("backlog")
         if not target:
             logger.info("YouGile: no column for status %s — skip move", status.value)
             return

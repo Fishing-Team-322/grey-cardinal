@@ -1176,7 +1176,7 @@ class YouGileMappingModel(Base):
     __tablename__ = "yougile_mappings"
     __table_args__ = (
         CheckConstraint(
-            "entity_type in ('project','board','column','task','user')",
+            "entity_type in ('project','board','column','task','user','chat_message')",
             name="ck_yougile_mapping_entity",
         ),
         UniqueConstraint("team_id", "entity_type", "yougile_id", name="uq_yougile_mapping"),

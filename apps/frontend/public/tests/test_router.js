@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Router } from "../js/router.js";
 
 function browser(path = "/") {
@@ -19,6 +21,13 @@ test("register stores and matches parameterized route", () => {
   Router.register("/app/teams/:id", "/partials/manager.html", async () => {});
   assert.equal(Router.routes.length, 1);
   assert.deepEqual(Router._matchRoute("/app/teams/abc").params, { id: "abc" });
+});
+
+test("shell and views import the same router module instance", () => {
+  const shellPath = fileURLToPath(new URL("../js/shell.js", import.meta.url));
+  const shell = readFileSync(shellPath, "utf8");
+  assert.match(shell, /from ["']\.\/router\.js["']/);
+  assert.doesNotMatch(shell, /router\.js\?/);
 });
 
 test("navigate changes history without reload", async () => {

@@ -157,6 +157,120 @@ async def test_board_mirror_updates_existing_task_without_duplicate(session_fact
 
 
 @pytest.mark.asyncio
+async def test_board_mirror_uses_backlog_when_todo_column_is_absent(session_factory):
+    key = "test-board-key"
+    settings = Settings(
+        llm_provider="disabled",
+        board_creds_encryption_key=key,
+        yougile_api_base_url="https://example.invalid",
+    )
+    fake = FakeYouGile()
+    async with session_factory() as session:
+        owner = m.UserModel(id=uuid4(), display_name="Owner")
+        company = m.CompanyModel(
+            id=uuid4(), name="Acme", timezone="Europe/Moscow", created_by=owner.id
+        )
+        team = m.TeamModel(
+            id=uuid4(),
+            company_id=company.id,
+            name="Team",
+            timezone="Europe/Moscow",
+            board_provider="yougile",
+            board_credentials_encrypted=SecretCipher(key).encrypt_text(
+                json.dumps({"api_key": "fake"})
+            ),
+        )
+        board = m.YouGileBoardModel(
+            id=uuid4(),
+            team_id=team.id,
+            external_id="board-1",
+            name="Board",
+            is_selected=True,
+        )
+        backlog = m.YouGileColumnModel(
+            id=uuid4(),
+            board_id=board.id,
+            external_id="backlog-1",
+            name="Backlog",
+            mapped_status="backlog",
+        )
+        task = m.TaskModel(
+            id=uuid4(),
+            seq=5,
+            public_id="GC-5",
+            team_id=team.id,
+            title="Backlog fallback",
+            status="todo",
+            priority="medium",
+            source="manual",
+        )
+        session.add_all([owner, company, team, board, backlog, task])
+        await session.commit()
+        task_id = task.id
+
+    mirror = BoardMirrorService(session_factory, settings, client_factory=lambda _: fake)
+    result = await mirror.create_external_task(task_id)
+
+    assert result.ok is True
+    assert fake.created["task"][0]["columnId"] == "backlog-1"
+
+
+@pytest.mark.asyncio
+async def test_board_mirror_imports_backlog_as_todo(session_factory):
+    key = "test-board-key"
+    settings = Settings(
+        llm_provider="disabled",
+        board_creds_encryption_key=key,
+        yougile_api_base_url="https://example.invalid",
+    )
+    fake = FakeYouGile(
+        tasks={"backlog-1": [{"id": "external-backlog", "title": "Backlog task"}]}
+    )
+    async with session_factory() as session:
+        owner = m.UserModel(id=uuid4(), display_name="Owner")
+        company = m.CompanyModel(
+            id=uuid4(), name="Acme", timezone="Europe/Moscow", created_by=owner.id
+        )
+        team = m.TeamModel(
+            id=uuid4(),
+            company_id=company.id,
+            name="Team",
+            timezone="Europe/Moscow",
+            board_provider="yougile",
+            board_credentials_encrypted=SecretCipher(key).encrypt_text(
+                json.dumps({"api_key": "fake"})
+            ),
+        )
+        board = m.YouGileBoardModel(
+            id=uuid4(),
+            team_id=team.id,
+            external_id="board-1",
+            name="Board",
+            is_selected=True,
+        )
+        backlog = m.YouGileColumnModel(
+            id=uuid4(),
+            board_id=board.id,
+            external_id="backlog-1",
+            name="Backlog",
+            mapped_status="backlog",
+        )
+        session.add_all([owner, company, team, board, backlog])
+        await session.commit()
+        team_id = team.id
+
+    mirror = BoardMirrorService(session_factory, settings, client_factory=lambda _: fake)
+    summary = await mirror.import_selected_board(team_id)
+
+    assert summary.imported_tasks == 1
+    async with session_factory() as session:
+        task = await session.scalar(
+            select(m.TaskModel).where(m.TaskModel.title == "Backlog task")
+        )
+        assert task.status == "todo"
+
+
+@pytest.mark.asyncio
 async def test_board_mirror_move_existing_link_without_selected_board_is_local_only(
     session_factory,
 ):

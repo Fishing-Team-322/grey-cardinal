@@ -91,18 +91,32 @@ async def receive_yougile_webhook(
             m.ExternalTaskLinkModel.external_task_id == yougile_id,
         )
     )
+    task = await session.get(m.TaskModel, link.task_id) if link is not None else None
     if link is not None and link.team_id != team_id:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "external task is already linked to another team",
+        project_link = await _project_link_for_webhook(
+            session,
+            webhook_team_id=team_id,
+            task=task,
+            task_link=link,
+        )
+        if project_link is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "external task is already linked to another team",
+            )
+        config["default_board_id"] = project_link.external_board_id
+        config["default_column_ids"] = dict(
+            (project_link.payload or {}).get("columns") or {}
         )
     mapping = await repo.find_by_yougile("task", yougile_id)
     local_id = link.task_id if link is not None else mapping.local_id if mapping else None
-    task = await session.get(m.TaskModel, local_id) if local_id else None
+    if task is None and local_id:
+        task = await session.get(m.TaskModel, local_id)
     created = task is None
     if task is None:
         task = await _create_local_task(session, team_id, config, task_data)
 
+    task_team_id = task.team_id or team_id
     was_done = task.status == "done"
     _apply_task_payload(task, config, task_data, event_name)
     if "assigned" in task_data:
@@ -111,7 +125,7 @@ async def receive_yougile_webhook(
         await grant_team_xp(
             session,
             user_id=task.assignee_id,
-            team_id=team_id,
+            team_id=task_team_id,
             task_id=task.id,
             kind="task_completed",
             points=TASK_COMPLETED_XP,
@@ -136,7 +150,7 @@ async def receive_yougile_webhook(
                 await grant_team_xp(
                     session,
                     user_id=user_id,
-                    team_id=team_id,
+                    team_id=task_team_id,
                     task_id=task.id,
                     kind="cross_team_task_completed",
                     points=15,
@@ -145,7 +159,7 @@ async def receive_yougile_webhook(
                 )
     link = await _upsert_external_link(
         session,
-        team_id=team_id,
+        team_id=task_team_id,
         task=task,
         link=link,
         config=config,
@@ -170,7 +184,11 @@ async def receive_yougile_webhook(
             event=ws_name,
             payload={
                 "team_id": str(team_id),
+                "owner_team_id": str(task_team_id),
                 "task_id": str(task.id),
+                "project_id": str(task.company_project_id)
+                if task.company_project_id
+                else None,
                 "yougile_id": yougile_id,
                 "status": task.status,
                 "source": "yougile",
@@ -178,6 +196,33 @@ async def receive_yougile_webhook(
         )
     )
     return {"accepted": True, "task_id": str(task.id)}
+
+
+async def _project_link_for_webhook(
+    session: AsyncSession,
+    *,
+    webhook_team_id: UUID,
+    task: m.TaskModel | None,
+    task_link: m.ExternalTaskLinkModel,
+) -> m.ProjectExternalLinkModel | None:
+    if task is None or task.company_project_id is None:
+        return None
+    project_link = await session.scalar(
+        select(m.ProjectExternalLinkModel).where(
+            m.ProjectExternalLinkModel.project_id == task.company_project_id,
+            m.ProjectExternalLinkModel.provider == "yougile",
+            m.ProjectExternalLinkModel.source_team_id == webhook_team_id,
+        )
+    )
+    if project_link is None:
+        return None
+    if (
+        project_link.external_board_id
+        and task_link.external_board_id
+        and project_link.external_board_id != task_link.external_board_id
+    ):
+        return None
+    return project_link
 
 
 def _task_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -261,7 +306,9 @@ def _apply_task_payload(
     event_name: str,
 ) -> None:
     if data.get("title"):
-        task.title = str(data["title"])
+        title = str(data["title"])
+        prefix = f"{task.public_id} "
+        task.title = title[len(prefix) :] if title.startswith(prefix) else title
     if "description" in data:
         task.description = data.get("description")
     if event_name == "task-deleted" or data.get("deleted"):
@@ -281,7 +328,12 @@ def _status_for(config: dict[str, Any], data: dict[str, Any], current: str) -> s
     by_column = {str(value): key for key, value in columns.items()}
     if data.get("completed"):
         return "done"
-    return by_column.get(column_id, current)
+    mapped = by_column.get(column_id)
+    if mapped == "backlog":
+        return "todo"
+    if mapped in {"todo", "in_progress", "blocked", "review", "done", "cancelled"}:
+        return mapped
+    return current
 
 
 async def _local_assignee(

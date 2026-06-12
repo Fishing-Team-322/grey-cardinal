@@ -40,6 +40,7 @@ async def connected_team(session_factory):
                 "webhook_secret": "hook-secret",
                 "default_column_ids": {
                     "todo": "col-todo",
+                    "backlog": "col-backlog",
                     "in_progress": "col-progress",
                     "done": "col-done",
                 },
@@ -169,6 +170,37 @@ def test_task_created_and_moved_are_mirrored(
     asyncio.run(_assert_db())
 
 
+def test_task_created_in_backlog_is_normalized_to_todo(
+    webhook_client,
+    connected_team,
+    session_factory,
+):
+    client, _ = webhook_client
+    response = client.post(
+        _url(connected_team, "task-created"),
+        json={
+            "id": "remote-backlog",
+            "title": "Backlog task",
+            "columnId": "col-backlog",
+        },
+    )
+    assert response.status_code == 202, response.text
+
+    async def _assert_db():
+        async with session_factory() as session:
+            link = await session.scalar(
+                select(m.ExternalTaskLinkModel).where(
+                    m.ExternalTaskLinkModel.external_task_id == "remote-backlog"
+                )
+            )
+            task = await session.get(m.TaskModel, link.task_id)
+            assert task.status == "todo"
+
+    import asyncio
+
+    asyncio.run(_assert_db())
+
+
 def test_existing_external_link_prevents_delayed_webhook_duplicate(
     webhook_client,
     connected_team,
@@ -228,6 +260,111 @@ def test_existing_external_link_prevents_delayed_webhook_duplicate(
             assert len(tasks) == 1
             assert tasks[0].title == "Updated once"
             assert tasks[0].status == "in_progress"
+
+    asyncio.run(_assert_db())
+
+
+def test_project_task_webhook_uses_lead_team_board_mapping(
+    webhook_client,
+    connected_team,
+    session_factory,
+):
+    client, _ = webhook_client
+
+    async def _seed_project_card():
+        async with session_factory() as session:
+            company = await session.scalar(select(m.CompanyModel))
+            user = await session.scalar(select(m.UserModel))
+            owner_team = m.TeamModel(
+                id=uuid4(),
+                company_id=company.id,
+                name="Owner team",
+                timezone="Europe/Moscow",
+            )
+            project = m.CompanyProjectModel(
+                id=uuid4(),
+                company_id=company.id,
+                code="PRJ-WH",
+                name="Webhook project",
+                status="active",
+                owner_id=user.id,
+                created_by=user.id,
+                source="manual",
+            )
+            session.add_all([owner_team, project])
+            await session.flush()
+            task = m.TaskModel(
+                id=uuid4(),
+                seq=1,
+                public_id="GC-1",
+                team_id=owner_team.id,
+                company_project_id=project.id,
+                title="Project task",
+                status="todo",
+                priority="medium",
+                source="manual",
+            )
+            session.add_all(
+                [
+                    task,
+                    m.ProjectExternalLinkModel(
+                        id=uuid4(),
+                        project_id=project.id,
+                        provider="yougile",
+                        source_team_id=connected_team,
+                        external_board_id="project-board",
+                        sync_status="synced",
+                        payload={
+                            "columns": {
+                                "todo": "project-todo",
+                                "in_progress": "project-progress",
+                                "done": "project-done",
+                            }
+                        },
+                    ),
+                    m.ExternalTaskLinkModel(
+                        id=uuid4(),
+                        team_id=owner_team.id,
+                        task_id=task.id,
+                        provider="yougile",
+                        external_board_id="project-board",
+                        external_column_id="project-todo",
+                        external_task_id="project-card",
+                        sync_status="synced",
+                    ),
+                ]
+            )
+            await session.commit()
+            return task.id, owner_team.id
+
+    import asyncio
+
+    task_id, owner_team_id = asyncio.run(_seed_project_card())
+    response = client.post(
+        _url(connected_team, "task-moved"),
+        json={
+            "id": "project-card",
+            "title": "GC-1 Project task",
+            "columnId": "project-progress",
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["task_id"] == str(task_id)
+
+    async def _assert_db():
+        async with session_factory() as session:
+            task = await session.get(m.TaskModel, task_id)
+            assert task.status == "in_progress"
+            assert task.title == "Project task"
+            tasks = list(await session.scalars(select(m.TaskModel)))
+            assert len(tasks) == 1
+            link = await session.scalar(
+                select(m.ExternalTaskLinkModel).where(
+                    m.ExternalTaskLinkModel.external_task_id == "project-card"
+                )
+            )
+            assert link.team_id == owner_team_id
+            assert link.external_column_id == "project-progress"
 
     asyncio.run(_assert_db())
 

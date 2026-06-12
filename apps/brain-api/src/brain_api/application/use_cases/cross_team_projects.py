@@ -23,7 +23,12 @@ from brain_api.application.use_cases.project_simulation import (
 from brain_api.config import Settings
 from brain_api.infrastructure.db import models as m
 from brain_api.infrastructure.security.encryption import SecretCipher
-from brain_api.integrations.yougile import YouGileClient, YouGileNotFound
+from brain_api.integrations.yougile import (
+    YouGileClient,
+    YouGileError,
+    YouGileMappingRepo,
+    YouGileNotFound,
+)
 
 PROJECT_DRAFT_TTL = timedelta(days=7)
 PROJECT_COLUMNS = (
@@ -650,12 +655,14 @@ async def reconcile_project_from_yougile(
     project: m.CompanyProjectModel,
     settings: Settings,
     client: YouGileClient | None = None,
+    import_comments: bool = True,
 ) -> dict[str, Any]:
     """Pull current state from the project's YouGile board into Grey Cardinal.
 
     Each linked task's status follows the YouGile column it sits in (or 'done'
-    when the card is marked completed, 'cancelled' when deleted). Outbound
-    (site -> YouGile) is unaffected; this only reflects YouGile changes back."""
+    when the card is marked completed, 'cancelled' when deleted), and new YouGile
+    chat messages are imported as task comments. Outbound (site -> YouGile) is
+    unaffected; this only reflects YouGile changes back."""
     proj_link = await session.scalar(
         select(m.ProjectExternalLinkModel).where(
             m.ProjectExternalLinkModel.project_id == project.id,
@@ -706,30 +713,97 @@ async def reconcile_project_from_yougile(
 
     now = datetime.now(UTC)
     updated = 0
+    imported = 0
+    comment_errors = 0
+    repo = YouGileMappingRepo(session, proj_link.source_team_id)
     for task, link in rows:
         card = card_by_id.get(link.external_task_id)
         if card is None:
             continue
+        # --- status follows the YouGile column ---
         if card.get("deleted"):
             new_status = "cancelled"
         elif card.get("completed"):
             new_status = "done"
         else:
             new_status = status_by_column.get(str(card.get("columnId")))
-        if not new_status or new_status == task.status:
-            continue
-        task.status = new_status
-        task.last_status_update_at = now
-        task.completed_at = now if new_status == "done" else None
-        link.external_column_id = str(card.get("columnId") or "") or link.external_column_id
-        link.sync_status = "synced"
-        link.last_error = None
-        link.last_synced_at = now
-        updated += 1
+        if new_status and new_status != task.status:
+            task.status = new_status
+            task.last_status_update_at = now
+            task.completed_at = now if new_status == "done" else None
+            link.external_column_id = str(card.get("columnId") or "") or link.external_column_id
+            link.sync_status = "synced"
+            link.last_error = None
+            link.last_synced_at = now
+            updated += 1
+        # --- inbound comments (best-effort; never break the status sync) ---
+        if import_comments:
+            try:
+                imported += await _import_yougile_comments(
+                    session, repo, task, link.external_task_id, client
+                )
+            except YouGileError:
+                comment_errors += 1
 
     proj_link.last_synced_at = now
     await session.commit()
-    return {"ok": True, "updated_statuses": updated}
+    return {
+        "ok": True,
+        "updated_statuses": updated,
+        "imported_comments": imported,
+        "comment_errors": comment_errors,
+    }
+
+
+async def _import_yougile_comments(
+    session: AsyncSession,
+    repo: YouGileMappingRepo,
+    task: m.TaskModel,
+    card_id: str,
+    client: YouGileClient,
+) -> int:
+    """Import new YouGile chat messages of a card as local task comments.
+
+    De-duplicated via a 'chat_message' mapping; our own outbound messages
+    (label 'Grey Cardinal') are skipped so they are not echoed back."""
+    messages = await client.list_chat_messages(card_id)
+    imported = 0
+    for msg in messages:
+        msg_id = str(msg.get("id") or "")
+        if not msg_id or (msg.get("label") or "") == "Grey Cardinal":
+            continue
+        text = (msg.get("text") or "").strip()
+        if not text:
+            text = re.sub(r"<[^>]+>", "", msg.get("textHtml") or "").strip()
+        if not text:
+            continue
+        if await repo.find_by_yougile("chat_message", msg_id) is not None:
+            continue
+        comment = m.TaskCommentModel(
+            id=uuid4(),
+            task_id=task.id,
+            author_id=None,
+            author_name=await _yougile_comment_author(session, repo, msg),
+            body=text[:4000],
+        )
+        session.add(comment)
+        await session.flush()
+        await repo.upsert("chat_message", msg_id, local_id=comment.id)
+        imported += 1
+    return imported
+
+
+async def _yougile_comment_author(
+    session: AsyncSession, repo: YouGileMappingRepo, msg: dict[str, Any]
+) -> str:
+    from_id = str(msg.get("fromUserId") or msg.get("userId") or "")
+    if from_id:
+        mapping = await repo.find_by_yougile("user", from_id)
+        if mapping is not None and mapping.local_id is not None:
+            user = await session.get(m.UserModel, mapping.local_id)
+            if user is not None:
+                return f"{user.display_name} · YouGile"
+    return "YouGile"
 
 
 async def add_collaboration_event(
@@ -1167,4 +1241,3 @@ def _as_utc(value: datetime) -> datetime:
 
 def _int_or_none(value: Any) -> int | None:
     return int(value) if value not in (None, "") else None
-

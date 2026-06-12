@@ -240,15 +240,21 @@ async def test_project_context_requires_explicit_choice_when_chat_has_many_proje
 class _FakeProjectYouGile:
     """Minimal YouGile client double for project-board task moves."""
 
-    def __init__(self, valid_ids=(), board_cards=()):
+    def __init__(self, valid_ids=(), board_cards=(), messages=None):
         self.valid = set(valid_ids)
         self.board_cards = list(board_cards)
+        self.messages = dict(messages or {})  # card_id -> [message, ...]
         self.updates = []
         self.creates = []
         self._n = 0
 
     async def list_tasks(self, board_id=None, cursor=None, *, column_id=None, assigned_to=None):
+        if column_id is not None:
+            return [c for c in self.board_cards if str(c.get("columnId")) == str(column_id)]
         return list(self.board_cards)
+
+    async def list_chat_messages(self, task_id):
+        return list(self.messages.get(task_id, []))
 
     async def update_task(self, task_id, **fields):
         self.updates.append((task_id, fields))
@@ -471,3 +477,41 @@ async def test_reconcile_not_synced_without_project_link(session_factory):
 
     assert result["ok"] is False
     assert result["reason"] == "not_synced"
+
+
+async def test_reconcile_imports_yougile_comments_once(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        project, task = await _seed_project_with_task(
+            session, company, backend, director, with_card=True
+        )
+        fake = _FakeProjectYouGile(
+            board_cards=[{"id": "card-1", "columnId": "col-todo"}],
+            messages={
+                "card-1": [
+                    {"id": "msg-1", "text": "Вопрос из YouGile", "fromUserId": "yg-user"},
+                    {"id": "msg-2", "text": "наш ответ", "label": "Grey Cardinal"},
+                    {"id": "msg-3", "text": "", "textHtml": "<p></p>"},
+                ]
+            },
+        )
+        first = await reconcile_project_from_yougile(
+            session, project=project, settings=None, client=fake
+        )
+        # idempotent: a second pull must not duplicate the imported comment
+        second = await reconcile_project_from_yougile(
+            session, project=project, settings=None, client=fake
+        )
+
+    assert first["imported_comments"] == 1  # our own + empty messages skipped
+    assert second["imported_comments"] == 0
+    async with session_factory() as session:
+        comments = list(
+            await session.scalars(
+                select(m.TaskCommentModel).where(m.TaskCommentModel.task_id == task.id)
+            )
+        )
+    assert len(comments) == 1
+    assert comments[0].body == "Вопрос из YouGile"
+    assert comments[0].author_name == "YouGile"
+    assert comments[0].author_id is None

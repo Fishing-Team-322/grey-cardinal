@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from brain_api.infrastructure.db import models as m
 
-EntityType = str  # 'project' | 'board' | 'column' | 'task' | 'user'
+EntityType = str  # project | board | column | task | user | chat_message
 
 
 class YouGileMappingRepo:

@@ -156,8 +156,14 @@ export async function projectDetailView(root, params, skipPull = false) {
     // Reflect YouGile-side changes (cards moved in YouGile) back onto the board.
     api.projects.pullYougile(project.id)
       .then((result) => {
-        if (result && result.updated_statuses > 0) {
-          toast(`Обновлено из YouGile: ${result.updated_statuses}`);
+        const statuses = Number(result?.updated_statuses || 0);
+        const comments = Number(result?.imported_comments || 0);
+        if (statuses > 0 || comments > 0) {
+          const changes = [
+            statuses > 0 ? `${statuses} статусов` : "",
+            comments > 0 ? `${comments} комментариев` : "",
+          ].filter(Boolean).join(", ");
+          toast(`Обновлено из YouGile: ${changes}`);
           projectDetailView(root, params, true);
         }
       })

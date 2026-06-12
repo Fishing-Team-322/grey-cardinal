@@ -118,9 +118,7 @@ class BoardMirrorService:
                 link.last_error = str(exc)
                 await session.commit()
                 return SyncResult(False, "local_only", link.external_task_id, str(exc))
-            target = context["status_columns"].get(task.status) or context[
-                "status_columns"
-            ].get("todo")
+            target = _status_column(context["status_columns"], task.status)
             if target is None:
                 return await self._mark_create_error(
                     session, task, context["board"], "no_mapped_todo_column"
@@ -219,7 +217,7 @@ class BoardMirrorService:
                 )
                 await session.commit()
                 return SyncResult(False, "local_only", link.external_task_id, str(exc))
-            target = context["status_columns"].get(status.value)
+            target = _status_column(context["status_columns"], status.value)
             if target is None:
                 return await self._mark_link_error(
                     session, task, link, f"no_mapped_column:{status.value}"
@@ -273,7 +271,7 @@ class BoardMirrorService:
                 link.last_error = str(exc)
                 await session.commit()
                 return SyncResult(False, "local_only", link.external_task_id, str(exc))
-            target = context["status_columns"].get(task.status)
+            target = _status_column(context["status_columns"], task.status)
             if target is None:
                 return await self._mark_link_error(
                     session, task, link, f"no_mapped_column:{task.status}"
@@ -443,7 +441,7 @@ class BoardMirrorService:
                 f"{external_id}: external task is already linked to another team"
             )
             return
-        status = column.mapped_status or "todo"
+        status = _local_task_status(column.mapped_status)
         title = _clean_external_title(str(payload.get("title") or "Без названия"))
         assignee_id = await self._local_assignee(session, team_id, payload.get("assigned") or [])
         deadline = _parse_deadline(payload.get("deadline"))
@@ -651,6 +649,25 @@ def _clean_external_title(title: str) -> str:
     if len(parts) == 2 and parts[0].upper().startswith("GC-"):
         return parts[1]
     return title
+
+
+def _status_column(
+    columns: dict[str, m.YouGileColumnModel], status: str
+) -> m.YouGileColumnModel | None:
+    target = columns.get(status)
+    if target is not None:
+        return target
+    if status == "todo":
+        return columns.get("backlog")
+    return None
+
+
+def _local_task_status(mapped_status: str | None) -> str:
+    if mapped_status == "backlog":
+        return "todo"
+    if mapped_status in {"todo", "in_progress", "blocked", "review", "done", "cancelled"}:
+        return mapped_status
+    return "todo"
 
 
 def _deadline(value: datetime | None) -> dict[str, Any] | None:

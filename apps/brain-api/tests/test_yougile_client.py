@@ -109,6 +109,20 @@ async def test_webhook_and_comment_payloads_match_openapi():
 
 
 @pytest.mark.asyncio
+async def test_list_chat_messages_uses_task_chat_endpoint():
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["path"] = req.url.path
+        return httpx.Response(200, json=_page([{"id": "message-1", "text": "Ready"}]))
+
+    messages = await _client(handler).list_chat_messages("task-1")
+
+    assert messages == [{"id": "message-1", "text": "Ready"}]
+    assert seen["path"] == "/api-v2/chats/task-1/messages"
+
+
+@pytest.mark.asyncio
 async def test_429_is_retried_after_retry_after_then_succeeds():
     calls = {"n": 0}
 

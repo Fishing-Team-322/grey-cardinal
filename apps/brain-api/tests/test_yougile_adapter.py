@@ -104,6 +104,23 @@ async def test_create_card_maps_assignee_deadline_and_task(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_create_card_uses_backlog_when_todo_is_absent(session_factory):
+    _, team_id = await _seed_team(session_factory)
+    client = FakeClient()
+    adapter = YouGileBoardAdapter(
+        session_factory,
+        team_id,
+        client,
+        {"backlog": "col-backlog", "in_progress": "col-progress", "done": "col-done"},
+    )
+
+    result = await adapter.create_card(_task(team_id))
+
+    assert result.external_card_id == "yg-task-1"
+    assert client.created[0]["columnId"] == "col-backlog"
+
+
+@pytest.mark.asyncio
 async def test_move_close_and_comment_use_verified_endpoints(session_factory):
     _, team_id = await _seed_team(session_factory)
     client = FakeClient()
