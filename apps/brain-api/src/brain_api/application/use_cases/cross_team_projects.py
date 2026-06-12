@@ -644,6 +644,94 @@ async def move_project_task_status(
         return _result("error", error)
 
 
+async def reconcile_project_from_yougile(
+    session: AsyncSession,
+    *,
+    project: m.CompanyProjectModel,
+    settings: Settings,
+    client: YouGileClient | None = None,
+) -> dict[str, Any]:
+    """Pull current state from the project's YouGile board into Grey Cardinal.
+
+    Each linked task's status follows the YouGile column it sits in (or 'done'
+    when the card is marked completed, 'cancelled' when deleted). Outbound
+    (site -> YouGile) is unaffected; this only reflects YouGile changes back."""
+    proj_link = await session.scalar(
+        select(m.ProjectExternalLinkModel).where(
+            m.ProjectExternalLinkModel.project_id == project.id,
+            m.ProjectExternalLinkModel.provider == "yougile",
+        )
+    )
+    if proj_link is None or not proj_link.external_board_id:
+        return {"ok": False, "reason": "not_synced", "updated_statuses": 0}
+
+    columns = dict((proj_link.payload or {}).get("columns") or {})
+    status_by_column = {str(col_id): status for status, col_id in columns.items()}
+
+    if client is None:
+        team = await session.get(m.TeamModel, proj_link.source_team_id)
+        if team is None or not team.board_credentials_encrypted:
+            return {"ok": False, "reason": "not_connected", "updated_statuses": 0}
+        cipher = SecretCipher(settings.board_creds_encryption_key or "dev-key")
+        raw = cipher.decrypt_text(team.board_credentials_encrypted) or "{}"
+        api_key = json.loads(raw).get("api_key", "")
+        client = YouGileClient(
+            api_key,
+            base_url=settings.yougile_api_base_url,
+            rate_per_minute=settings.yougile_rate_limit_per_minute,
+        )
+
+    # YouGile v2 lists tasks per column (GET /tasks rejects boardId). Query each
+    # project column and stamp the column we found the card in.
+    card_by_id: dict[str, dict[str, Any]] = {}
+    for col_id in {str(value) for value in columns.values() if value}:
+        for card in await client.list_tasks(column_id=col_id):
+            card_id = str(card.get("id") or "")
+            if not card_id:
+                continue
+            card.setdefault("columnId", col_id)
+            card_by_id[card_id] = card
+
+    rows = list(
+        await session.execute(
+            select(m.TaskModel, m.ExternalTaskLinkModel)
+            .join(
+                m.ExternalTaskLinkModel,
+                (m.ExternalTaskLinkModel.task_id == m.TaskModel.id)
+                & (m.ExternalTaskLinkModel.provider == "yougile"),
+            )
+            .where(m.TaskModel.company_project_id == project.id)
+        )
+    )
+
+    now = datetime.now(UTC)
+    updated = 0
+    for task, link in rows:
+        card = card_by_id.get(link.external_task_id)
+        if card is None:
+            continue
+        if card.get("deleted"):
+            new_status = "cancelled"
+        elif card.get("completed"):
+            new_status = "done"
+        else:
+            new_status = status_by_column.get(str(card.get("columnId")))
+        if not new_status or new_status == task.status:
+            continue
+        task.status = new_status
+        task.last_status_update_at = now
+        task.completed_at = now if new_status == "done" else None
+        link.external_column_id = str(card.get("columnId") or "") or link.external_column_id
+        link.sync_status = "synced"
+        link.last_error = None
+        link.last_synced_at = now
+        updated += 1
+
+    proj_link.last_synced_at = now
+    await session.commit()
+    return {"ok": True, "updated_statuses": updated}
+
+
 async def add_collaboration_event(
     session: AsyncSession,
     *,

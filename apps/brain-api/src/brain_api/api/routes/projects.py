@@ -19,6 +19,7 @@ from brain_api.application.use_cases.cross_team_projects import (
     build_project_draft,
     create_project_from_draft,
     project_payload,
+    reconcile_project_from_yougile,
     sync_project_to_yougile,
 )
 from brain_api.container import Container
@@ -337,6 +338,24 @@ async def sync_project(
         source_team_id=lead_team_id,
         settings=container.settings,
     )
+
+
+@router.post("/api/projects/{project_id}/yougile/pull")
+async def pull_project_from_yougile(
+    project_id: UUID,
+    current_user: CurrentUser,
+    container: Container = Depends(get_container),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Reflect YouGile-side changes (task moved between columns) back onto the
+    site. Any project member can trigger it; it only reads YouGile and updates
+    local task statuses."""
+    project = await _project_for_user(session, project_id, current_user.id)
+    result = await reconcile_project_from_yougile(
+        session, project=project, settings=container.settings
+    )
+    payload = await project_payload(session, project)
+    return {**result, "project": payload}
 
 
 @router.post("/api/projects/{project_id}/tasks", status_code=status.HTTP_201_CREATED)

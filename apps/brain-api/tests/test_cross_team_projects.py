@@ -11,6 +11,7 @@ from brain_api.application.use_cases.cross_team_projects import (
     create_project_from_draft,
     move_project_task_status,
     project_payload,
+    reconcile_project_from_yougile,
 )
 from brain_api.infrastructure.db import models as m
 from brain_api.integrations.yougile import YouGileNotFound
@@ -239,11 +240,15 @@ async def test_project_context_requires_explicit_choice_when_chat_has_many_proje
 class _FakeProjectYouGile:
     """Minimal YouGile client double for project-board task moves."""
 
-    def __init__(self, valid_ids=()):
+    def __init__(self, valid_ids=(), board_cards=()):
         self.valid = set(valid_ids)
+        self.board_cards = list(board_cards)
         self.updates = []
         self.creates = []
         self._n = 0
+
+    async def list_tasks(self, board_id=None, cursor=None, *, column_id=None, assigned_to=None):
+        return list(self.board_cards)
 
     async def update_task(self, task_id, **fields):
         self.updates.append((task_id, fields))
@@ -391,3 +396,78 @@ async def test_project_task_move_local_only_without_project_link(session_factory
     async with session_factory() as session:
         stored = await session.get(m.TaskModel, task.id)
     assert stored.status == "done"
+
+
+async def test_reconcile_pulls_status_from_yougile_column(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        project, task = await _seed_project_with_task(
+            session, company, backend, director, with_card=True
+        )
+        # In YouGile the card was moved to the "done" column.
+        fake = _FakeProjectYouGile(board_cards=[{"id": "card-1", "columnId": "col-done"}])
+        result = await reconcile_project_from_yougile(
+            session, project=project, settings=None, client=fake
+        )
+
+    assert result["ok"] is True
+    assert result["updated_statuses"] == 1
+    async with session_factory() as session:
+        stored = await session.get(m.TaskModel, task.id)
+        link = await session.scalar(
+            select(m.ExternalTaskLinkModel).where(m.ExternalTaskLinkModel.task_id == task.id)
+        )
+    assert stored.status == "done" and stored.completed_at is not None
+    assert link.external_column_id == "col-done"
+
+
+async def test_reconcile_handles_completed_flag(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        project, task = await _seed_project_with_task(
+            session, company, backend, director, with_card=True
+        )
+        fake = _FakeProjectYouGile(
+            board_cards=[{"id": "card-1", "columnId": "col-prog", "completed": True}]
+        )
+        result = await reconcile_project_from_yougile(
+            session, project=project, settings=None, client=fake
+        )
+
+    assert result["updated_statuses"] == 1
+    async with session_factory() as session:
+        stored = await session.get(m.TaskModel, task.id)
+    assert stored.status == "done"
+
+
+async def test_reconcile_no_change_when_in_sync(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        project, task = await _seed_project_with_task(
+            session, company, backend, director, with_card=True
+        )
+        # Card still sits in the column matching the local status (todo).
+        fake = _FakeProjectYouGile(board_cards=[{"id": "card-1", "columnId": "col-todo"}])
+        result = await reconcile_project_from_yougile(
+            session, project=project, settings=None, client=fake
+        )
+
+    assert result["updated_statuses"] == 0
+    async with session_factory() as session:
+        stored = await session.get(m.TaskModel, task.id)
+    assert stored.status == "todo"
+
+
+async def test_reconcile_not_synced_without_project_link(session_factory):
+    async with session_factory() as session:
+        director, _, _, company, backend, _ = await _seed_company(session)
+        project, _ = await _seed_project_with_task(
+            session, company, backend, director, with_card=False, link_board=False
+        )
+        fake = _FakeProjectYouGile(board_cards=[])
+        result = await reconcile_project_from_yougile(
+            session, project=project, settings=None, client=fake
+        )
+
+    assert result["ok"] is False
+    assert result["reason"] == "not_synced"

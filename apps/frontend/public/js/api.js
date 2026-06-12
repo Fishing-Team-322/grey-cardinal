@@ -287,6 +287,9 @@ export const api = {
     syncYougile(projectId) {
       return request("POST", `/api/projects/${projectId}/yougile/sync`);
     },
+    pullYougile(projectId) {
+      return request("POST", `/api/projects/${projectId}/yougile/pull`);
+    },
     createTask(projectId, body) {
       return request("POST", `/api/projects/${projectId}/tasks`, { body });
     },

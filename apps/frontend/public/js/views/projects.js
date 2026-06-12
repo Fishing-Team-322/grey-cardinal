@@ -93,7 +93,7 @@ export async function projectsView(root) {
   render();
 }
 
-export async function projectDetailView(root, params) {
+export async function projectDetailView(root, params, skipPull = false) {
   injectStyles();
   setTopbar("Проект");
   const content = root.querySelector("#project-content");
@@ -150,7 +150,19 @@ export async function projectDetailView(root, params) {
   actions.querySelector("#add-project-task")?.addEventListener("click", () => {
     openProjectTaskDialog(root, project, () => projectDetailView(root, params));
   });
-  bindProjectBoardDnd(content, () => projectDetailView(root, params));
+  bindProjectBoardDnd(content, () => projectDetailView(root, params, true));
+
+  if (!skipPull) {
+    // Reflect YouGile-side changes (cards moved in YouGile) back onto the board.
+    api.projects.pullYougile(project.id)
+      .then((result) => {
+        if (result && result.updated_statuses > 0) {
+          toast(`Обновлено из YouGile: ${result.updated_statuses}`);
+          projectDetailView(root, params, true);
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 function bindProjectBoardDnd(content, reload) {

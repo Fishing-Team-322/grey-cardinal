@@ -304,6 +304,9 @@ class YouGileClient:
             },
         )
 
+    async def list_chat_messages(self, task_id: str) -> list[dict[str, Any]]:
+        return await self._paginate(f"/chats/{task_id}/messages")
+
 
 def _retry_after(resp: httpx.Response) -> float:
     raw = resp.headers.get("Retry-After")
